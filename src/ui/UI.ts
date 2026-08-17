@@ -89,7 +89,8 @@ export class UI {
     const wf = this.app.session.workflow;
     if (wf === "site") this.left.append(
       this.areaSection(), this.tileSection(), this.calibrationSection(),
-      section("固定設施", [buildLibraryFixturesHint(), buildLibrary(this.app, { categories: ["fixture"] })]),
+      el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
+      buildLibrary(this.app, { categories: ["fixture"] }),
     );
     else if (wf === "layout") this.left.append(buildLibrary(this.app, { categories: ["furniture", "equipment", "floor"], zones: true, arrays: true }));
     else if (wf === "route") this.left.append(this.routeSection());
@@ -303,10 +304,6 @@ export class UI {
       else if (k === "d") this.app.duplicateSelection();
     });
   }
-}
-
-function buildLibraryFixturesHint(): HTMLElement {
-  return el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" });
 }
 
 function setPressed(root: HTMLElement, group: string, pred: (i: number) => boolean): void {
