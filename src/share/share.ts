@@ -32,6 +32,14 @@ export function buildShareUrl(project: Project, base?: string): string {
   return `${origin}${HASH_PREFIX}${encodeProject(project)}`;
 }
 
+/**
+ * A LINE share URL that opens LINE (app on mobile, web on desktop) with the
+ * given text prefilled so the user can pick a friend or group and send it.
+ */
+export function buildLineShareUrl(text: string): string {
+  return `https://line.me/R/share?text=${encodeURIComponent(text)}`;
+}
+
 /** Extract a shared plan from the current URL hash, if present. */
 export function readSharedFromHash(hash: string): Partial<Project> | null {
   if (!hash.startsWith(HASH_PREFIX)) return null;

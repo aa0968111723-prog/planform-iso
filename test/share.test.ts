@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultProject } from "../src/core/model";
-import { decodeProject, encodeProject, readSharedFromHash } from "../src/share/share";
+import {
+  buildLineShareUrl,
+  decodeProject,
+  encodeProject,
+  readSharedFromHash,
+} from "../src/share/share";
 
 describe("project encode/decode", () => {
   it("round-trips a project (incl. CJK) through a URL-safe payload", () => {
@@ -52,5 +57,17 @@ describe("hash reader", () => {
   it("ignores unrelated hashes", () => {
     expect(readSharedFromHash("#other")).toBeNull();
     expect(readSharedFromHash("")).toBeNull();
+  });
+});
+
+describe("LINE share url", () => {
+  it("points at line.me and url-encodes the text", () => {
+    const url = buildLineShareUrl("教室平面圖\nhttps://example.com/#p=abc+def");
+    expect(url.startsWith("https://line.me/R/share?text=")).toBe(true);
+    // Newline, colon, slash and + must be percent-encoded.
+    expect(url).toContain("%0A");
+    expect(url).toContain("https%3A%2F%2Fexample.com");
+    expect(url).toContain("%2B");
+    expect(url).not.toContain("\n");
   });
 });

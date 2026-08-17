@@ -15,7 +15,7 @@ import { matPreviewCenters, type MatArraySpec, type MatPreviewState } from "../c
 import { buildSummary, legendEntries, type PlanSummary } from "../core/summary";
 import { Store, migrate } from "../state/store";
 import { SceneManager } from "../scene/SceneManager";
-import { buildShareUrl } from "../share/share";
+import { buildLineShareUrl, buildShareUrl } from "../share/share";
 import { buildShareImage } from "../export/shareImage";
 
 export type Mode = "select" | "route";
@@ -164,6 +164,13 @@ export class App {
 
   getShareUrl(): string {
     return buildShareUrl(this.state);
+  }
+
+  /** LINE share URL prefilled with the plan title + link. */
+  getLineShareUrl(): string {
+    const url = buildShareUrl(this.state);
+    const title = this.getSummary().title;
+    return buildLineShareUrl(`【場佈平面圖】${title}\n${url}`);
   }
 
   loadShared(partial: Partial<Project>): void {

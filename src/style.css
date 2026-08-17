@@ -117,6 +117,17 @@ body {
   background: transparent;
 }
 
+.btn--line {
+  background: #06c755;
+  border-color: #06c755;
+  color: #fff;
+  font-weight: 700;
+}
+
+.btn--line:hover {
+  background: #05b34c;
+}
+
 .chip--danger,
 .chip--danger[aria-pressed] {
   border-color: var(--danger);

@@ -206,6 +206,10 @@ export class UI {
       }
     });
 
+    const line = button("傳到 LINE", () => {
+      window.open(this.app.getLineShareUrl(), "_blank", "noopener,noreferrer");
+    }, "btn btn--line");
+
     const actions: HTMLElement[] = [copy];
     if (typeof navigator.share === "function") {
       actions.push(button("系統分享", () => {
@@ -239,6 +243,7 @@ export class UI {
         button("×", () => this.closeShare(), "chip chip--sm"),
       ]),
       el("p", { class: "hint", text: "分享連結已包含整份平面圖，對方開啟即可看到，不需帳號或後端。" }),
+      line,
       link,
       el("div", { class: "row" }, actions),
       el("div", { class: "qr-wrap" }, [qrImg]),
