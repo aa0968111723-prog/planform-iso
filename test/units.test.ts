@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  applySnap,
   cmToMeters,
+  formatTileRef,
   metersToCm,
+  snapToHalfTile,
   snapToTileCenter,
   snapToTileIntersection,
   tileCenterToWorld,
@@ -67,5 +70,32 @@ describe("tile spans", () => {
   it("computes how many tiles a real length spans", () => {
     expect(tilesSpanned(1.8, 0.6)).toBeCloseTo(3);
     expect(tilesSpanned(0.9, 0.6)).toBeCloseTo(1.5);
+  });
+});
+
+describe("half-tile snapping", () => {
+  it("snaps to half-tile increments", () => {
+    const r = snapToHalfTile(0.44, 0.16, TILE);
+    expect(r.x).toBeCloseTo(0.3);
+    expect(r.z).toBeCloseTo(0.3);
+  });
+});
+
+describe("applySnap dispatch", () => {
+  it("passes through when off", () => {
+    expect(applySnap(0.37, 0.52, TILE, "off")).toEqual({ x: 0.37, z: 0.52 });
+  });
+  it("routes to the selected mode", () => {
+    expect(applySnap(0.1, 0.1, TILE, "center")).toEqual(snapToTileCenter(0.1, 0.1, TILE));
+    expect(applySnap(0.4, 0.4, TILE, "intersection")).toEqual(
+      snapToTileIntersection(0.4, 0.4, TILE),
+    );
+  });
+});
+
+describe("tile ref formatting", () => {
+  it("is 1-based and human readable", () => {
+    expect(formatTileRef({ col: 0, row: 0 })).toContain("第 1 行");
+    expect(formatTileRef({ col: 2, row: 3 })).toContain("第 4 列");
   });
 });
