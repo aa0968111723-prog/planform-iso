@@ -59,10 +59,40 @@ export function button(
   return b;
 }
 
-export function section(title: string, body: HTMLElement[]): HTMLDetailsElement {
-  const details = el("details", { class: "section", open: true }, [
+export function section(title: string, body: HTMLElement[], open = true): HTMLDetailsElement {
+  const details = el("details", { class: "section", open }, [
     el("summary", { class: "section__title", text: title }),
     el("div", { class: "section__body" }, body),
   ]) as HTMLDetailsElement;
   return details;
+}
+
+export function card(
+  icon: string,
+  title: string,
+  subtitle: string,
+  onClick: () => void,
+): HTMLButtonElement {
+  const b = el("button", { type: "button", class: "card" }, [
+    el("span", { class: "card__icon", text: icon }),
+    el("span", { class: "card__body" }, [
+      el("span", { class: "card__title", text: title }),
+      el("span", { class: "card__sub", text: subtitle }),
+    ]),
+  ]) as HTMLButtonElement;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+export function selectField(
+  label: string,
+  options: { value: string; label: string }[],
+  value: string,
+  onChange: (v: string) => void,
+): HTMLLabelElement {
+  const sel = el("select", { class: "field__input" }) as HTMLSelectElement;
+  for (const o of options) sel.append(el("option", { value: o.value, text: o.label }));
+  sel.value = value;
+  sel.addEventListener("change", () => onChange(sel.value));
+  return el("label", { class: "field" }, [el("span", { class: "field__label", text: label }), sel]) as HTMLLabelElement;
 }

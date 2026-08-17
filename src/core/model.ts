@@ -1,13 +1,16 @@
 /**
- * Local-first project data model. All spatial values are in meters
- * (1 Three.js unit = 1 meter). Angles are in degrees, measured clockwise
- * about the +Y axis in the X/Z plane.
+ * Local-first project data model (v2). All spatial values are in meters
+ * (1 Three.js unit = 1 meter). Angles are in degrees; an object's rotationDeg
+ * is its yaw about +Y and also defines the direction it faces (0 = facing +Z).
+ *
+ * v2 upgrades objects from interchangeable boxes to semantic assets with a
+ * placement surface, elevation, parent (tabletop), wall anchor and door
+ * behaviour, and adds ArrayGroups for repeated layouts. See assets.ts.
  */
 
-export const PROJECT_VERSION = 1;
+export const PROJECT_VERSION = 2;
 
 export interface AreaConfig {
-  /** "classroom" | "corridor" — a large physical area. */
   id: "classroom" | "corridor";
   name: string;
   length: number; // +X, meters
@@ -19,17 +22,13 @@ export interface AreaConfig {
 export interface TileConfig {
   width: number; // meters (+X)
   depth: number; // meters (+Z)
-  originX: number; // meters
-  originZ: number; // meters
-  rotationDeg: number; // grid orientation
+  originX: number;
+  originZ: number;
+  rotationDeg: number;
   visible: boolean;
 }
 
 export interface Calibration {
-  /**
-   * A known real-world reference length (meters) for a measured segment,
-   * used to sanity-check scale on site. Purely informational metadata.
-   */
   referenceLength: number | null;
   note: string;
 }
@@ -44,19 +43,60 @@ export type ObjectKind =
   | "mat"
   | "regTable";
 
+export type Surface = "floor" | "wall" | "tabletop";
+export type WallEdge = "n" | "s" | "e" | "w";
+export type HingeSide = "left" | "right";
+
+export interface WallAnchor {
+  areaId: "classroom" | "corridor";
+  edge: WallEdge;
+  /** Distance (meters) along the wall from its min corner to the object center. */
+  offset: number;
+}
+
 export interface SceneObject {
   id: string;
   kind: ObjectKind;
   x: number; // center, meters
   z: number;
-  rotationDeg: number;
+  rotationDeg: number; // yaw = facing (0 faces +Z)
   width: number; // meters (+X before rotation)
   depth: number; // meters (+Z before rotation)
   height: number; // meters (+Y)
   locked: boolean;
   hidden: boolean;
-  /** Door-only: hinge/open direction indicator, degrees. */
+
+  // v2 semantic placement
+  surface: Surface;
+  elevation: number; // base above floor (meters)
+  parentId?: string; // tabletop host
+  presetId?: string;
+  note?: string;
+  wallAnchor?: WallAnchor;
+
+  // door-specific
+  hinge?: HingeSide;
+  openInward?: boolean;
   openDeg?: number;
+}
+
+/** A repeated layout (e.g. a mat block or a chair grid) kept as one editable unit. */
+export interface ArrayGroup {
+  id: string;
+  name: string;
+  sourceKind: ObjectKind;
+  rows: number; // along +Z
+  cols: number; // along +X
+  itemWidth: number;
+  itemDepth: number;
+  itemHeight: number;
+  gapX: number;
+  gapZ: number;
+  rotationDeg: number;
+  anchorX: number; // min-corner anchor (meters), pre-rotation
+  anchorZ: number;
+  locked: boolean;
+  hidden: boolean;
 }
 
 export type ZoneType =
@@ -71,11 +111,11 @@ export interface Zone {
   id: string;
   type: ZoneType;
   name: string;
-  x: number; // center, meters
+  x: number;
   z: number;
-  width: number; // meters (+X)
-  depth: number; // meters (+Z)
-  color: string; // hex
+  width: number;
+  depth: number;
+  color: string;
   locked: boolean;
   hidden: boolean;
 }
@@ -112,6 +152,7 @@ export interface Project {
   calibration: Calibration;
   zones: Zone[];
   objects: SceneObject[];
+  groups: ArrayGroup[];
   routes: Route[];
   view: ViewName;
   layers: LayerVisibility;
@@ -122,21 +163,6 @@ export function uid(prefix = "id"): string {
   idCounter += 1;
   return `${prefix}_${Date.now().toString(36)}_${idCounter.toString(36)}`;
 }
-
-/** Default real-scale object dimensions (meters). */
-export const OBJECT_DEFAULTS: Record<
-  ObjectKind,
-  { width: number; depth: number; height: number; label: string; color: string }
-> = {
-  computer: { width: 0.5, depth: 0.5, height: 0.4, label: "電腦", color: "#64748b" },
-  door: { width: 0.9, depth: 0.12, height: 2.0, label: "門", color: "#a16207" },
-  switch: { width: 0.12, depth: 0.05, height: 0.12, label: "電燈開關", color: "#eab308" },
-  screen: { width: 2.0, depth: 0.1, height: 1.2, label: "投影幕", color: "#1d4ed8" },
-  table: { width: 1.2, depth: 0.6, height: 0.74, label: "桌子", color: "#b08968" },
-  chair: { width: 0.45, depth: 0.45, height: 0.9, label: "椅子", color: "#94a3b8" },
-  mat: { width: 0.6, depth: 1.8, height: 0.05, label: "地墊", color: "#ef476f" },
-  regTable: { width: 1.5, depth: 0.7, height: 0.74, label: "報到桌", color: "#0d9488" },
-};
 
 export const ZONE_DEFAULTS: Record<
   ZoneType,
@@ -154,33 +180,13 @@ export function createDefaultProject(): Project {
   return {
     version: PROJECT_VERSION,
     name: "未命名平面圖",
-    classroom: {
-      id: "classroom",
-      name: "教室",
-      length: 10,
-      width: 8,
-      x: 0,
-      z: 0,
-    },
-    corridor: {
-      id: "corridor",
-      name: "走廊",
-      length: 10,
-      width: 2,
-      x: 0,
-      z: 8,
-    },
-    tile: {
-      width: 0.6,
-      depth: 0.6,
-      originX: 0,
-      originZ: 0,
-      rotationDeg: 0,
-      visible: true,
-    },
+    classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 },
+    corridor: { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+    tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
     calibration: { referenceLength: null, note: "" },
     zones: [],
     objects: [],
+    groups: [],
     routes: [],
     view: "iso",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },

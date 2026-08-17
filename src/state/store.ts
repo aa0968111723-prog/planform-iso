@@ -1,8 +1,5 @@
-import {
-  createDefaultProject,
-  PROJECT_VERSION,
-  type Project,
-} from "../core/model";
+import { createDefaultProject, type Project } from "../core/model";
+import { migrateProject } from "../core/migrate";
 
 const AUTOSAVE_KEY = "planform-iso:autosave";
 const LAYOUTS_KEY = "planform-iso:layouts";
@@ -116,7 +113,7 @@ export class Store {
 
   /** Replace the whole project (import / load layout). Resets history. */
   loadProject(project: Project): void {
-    this.project = migrate(project);
+    this.project = migrateProject(project);
     this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
@@ -144,7 +141,7 @@ export class Store {
     try {
       const raw = localStorage.getItem(AUTOSAVE_KEY);
       if (!raw) return null;
-      return migrate(JSON.parse(raw));
+      return migrateProject(JSON.parse(raw));
     } catch {
       return null;
     }
@@ -191,17 +188,5 @@ function readLayouts(): Record<string, Project> {
   }
 }
 
-/** Fill in any fields missing from older/imported project blobs. */
-export function migrate(input: Partial<Project>): Project {
-  const base = createDefaultProject();
-  const p: Project = { ...base, ...input, version: PROJECT_VERSION };
-  p.classroom = { ...base.classroom, ...input.classroom };
-  p.corridor = { ...base.corridor, ...input.corridor };
-  p.tile = { ...base.tile, ...input.tile };
-  p.calibration = { ...base.calibration, ...input.calibration };
-  p.layers = { ...base.layers, ...input.layers };
-  p.zones = Array.isArray(input.zones) ? input.zones : [];
-  p.objects = Array.isArray(input.objects) ? input.objects : [];
-  p.routes = Array.isArray(input.routes) ? input.routes : [];
-  return p;
-}
+/** @deprecated use migrateProject from core/migrate. Kept for import compatibility. */
+export const migrate = migrateProject;
