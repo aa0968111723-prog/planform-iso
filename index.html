@@ -6,11 +6,8 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#0f172a" />
-    <meta
-      name="description"
-      content="平面場 ISO — 3D 等角實尺場佈工具 (Vite + TypeScript + Three.js PWA)"
-    />
+    <meta name="theme-color" content="#0b1120" />
+    <meta name="description" content="平面場 ISO — 3D 等角實尺場佈工具（教室 / 走廊真實尺寸、地磚吸附、地墊模擬、動線規劃）" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>平面場 ISO · 3D 等角場佈工具</title>
@@ -18,25 +15,7 @@
   <body>
     <div id="app">
       <canvas id="scene"></canvas>
-
-      <header class="hud hud--top">
-        <h1 class="hud__title">平面場 ISO</h1>
-        <p class="hud__scale" id="scale-readout">1 unit = 1 m</p>
-      </header>
-
-      <nav class="hud hud--views" aria-label="Camera views">
-        <button type="button" class="btn" data-view="iso" aria-pressed="true">等角</button>
-        <button type="button" class="btn" data-view="top">俯視</button>
-        <button type="button" class="btn" data-view="front">正視</button>
-      </nav>
-
-      <footer class="hud hud--bottom">
-        <button type="button" class="btn" id="toggle-grid" aria-pressed="true">格線</button>
-        <button type="button" class="btn" id="export-png">匯出 PNG</button>
-        <span class="hud__hint" id="tile-readout">格 60 × 60 cm</span>
-      </footer>
     </div>
-
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

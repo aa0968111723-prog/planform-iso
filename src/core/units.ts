@@ -92,3 +92,55 @@ export function snapToTileCenter(
 export function tilesSpanned(lengthMeters: number, tileSizeMeters: number): number {
   return lengthMeters / tileSizeMeters;
 }
+
+/** Snap to the nearest tile edge (nearest grid line on each axis independently). */
+export function snapToTileEdge(
+  x: number,
+  z: number,
+  tile: TileConfig,
+): { x: number; z: number } {
+  // Snap each coordinate to the nearest grid line (same as intersection).
+  return snapToTileIntersection(x, z, tile);
+}
+
+/** Snap to the nearest half-tile position (grid lines and tile centers). */
+export function snapToHalfTile(
+  x: number,
+  z: number,
+  tile: TileConfig,
+): { x: number; z: number } {
+  const half = { width: tile.width / 2, depth: tile.depth / 2, originX: tile.originX, originZ: tile.originZ };
+  return {
+    x: half.originX + Math.round((x - half.originX) / half.width) * half.width,
+    z: half.originZ + Math.round((z - half.originZ) / half.depth) * half.depth,
+  };
+}
+
+export type SnapMode = "off" | "intersection" | "edge" | "center" | "half";
+
+/** Apply the configured snap mode to a world position (meters). */
+export function applySnap(
+  x: number,
+  z: number,
+  tile: TileConfig,
+  mode: SnapMode,
+): { x: number; z: number } {
+  switch (mode) {
+    case "intersection":
+      return snapToTileIntersection(x, z, tile);
+    case "edge":
+      return snapToTileEdge(x, z, tile);
+    case "center":
+      return snapToTileCenter(x, z, tile);
+    case "half":
+      return snapToHalfTile(x, z, tile);
+    case "off":
+    default:
+      return { x, z };
+  }
+}
+
+/** Human-readable tile reference like "第 3 列 / 第 2 排" (1-based). */
+export function formatTileRef(ref: TileRef): string {
+  return `第 ${ref.col + 1} 行 / 第 ${ref.row + 1} 列`;
+}
