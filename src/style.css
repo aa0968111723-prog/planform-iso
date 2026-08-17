@@ -65,11 +65,22 @@ body {
 
 .group {
   display: flex;
+  align-items: center;
   gap: 4px;
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: rgba(30, 41, 59, 0.4);
+}
+
+.group--wrap {
+  flex-wrap: wrap;
+}
+
+.group__label {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 0 4px 0 6px;
 }
 
 /* --- buttons ------------------------------------------------------------ */

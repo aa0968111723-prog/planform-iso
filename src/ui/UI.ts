@@ -21,8 +21,8 @@ import { button, el, num, section, textField } from "./dom";
 
 const FOCUS: { id: Focus; label: string }[] = [
   { id: "all", label: "全部" },
-  { id: "zones", label: "區域" },
-  { id: "flow", label: "動線" },
+  { id: "zones", label: "只看區域" },
+  { id: "flow", label: "只看動線" },
 ];
 
 const VIEWS: { id: ViewName; label: string }[] = [
@@ -125,22 +125,10 @@ export class UI {
     const views = el("div", { class: "group", "data-group": "views" },
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip")));
 
-    const history = el("div", { class: "group" }, [
-      button("復原", () => this.app.undo(), "chip"),
-      button("重做", () => this.app.redo(), "chip"),
-    ]);
-
     const modes = el("div", { class: "group", "data-group": "modes" }, [
       button("選取", () => this.app.setMode("select"), "chip"),
-      button("動線", () => this.app.setMode("route"), "chip"),
+      button("畫動線", () => this.app.setMode("route"), "chip"),
     ]);
-
-    const snap = el("div", { class: "group", "data-group": "snap" },
-      SNAPS.map((s) => button(s.label, () => this.app.setSnap(s.id), "chip chip--sm")));
-
-    const layers = el("div", { class: "group", "data-group": "layers" },
-      (["areas", "tiles", "zones", "objects", "routes"] as const).map((l) =>
-        button(layerLabel(l), () => this.app.toggleLayer(l), "chip chip--sm")));
 
     const focus = el("div", { class: "group", "data-group": "focus" },
       FOCUS.map((f) => button(f.label, () => this.app.setFocus(f.id), "chip chip--sm")));
@@ -148,20 +136,21 @@ export class UI {
     const view2 = el("div", { class: "group", "data-group": "view2" }, [
       button("名稱", () => this.app.setShowLabels(!this.app.session.showLabels), "chip chip--sm"),
       button("圖例", () => this.toggleLegend(), "chip chip--sm"),
-      button("檢視", () => this.app.setPresentation(!this.app.session.presentation), "chip"),
+      button("檢視給團隊", () => this.app.setPresentation(!this.app.session.presentation), "chip"),
     ]);
 
     const share = button("分享", () => this.openShare(), "chip chip--primary");
 
-    const panelToggle = button("面板", () => this.root.classList.toggle("panel-open"), "chip");
+    const panelToggle = button("設定面板", () => this.root.classList.toggle("panel-open"), "chip");
 
-    this.topbar.append(title, views, focus, view2, modes, snap, layers, history, share, panelToggle);
+    this.topbar.append(title, views, modes, focus, view2, share, panelToggle);
   }
 
   // --- panel -------------------------------------------------------------
 
   private buildPanel(): void {
     this.panel.append(
+      this.toolsSection(),
       this.projectSection(),
       this.ioSection(),
       this.areaSection(),
@@ -228,18 +217,20 @@ export class UI {
       downloadPng(img, "planform-share.png");
     }, "btn btn--ghost"));
 
-    const qrCanvas = el("canvas", { class: "qr" }) as HTMLCanvasElement;
+    const qrImg = el("img", { class: "qr", alt: "分享 QR code" }) as HTMLImageElement;
     const qrNote = el("p", { class: "hint" });
-    if (url.length <= 1800) {
+    // Byte-mode QR (level L) holds ~2953 bytes; beyond that fall back to the link.
+    if (url.length <= 2900) {
       try {
-        await QRCode.toCanvas(qrCanvas, url, { width: 220, margin: 1 });
-        qrNote.textContent = "用手機掃描即可開啟這份平面圖。";
+        qrImg.src = await QRCode.toDataURL(url, { width: 256, margin: 1, errorCorrectionLevel: "L" });
+        qrNote.textContent = "用手機掃描即可開啟這份平面圖（不需帳號）。";
       } catch {
-        qrNote.textContent = "無法產生 QR code。";
+        qrImg.style.display = "none";
+        qrNote.textContent = "無法產生 QR code，請用「複製連結」分享。";
       }
     } else {
-      qrNote.textContent = "平面圖較大，連結過長無法產生 QR code，請用「複製連結」分享。";
-      qrCanvas.style.display = "none";
+      qrImg.style.display = "none";
+      qrNote.textContent = "平面圖較大、連結過長無法產生 QR code，請改用「複製連結」或「下載分享圖」。";
     }
 
     const card = el("div", { class: "modal__card" }, [
@@ -250,7 +241,7 @@ export class UI {
       el("p", { class: "hint", text: "分享連結已包含整份平面圖，對方開啟即可看到，不需帳號或後端。" }),
       link,
       el("div", { class: "row" }, actions),
-      el("div", { class: "qr-wrap" }, [qrCanvas]),
+      el("div", { class: "qr-wrap" }, [qrImg]),
       qrNote,
     ]);
     this.modal.append(card);
@@ -262,6 +253,25 @@ export class UI {
 
   private closeShare(): void {
     this.modal.style.display = "none";
+  }
+
+  private toolsSection(): HTMLElement {
+    const history = el("div", { class: "row" }, [
+      button("復原", () => this.app.undo(), "btn btn--ghost"),
+      button("重做", () => this.app.redo(), "btn btn--ghost"),
+    ]);
+    const snap = el("div", { class: "group group--wrap", "data-group": "snap" },
+      SNAPS.map((s) => button(s.label, () => this.app.setSnap(s.id), "chip chip--sm")));
+    const layers = el("div", { class: "group group--wrap", "data-group": "layers" },
+      (["areas", "tiles", "zones", "objects", "routes"] as const).map((l) =>
+        button(layerLabel(l), () => this.app.toggleLayer(l), "chip chip--sm")));
+    return section("工具 / 顯示", [
+      history,
+      el("div", { class: "subhead", text: "吸附模式" }),
+      snap,
+      el("div", { class: "subhead", text: "圖層顯示" }),
+      layers,
+    ]);
   }
 
   private projectSection(): HTMLElement {
@@ -451,13 +461,13 @@ export class UI {
     const sess = this.app.session;
 
     // Pressed states.
-    setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-    setPressed(this.topbar, "modes", (b) => (b === 0 ? sess.mode === "select" : sess.mode === "route"));
-    setPressed(this.topbar, "snap", (b) => SNAPS[b].id === sess.snap);
+    setPressed(this.root, "views", (b) => VIEWS[b].id === s.view);
+    setPressed(this.root, "modes", (b) => (b === 0 ? sess.mode === "select" : sess.mode === "route"));
+    setPressed(this.root, "snap", (b) => SNAPS[b].id === sess.snap);
     const layerKeys = ["areas", "tiles", "zones", "objects", "routes"] as const;
-    setPressed(this.topbar, "layers", (b) => s.layers[layerKeys[b]]);
-    setPressed(this.topbar, "focus", (b) => FOCUS[b].id === sess.focus);
-    setPressed(this.topbar, "view2", (b) =>
+    setPressed(this.root, "layers", (b) => s.layers[layerKeys[b]]);
+    setPressed(this.root, "focus", (b) => FOCUS[b].id === sess.focus);
+    setPressed(this.root, "view2", (b) =>
       b === 0 ? sess.showLabels : b === 1 ? this.legend.style.display !== "none" : sess.presentation);
 
     this.updatePresentation();

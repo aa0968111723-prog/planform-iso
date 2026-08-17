@@ -1,24 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultProject } from "../src/core/model";
-import {
-  base64ToUtf8,
-  decodeProject,
-  encodeProject,
-  readSharedFromHash,
-  utf8ToBase64,
-} from "../src/share/share";
-
-describe("base64 utf-8 round-trip", () => {
-  it("handles CJK text", () => {
-    const s = "教室 / 走廊 平面圖 🏫";
-    expect(base64ToUtf8(utf8ToBase64(s))).toBe(s);
-  });
-});
+import { decodeProject, encodeProject, readSharedFromHash } from "../src/share/share";
 
 describe("project encode/decode", () => {
-  it("round-trips a project through a URL-safe payload", () => {
+  it("round-trips a project (incl. CJK) through a URL-safe payload", () => {
     const p = createDefaultProject();
-    p.name = "示範教室";
+    p.name = "示範教室 🏫";
     p.zones.push({
       id: "z1",
       type: "registration",
@@ -32,9 +19,21 @@ describe("project encode/decode", () => {
       hidden: false,
     });
     const encoded = encodeProject(p);
-    // URL-safe: no +, /, or = padding.
-    expect(encoded).not.toMatch(/[+/=]/);
+    // URL-safe: no characters that need escaping in a URL.
+    expect(encoded).not.toMatch(/[^A-Za-z0-9+\-$]/);
     expect(decodeProject(encoded)).toEqual(p);
+  });
+
+  it("compresses repetitive plans smaller than raw JSON", () => {
+    const p = createDefaultProject();
+    for (let i = 0; i < 30; i++) {
+      p.objects.push({
+        id: `m${i}`, kind: "mat", x: i, z: 0, rotationDeg: 0,
+        width: 0.6, depth: 1.8, height: 0.05, locked: false, hidden: false,
+      });
+    }
+    const encoded = encodeProject(p);
+    expect(encoded.length).toBeLessThan(JSON.stringify(p).length);
   });
 
   it("returns null for garbage", () => {

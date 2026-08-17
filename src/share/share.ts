@@ -1,39 +1,27 @@
+import {
+  compressToEncodedURIComponent,
+  decompressFromEncodedURIComponent,
+} from "lz-string";
 import type { Project } from "../core/model";
 
 /**
- * Backend-free sharing: the whole plan is serialized into the URL hash so a
- * link fully reconstructs the plan on another device. No server involved.
+ * Backend-free sharing: the whole plan is serialized and compressed into the
+ * URL hash so a link fully reconstructs the plan on another device — no server
+ * involved. Compression keeps links short enough for a QR code in most plans.
  */
 
 const HASH_PREFIX = "#p=";
 
-export function utf8ToBase64(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
-}
-
-export function base64ToUtf8(b64: string): string {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
-}
-
-/** URL-safe base64 (so the payload survives inside a URL hash). */
+/** Compress a project into a URL-safe payload. */
 export function encodeProject(project: Project): string {
-  return utf8ToBase64(JSON.stringify(project))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return compressToEncodedURIComponent(JSON.stringify(project));
 }
 
 export function decodeProject(encoded: string): Partial<Project> | null {
   try {
-    let b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
-    while (b64.length % 4) b64 += "=";
-    return JSON.parse(base64ToUtf8(b64)) as Partial<Project>;
+    const json = decompressFromEncodedURIComponent(encoded);
+    if (!json) return null;
+    return JSON.parse(json) as Partial<Project>;
   } catch {
     return null;
   }
