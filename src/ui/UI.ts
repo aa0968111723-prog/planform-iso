@@ -1,502 +1,313 @@
-import { App } from "../app/App";
-import {
-  OBJECT_DEFAULTS,
-  ZONE_DEFAULTS,
-  type ObjectKind,
-  type ViewName,
-  type ZoneType,
-} from "../core/model";
-import { matArrayFootprint, zoneMatCapacity } from "../core/mat";
-import { formatTileRef, metersToCm, worldToTile } from "../core/units";
-import type { SnapMode } from "../core/units";
-import { migrate } from "../state/store";
-import {
-  downloadPng,
-  exportProjectJson,
-  importProjectJson,
-} from "../export/exporters";
+import { App, type Workflow } from "../app/App";
+import { metersToCm, type SnapMode } from "../core/units";
+import type { ViewName } from "../core/model";
+import { calibrationCompare } from "../core/measure";
+import { issueCounts, type Severity } from "../core/validation";
+import { renderConstructionPlan } from "../export/constructionPlan";
+import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
+import { buildInspector } from "./inspector";
+import { buildLibrary, buildPlacementToolbar } from "./library";
 import { button, el, num, section, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
-  { id: "iso", label: "等角" },
-  { id: "top", label: "俯視" },
-  { id: "front", label: "正視" },
-  { id: "left", label: "左視" },
-  { id: "right", label: "右視" },
+  { id: "iso", label: "等角" }, { id: "top", label: "俯視" }, { id: "front", label: "正視" },
+  { id: "left", label: "左視" }, { id: "right", label: "右視" },
 ];
-
 const SNAPS: { id: SnapMode; label: string }[] = [
-  { id: "off", label: "自由" },
-  { id: "intersection", label: "交點" },
-  { id: "edge", label: "邊線" },
-  { id: "center", label: "中心" },
-  { id: "half", label: "半格" },
+  { id: "off", label: "自由" }, { id: "intersection", label: "交點" }, { id: "edge", label: "邊線" },
+  { id: "center", label: "中心" }, { id: "half", label: "半格" },
 ];
-
-const TILE_PRESETS = [30, 40, 60];
+const WORKFLOWS: { id: Workflow; label: string }[] = [
+  { id: "site", label: "場地" }, { id: "layout", label: "排佈" }, { id: "route", label: "動線" },
+  { id: "check", label: "檢查" }, { id: "export", label: "匯出" },
+];
+const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
+const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
 
 export class UI {
-  private topbar: HTMLElement;
-  private panel: HTMLElement;
-  private selBar: HTMLElement;
-  private box: HTMLElement;
-  private dynamic = el("div");
-  private matReadout = el("div", { class: "readout" });
-  private inputs: Record<string, HTMLInputElement> = {};
+  private topbar = el("header", { class: "topbar" });
+  private left = el("aside", { class: "left" });
+  private right = el("aside", { class: "right" });
+  private nav = el("nav", { class: "bottomnav" });
+  private placebar = el("div", { class: "placebar-wrap", style: "display:none" });
+  private measurebar = el("div", { class: "measurebar", style: "display:none" });
+  private box = el("div", { class: "boxsel", style: "display:none" });
+  private advanced = false;
+  private lastWorkflow: Workflow | null = null;
+  private snapSel: HTMLSelectElement | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
-    this.topbar = el("header", { class: "topbar" });
-    this.panel = el("aside", { class: "panel" });
-    this.selBar = el("div", { class: "selbar", style: "display:none" });
-    this.box = el("div", { class: "boxsel", style: "display:none" });
-    root.append(this.topbar, this.panel, this.selBar, this.box);
-
+    root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box);
     this.buildTopbar();
-    this.buildPanel();
-
+    this.buildNav();
+    this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onChange(() => this.update());
     this.bindKeys();
     this.update();
   }
 
-  // --- top bar -----------------------------------------------------------
-
   private buildTopbar(): void {
-    const title = el("div", { class: "topbar__title", text: "平面場 ISO" });
-
-    const views = el("div", { class: "group", "data-group": "views" },
-      VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip")));
-
     const history = el("div", { class: "group" }, [
-      button("復原", () => this.app.undo(), "chip"),
-      button("重做", () => this.app.redo(), "chip"),
+      button("↶", () => this.app.undo(), "chip"), button("↷", () => this.app.redo(), "chip"),
     ]);
-
-    const modes = el("div", { class: "group", "data-group": "modes" }, [
-      button("選取", () => this.app.setMode("select"), "chip"),
-      button("動線", () => this.app.setMode("route"), "chip"),
+    const views = el("div", { class: "group", "data-group": "views" },
+      VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
+    const flows = el("div", { class: "group group--flows", "data-group": "flows" },
+      WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
+    const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
+    for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
+    snapSel.value = this.app.session.snap;
+    snapSel.addEventListener("change", () => this.app.setSnap(snapSel.value as SnapMode));
+    this.snapSel = snapSel;
+    const more = el("div", { class: "group", "data-group": "view2" }, [
+      button("名稱", () => this.app.setShowLabels(!this.app.session.showLabels), "chip chip--sm"),
+      button("置中", () => this.app.recenterView(), "chip chip--sm"),
+      snapSel,
     ]);
-
-    const snap = el("div", { class: "group", "data-group": "snap" },
-      SNAPS.map((s) => button(s.label, () => this.app.setSnap(s.id), "chip chip--sm")));
-
-    const layers = el("div", { class: "group", "data-group": "layers" },
-      (["areas", "tiles", "zones", "objects", "routes"] as const).map((l) =>
-        button(layerLabel(l), () => this.app.toggleLayer(l), "chip chip--sm")));
-
-    const panelToggle = button("面板", () => this.root.classList.toggle("panel-open"), "chip");
-
-    this.topbar.append(title, views, modes, snap, layers, history, panelToggle);
+    this.topbar.append(el("div", { class: "topbar__title", text: "平面場 ISO" }), history, flows, views, more);
   }
 
-  // --- panel -------------------------------------------------------------
+  private buildNav(): void {
+    const items: { w: Workflow; label: string; icon: string }[] = [
+      { w: "site", label: "場地", icon: "▦" }, { w: "layout", label: "素材", icon: "▤" },
+      { w: "route", label: "動線", icon: "↝" }, { w: "check", label: "檢查", icon: "✓" },
+      { w: "export", label: "更多", icon: "⋯" },
+    ];
+    this.nav.append(...items.map((it) =>
+      el("button", { type: "button", class: "navbtn", "data-nav": it.w }, [
+        el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
+      ])));
+    this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
+      b.addEventListener("click", () => { this.app.setWorkflow(b.dataset.nav as Workflow); this.root.classList.add("show-left"); }));
+  }
 
-  private buildPanel(): void {
-    this.panel.append(
-      this.projectSection(),
-      this.ioSection(),
-      this.areaSection(),
-      this.calibrationSection(),
-      this.tileSection(),
-      this.zoneSection(),
-      this.objectSection(),
-      this.matSection(),
-      this.routeSection(),
-      section("選取資訊", [this.dynamic]),
+  // --- left panel (workflow-driven) --------------------------------------
+
+  private rebuildLeft(): void {
+    this.left.innerHTML = "";
+    const wf = this.app.session.workflow;
+    if (wf === "site") this.left.append(
+      this.areaSection(), this.tileSection(), this.calibrationSection(),
+      el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
+      buildLibrary(this.app, { categories: ["fixture"] }),
     );
-  }
-
-  private projectSection(): HTMLElement {
-    const name = textField("名稱", this.app.store.getState().name, (v) =>
-      this.app.store.mutate((p) => (p.name = v), { history: false }));
-    this.inputs.projName = name.querySelector("input")!;
-
-    const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" });
-    const layoutList = el("select", { class: "field__input" }) as HTMLSelectElement;
-    layoutList.id = "layoutList";
-    this.inputs.layoutList = layoutList as unknown as HTMLInputElement;
-
-    const save = button("儲存平面圖", () => {
-      const n = layoutName.value.trim() || this.app.store.getState().name;
-      this.app.store.saveNamedLayout(n);
-      this.update();
-    });
-    const load = button("載入", () => {
-      if (layoutList.value) this.app.store.loadNamedLayout(layoutList.value);
-    }, "btn btn--ghost");
-    const del = button("刪除", () => {
-      if (layoutList.value) {
-        this.app.store.deleteNamedLayout(layoutList.value);
-        this.update();
-      }
-    }, "btn btn--ghost");
-
-    return section("平面圖", [
-      name,
-      el("div", { class: "row" }, [layoutName, save]),
-      el("div", { class: "row" }, [layoutList, load, del]),
-    ]);
-  }
-
-  private ioSection(): HTMLElement {
-    const importInput = el("input", { type: "file", accept: "application/json", style: "display:none" }) as HTMLInputElement;
-    importInput.addEventListener("change", async () => {
-      const file = importInput.files?.[0];
-      if (!file) return;
-      try {
-        const data = await importProjectJson(file);
-        this.app.store.loadProject(migrate(data));
-      } catch {
-        alert("匯入失敗：JSON 格式錯誤");
-      }
-      importInput.value = "";
-    });
-
-    return section("匯入 / 匯出", [
-      el("div", { class: "row" }, [
-        button("匯出 JSON", () => exportProjectJson(this.app.store.getState())),
-        button("匯入 JSON", () => importInput.click(), "btn btn--ghost"),
-      ]),
-      el("div", { class: "row" }, [
-        button("匯出俯視 PNG", () =>
-          downloadPng(this.app.scene.exportPng(this.app.store.getState(), "top", "layout"), "planform-top.png")),
-        button("匯出動線 PNG", () =>
-          downloadPng(this.app.scene.exportPng(this.app.store.getState(), "top", "flow"), "planform-flow.png")),
-      ]),
-      importInput,
-    ]);
+    else if (wf === "layout") this.left.append(buildLibrary(this.app, { categories: ["furniture", "equipment", "floor"], zones: true, arrays: true }));
+    else if (wf === "route") this.left.append(this.routeSection());
+    else if (wf === "check") this.left.append(this.validationSection());
+    else if (wf === "export") this.left.append(this.exportSection());
   }
 
   private areaSection(): HTMLElement {
+    const s = this.app.store.getState();
     const body: HTMLElement[] = [];
     for (const id of ["classroom", "corridor"] as const) {
-      const a = this.app.store.getState()[id];
-      const len = num("長 (m)", a.length, 0.1, (v) => this.app.updateArea(id, { length: v }), 0.5);
-      const wid = num("寬 (m)", a.width, 0.1, (v) => this.app.updateArea(id, { width: v }), 0.5);
-      const px = num("X (m)", a.x, 0.1, (v) => this.app.updateArea(id, { x: v }));
-      const pz = num("Z (m)", a.z, 0.1, (v) => this.app.updateArea(id, { z: v }));
-      this.inputs[`${id}_len`] = len.querySelector("input")!;
-      this.inputs[`${id}_wid`] = wid.querySelector("input")!;
-      this.inputs[`${id}_x`] = px.querySelector("input")!;
-      this.inputs[`${id}_z`] = pz.querySelector("input")!;
-      body.push(
-        el("div", { class: "subhead", text: a.name }),
-        el("div", { class: "grid2" }, [len, wid, px, pz]),
-      );
+      const a = s[id];
+      body.push(el("div", { class: "subhead", text: a.name }), el("div", { class: "grid2" }, [
+        num("長 (m)", a.length, 0.1, (v) => this.app.updateArea(id, { length: v }), 0.5),
+        num("寬 (m)", a.width, 0.1, (v) => this.app.updateArea(id, { width: v }), 0.5),
+        num("X (m)", a.x, 0.1, (v) => this.app.updateArea(id, { x: v })),
+        num("Z (m)", a.z, 0.1, (v) => this.app.updateArea(id, { z: v })),
+      ]));
     }
-    return section("大區域（教室 / 走廊）", body);
-  }
-
-  private calibrationSection(): HTMLElement {
-    const c = this.app.store.getState().calibration;
-    const ref = num("參考長度 (m)", c.referenceLength ?? 0, 0.05, (v) =>
-      this.app.updateCalibration({ referenceLength: v || null }), 0);
-    this.inputs.calRef = ref.querySelector("input")!;
-    const note = textField("備註", c.note, (v) => this.app.updateCalibration({ note: v }));
-    this.inputs.calNote = note.querySelector("input")!;
-    return section("現場校正", [
-      el("p", { class: "hint", text: "輸入已知的一塊地磚或一段牆面實際長度，用來核對比例。" }),
-      ref,
-      note,
-    ]);
+    return section("教室 / 走廊", body);
   }
 
   private tileSection(): HTMLElement {
     const t = this.app.store.getState().tile;
-    const w = num("地磚寬 (cm)", metersToCm(t.width), 1, (v) => this.app.updateTile({ width: v / 100 }), 1);
-    const d = num("地磚深 (cm)", metersToCm(t.depth), 1, (v) => this.app.updateTile({ depth: v / 100 }), 1);
-    const ox = num("原點 X (m)", t.originX, 0.05, (v) => this.app.updateTile({ originX: v }));
-    const oz = num("原點 Z (m)", t.originZ, 0.05, (v) => this.app.updateTile({ originZ: v }));
-    const rot = num("旋轉 (°)", t.rotationDeg, 1, (v) => this.app.updateTile({ rotationDeg: v }));
-    this.inputs.tileW = w.querySelector("input")!;
-    this.inputs.tileD = d.querySelector("input")!;
-    this.inputs.tileOX = ox.querySelector("input")!;
-    this.inputs.tileOZ = oz.querySelector("input")!;
-    this.inputs.tileRot = rot.querySelector("input")!;
-
-    const presets = el("div", { class: "row" },
-      TILE_PRESETS.map((cm) => button(`${cm}×${cm}`, () =>
-        this.app.updateTile({ width: cm / 100, depth: cm / 100 }), "chip chip--sm")));
-
-    const vis = button("顯示 / 隱藏格線", () =>
-      this.app.updateTile({ visible: !this.app.store.getState().tile.visible }), "btn btn--ghost");
-
     return section("地磚", [
-      el("div", { class: "grid2" }, [w, d, ox, oz, rot]),
-      presets,
-      vis,
+      el("div", { class: "grid2" }, [
+        num("寬 (cm)", metersToCm(t.width), 1, (v) => this.app.updateTile({ width: v / 100 }), 1),
+        num("深 (cm)", metersToCm(t.depth), 1, (v) => this.app.updateTile({ depth: v / 100 }), 1),
+        num("原點 X (m)", t.originX, 0.05, (v) => this.app.updateTile({ originX: v })),
+        num("原點 Z (m)", t.originZ, 0.05, (v) => this.app.updateTile({ originZ: v })),
+        num("旋轉 (°)", t.rotationDeg, 1, (v) => this.app.updateTile({ rotationDeg: v })),
+      ]),
+      el("div", { class: "row wrap" }, [30, 40, 60].map((cm) =>
+        button(`${cm}×${cm}`, () => this.app.updateTile({ width: cm / 100, depth: cm / 100 }), "chip chip--sm"))),
+      button("顯示 / 隱藏格線", () => this.app.updateTile({ visible: !this.app.store.getState().tile.visible }), "btn btn--ghost"),
     ]);
   }
 
-  private zoneSection(): HTMLElement {
-    return section("加入小區域", [
-      el("div", { class: "row wrap" },
-        (Object.keys(ZONE_DEFAULTS) as ZoneType[]).map((t) =>
-          button(ZONE_DEFAULTS[t].label, () => this.app.addZone(t), "chip"))),
-    ]);
-  }
-
-  private objectSection(): HTMLElement {
-    return section("加入物件", [
-      el("div", { class: "row wrap" },
-        (Object.keys(OBJECT_DEFAULTS) as ObjectKind[]).map((k) =>
-          button(OBJECT_DEFAULTS[k].label, () => this.app.addObject(k), "chip"))),
-    ]);
-  }
-
-  private matSection(): HTMLElement {
-    const start = button("開始地墊模擬", () => this.app.startMatPreview());
-    const mw = num("墊寬 (m)", 0.6, 0.05, (v) => this.app.updateMatPreview({ spec: { matWidth: v } }), 0.1);
-    const md = num("墊深 (m)", 1.8, 0.05, (v) => this.app.updateMatPreview({ spec: { matDepth: v } }), 0.1);
-    const rows = num("列數", 3, 1, (v) => this.app.updateMatPreview({ spec: { rows: v } }), 1);
-    const cols = num("行數", 4, 1, (v) => this.app.updateMatPreview({ spec: { cols: v } }), 1);
-    const gx = num("水平間距 (m)", 0.1, 0.05, (v) => this.app.updateMatPreview({ spec: { gapX: v } }), 0);
-    const gz = num("垂直間距 (m)", 0.1, 0.05, (v) => this.app.updateMatPreview({ spec: { gapZ: v } }), 0);
-    const rot = num("旋轉 (°)", 0, 5, (v) => this.app.updateMatPreview({ rotationDeg: v }));
-    this.inputs.matW = mw.querySelector("input")!;
-    this.inputs.matD = md.querySelector("input")!;
-    this.inputs.matRows = rows.querySelector("input")!;
-    this.inputs.matCols = cols.querySelector("input")!;
-    this.inputs.matGX = gx.querySelector("input")!;
-    this.inputs.matGZ = gz.querySelector("input")!;
-    this.inputs.matRot = rot.querySelector("input")!;
-
-    const confirm = button("確認擺放", () => this.app.confirmMatPreview());
-    const cancel = button("取消", () => this.app.cancelMatPreview(), "btn btn--ghost");
-
-    return section("地墊模擬", [
-      el("p", { class: "hint", text: "選取一個小區域後開始模擬，可看到容量與超界資訊。" }),
-      start,
-      el("div", { class: "grid2" }, [mw, md, rows, cols, gx, gz, rot]),
-      this.matReadout,
-      el("div", { class: "row" }, [confirm, cancel]),
+  private calibrationSection(): HTMLElement {
+    const s = this.app.store.getState();
+    const typeSel = el("select", { class: "field__input" }) as HTMLSelectElement;
+    typeSel.append(el("option", { value: "tile", text: "一塊地磚" }), el("option", { value: "wall", text: "教室長邊牆面" }));
+    const actual = el("input", { type: "number", step: "1", class: "field__input", placeholder: "實際 (cm)" }) as HTMLInputElement;
+    const readout = el("div", { class: "readout" });
+    const apply = button("套用", () => {
+      const cm = parseFloat(actual.value);
+      if (!cm) return;
+      if (typeSel.value === "tile") this.app.applyCalibrationToTile(cm / 100);
+      else this.app.updateArea("classroom", { length: cm / 100 });
+    });
+    const compare = () => {
+      const cm = parseFloat(actual.value);
+      readout.innerHTML = "";
+      const modelM = typeSel.value === "tile" ? s.tile.width : s.classroom.length;
+      readout.append(el("div", { text: `目前模型值：${(modelM * 100).toFixed(0)} cm` }));
+      if (cm) {
+        const c = calibrationCompare(cm / 100, modelM);
+        readout.append(el("div", { text: c.matches ? "✓ 與模型一致" : `差異：${(c.deltaMeters * 100).toFixed(1)} cm (${c.deltaPct.toFixed(1)}%)` }));
+        readout.classList.toggle("readout--warn", !c.matches);
+      }
+    };
+    actual.addEventListener("input", compare);
+    typeSel.addEventListener("change", compare);
+    compare();
+    return section("現場校正", [
+      el("p", { class: "hint", text: "選你在現場量得到的尺寸，輸入實際值核對比例，再選擇是否套用。" }),
+      el("label", { class: "field" }, [el("span", { class: "field__label", text: "校正對象" }), typeSel]),
+      el("label", { class: "field" }, [el("span", { class: "field__label", text: "實際長度 (cm)" }), actual]),
+      readout,
+      apply,
     ]);
   }
 
   private routeSection(): HTMLElement {
-    const newR = button("新增動線", () => this.app.newRoute());
-    const finish = button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost");
-    this.routesList = el("div", { class: "list" });
+    const s = this.app.store.getState();
+    const list = el("div", { class: "list" });
+    for (const r of s.routes) {
+      list.append(el("div", { class: "list__row" }, [
+        el("span", { text: `${r.name}（${r.points.length} 點）` }),
+        button(this.app.session.activeRouteId === r.id ? "繪製中" : "編輯", () => this.app.editRoute(r.id), "chip chip--sm"),
+        button("刪除", () => { this.app.setSelection([r.id]); this.app.deleteSelection(); }, "chip chip--sm chip--danger"),
+      ]));
+    }
+    if (!s.routes.length) list.append(el("span", { class: "hint", text: "尚無動線。" }));
     return section("動線", [
-      el("p", { class: "hint", text: "「動線」模式下點擊地面加入節點，可拖曳節點調整。" }),
-      el("div", { class: "row" }, [newR, finish]),
-      this.routesList,
+      el("p", { class: "hint", text: "新增後在畫布點擊地面加入節點；可拖曳節點調整。" }),
+      el("div", { class: "row" }, [button("新增動線", () => this.app.newRoute()), button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
+      list,
     ]);
   }
 
-  private routesList = el("div");
+  private validationSection(): HTMLElement {
+    const issues = this.app.session.issues;
+    const counts = issueCounts(issues);
+    const list = el("div", { class: "list" });
+    for (const iss of issues) {
+      const row = el("button", { type: "button", class: `issue issue--${iss.severity}` }, [
+        el("span", { class: "issue__icon", text: SEV_ICON[iss.severity] }),
+        el("span", { text: `${SEV_LABEL[iss.severity]}：${iss.message}` }),
+      ]) as HTMLButtonElement;
+      row.addEventListener("click", () => this.app.focusIssue(iss));
+      list.append(row);
+    }
+    if (!issues.length) list.append(el("span", { class: "hint", text: "尚未發現問題，點「重新檢查」更新。" }));
+    return section("檢查中心", [
+      el("div", { class: "row" }, [
+        button("重新檢查", () => this.app.runValidation()),
+        el("span", { class: "hint", text: `⛔ ${counts.error} · ⚠ ${counts.warning} · ℹ ${counts.info}` }),
+      ]),
+      list,
+    ]);
+  }
 
-  // --- dynamic update ----------------------------------------------------
+  private exportSection(): HTMLElement {
+    const state = () => this.app.store.getState();
+    const importInput = el("input", { type: "file", accept: "application/json", style: "display:none" }) as HTMLInputElement;
+    importInput.addEventListener("change", async () => {
+      const f = importInput.files?.[0]; if (!f) return;
+      try { this.app.store.loadProject(await importProjectJson(f) as never); } catch { alert("匯入失敗：JSON 格式錯誤"); }
+      importInput.value = "";
+    });
+    const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" }) as HTMLInputElement;
+    const layoutList = el("select", { class: "field__input" }) as HTMLSelectElement;
+    const refreshList = () => {
+      const names = this.app.store.listLayouts(); const cur = layoutList.value;
+      layoutList.innerHTML = "";
+      layoutList.append(el("option", { value: "", text: names.length ? "選擇平面圖…" : "尚無已存平面圖" }));
+      for (const n of names) layoutList.append(el("option", { value: n, text: n }));
+      if (names.includes(cur)) layoutList.value = cur;
+    };
+    refreshList();
+    return section("匯出 / 儲存", [
+      el("div", { class: "subhead", text: "施工用輸出" }),
+      button("匯出工作人員場佈圖 (PNG)", () => downloadPng(renderConstructionPlan(state()), "planform-construction.png")),
+      button("匯出 3D 示意圖 (PNG)", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), "planform-3d.png"), "btn btn--ghost"),
+      el("div", { class: "row" }, [
+        button("匯出 JSON", () => exportProjectJson(state())),
+        button("匯入 JSON", () => importInput.click(), "btn btn--ghost"),
+      ]),
+      importInput,
+      el("div", { class: "subhead", text: "本機平面圖" }),
+      textField("名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
+      el("div", { class: "row" }, [layoutName, button("儲存", () => { this.app.store.saveNamedLayout(layoutName.value.trim() || state().name); refreshList(); })]),
+      el("div", { class: "row" }, [layoutList,
+        button("載入", () => { if (layoutList.value) this.app.store.loadNamedLayout(layoutList.value); }, "btn btn--ghost"),
+        button("刪除", () => { if (layoutList.value) { this.app.store.deleteNamedLayout(layoutList.value); refreshList(); } }, "btn btn--ghost")]),
+      el("div", { class: "subhead", text: "量測" }),
+      button("開始量測 (兩點距離)", () => this.app.startMeasure()),
+    ]);
+  }
+
+  // --- update ------------------------------------------------------------
 
   private update(): void {
-    const s = this.app.store.getState();
     const sess = this.app.session;
-
-    // Pressed states.
-    setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-    setPressed(this.topbar, "modes", (b) => (b === 0 ? sess.mode === "select" : sess.mode === "route"));
-    setPressed(this.topbar, "snap", (b) => SNAPS[b].id === sess.snap);
-    const layerKeys = ["areas", "tiles", "zones", "objects", "routes"] as const;
-    setPressed(this.topbar, "layers", (b) => s.layers[layerKeys[b]]);
-
-    // Refresh static input values (undo/redo/import may have changed them).
-    this.setVal("projName", s.name);
-    this.setVal("classroom_len", s.classroom.length);
-    this.setVal("classroom_wid", s.classroom.width);
-    this.setVal("classroom_x", s.classroom.x);
-    this.setVal("classroom_z", s.classroom.z);
-    this.setVal("corridor_len", s.corridor.length);
-    this.setVal("corridor_wid", s.corridor.width);
-    this.setVal("corridor_x", s.corridor.x);
-    this.setVal("corridor_z", s.corridor.z);
-    this.setVal("calRef", s.calibration.referenceLength ?? 0);
-    this.setVal("calNote", s.calibration.note);
-    this.setVal("tileW", metersToCm(s.tile.width));
-    this.setVal("tileD", metersToCm(s.tile.depth));
-    this.setVal("tileOX", s.tile.originX);
-    this.setVal("tileOZ", s.tile.originZ);
-    this.setVal("tileRot", s.tile.rotationDeg);
-
-    this.updateLayoutList();
-    this.updateMatReadout();
-    this.updateRoutesList();
-    this.updateSelection();
-  }
-
-  private setVal(key: string, value: string | number): void {
-    const input = this.inputs[key];
-    if (input && document.activeElement !== input) input.value = String(value);
-  }
-
-  private updateLayoutList(): void {
-    const list = this.inputs.layoutList as unknown as HTMLSelectElement;
-    if (!list) return;
-    const names = this.app.store.listLayouts();
-    const current = list.value;
-    list.innerHTML = "";
-    list.append(el("option", { value: "", text: names.length ? "選擇平面圖…" : "尚無已存平面圖" }));
-    for (const n of names) list.append(el("option", { value: n, text: n }));
-    if (names.includes(current)) list.value = current;
-  }
-
-  private updateMatReadout(): void {
-    const pre = this.app.session.matPreview;
-    this.matReadout.innerHTML = "";
-    if (!pre) {
-      this.matReadout.append(el("span", { class: "hint", text: "尚未開始模擬。" }));
-      return;
-    }
-    // Reflect current spec into inputs.
-    this.setVal("matW", pre.spec.matWidth);
-    this.setVal("matD", pre.spec.matDepth);
-    this.setVal("matRows", pre.spec.rows);
-    this.setVal("matCols", pre.spec.cols);
-    this.setVal("matGX", pre.spec.gapX);
-    this.setVal("matGZ", pre.spec.gapZ);
-    this.setVal("matRot", pre.rotationDeg);
-
-    const fp = matArrayFootprint(pre.spec);
-    const rows = [
-      `地墊數：${fp.count}`,
-      `占用：${fp.totalWidth.toFixed(2)} × ${fp.totalDepth.toFixed(2)} m`,
-    ];
-    const zone = pre.zoneId ? this.app.store.getState().zones.find((z) => z.id === pre.zoneId) : null;
-    if (zone) {
-      const cap = zoneMatCapacity(zone.width, zone.depth, pre.spec);
-      rows.push(`區域容量：${cap.maxCols} × ${cap.maxRows} = ${cap.capacity} 墊`);
-      if (cap.fits) rows.push(`剩餘：${cap.clearanceX.toFixed(2)} × ${cap.clearanceZ.toFixed(2)} m`);
-      else rows.push(`⚠ 超出區域：${cap.overflowX.toFixed(2)} × ${cap.overflowZ.toFixed(2)} m`);
-      this.matReadout.classList.toggle("readout--warn", !cap.fits);
-    } else {
-      this.matReadout.classList.remove("readout--warn");
-    }
-    for (const r of rows) this.matReadout.append(el("div", { text: r }));
-  }
-
-  private updateRoutesList(): void {
-    this.routesList.innerHTML = "";
     const s = this.app.store.getState();
-    for (const route of s.routes) {
-      const nameInput = el("input", { type: "text", value: route.name, class: "field__input field__input--sm" }) as HTMLInputElement;
-      nameInput.addEventListener("change", () => this.app.updateRoute(route.id, { name: nameInput.value }));
-      const color = el("input", { type: "color", value: route.color, class: "color" }) as HTMLInputElement;
-      color.addEventListener("input", () => this.app.updateRoute(route.id, { color: color.value }));
-      const vis = button(route.visible ? "顯示" : "隱藏", () =>
-        this.app.updateRoute(route.id, { visible: !route.visible }), "chip chip--sm");
-      const edit = button(this.app.session.activeRouteId === route.id ? "繪製中" : "編輯", () => {
-        this.app.setMode("route");
-        this.app.session.activeRouteId = route.id;
-        this.app.setSelection([route.id]);
-      }, "chip chip--sm");
-      const del = button("刪除", () => {
-        this.app.setSelection([route.id]);
-        this.app.deleteSelection();
-      }, "chip chip--sm");
-      this.routesList.append(
-        el("div", { class: "list__row" }, [nameInput, color, vis, edit, del,
-          el("span", { class: "hint", text: `${route.points.length} 點` })]),
-      );
+    setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
+    setPressed(this.topbar, "flows", (b) => WORKFLOWS[b].id === sess.workflow);
+    setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
+    if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
+    this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow)));
+
+    if (this.lastWorkflow !== sess.workflow || sess.workflow === "check" || sess.workflow === "route") {
+      this.lastWorkflow = sess.workflow;
+      this.rebuildLeft();
     }
-    if (s.routes.length === 0) this.routesList.append(el("span", { class: "hint", text: "尚無動線。" }));
+
+    // Inspector.
+    this.right.innerHTML = "";
+    this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
+    this.root.classList.toggle("show-inspector", sess.selection.size > 0);
+
+    // Placement + measure bars.
+    this.placebar.style.display = sess.mode === "place" ? "flex" : "none";
+    this.updateMeasureBar();
   }
 
-  private updateSelection(): void {
-    this.dynamic.innerHTML = "";
-    const obj = this.app.getSelectedObject();
-    const zone = this.app.getSelectedZone();
-    const count = this.app.session.selection.size;
-
-    if (count === 0) {
-      this.selBar.style.display = "none";
-      this.dynamic.append(el("span", { class: "hint", text: "未選取任何物件。" }));
-      return;
-    }
-    this.selBar.style.display = "flex";
-    this.selBar.innerHTML = "";
-    this.selBar.append(
-      button("旋轉 15°", () => this.app.rotateSelection(15), "chip"),
-      button("複製", () => this.app.duplicateSelection(), "chip"),
-      button("鎖定", () => this.app.toggleLockSelection(), "chip"),
-      button("隱藏", () => this.app.toggleHideSelection(), "chip"),
-      button("刪除", () => this.app.deleteSelection(), "chip chip--danger"),
+  private updateMeasureBar(): void {
+    const on = this.app.session.mode === "measure";
+    this.measurebar.style.display = on ? "flex" : "none";
+    if (!on) return;
+    this.measurebar.innerHTML = "";
+    const r = this.app.getMeasureResult();
+    const text = r
+      ? `${r.meters.toFixed(2)} m（${r.cm.toFixed(0)} cm）· 約 ${r.tilesDiagonal.toFixed(1)} 格`
+      : "點兩個位置量距離";
+    this.measurebar.append(
+      el("span", { class: "measurebar__text", text }),
+      button("清除", () => this.app.clearMeasure(), "chip chip--sm"),
+      button("完成", () => this.app.stopMeasure(), "chip chip--sm chip--primary"),
     );
-
-    if (count > 1) {
-      this.dynamic.append(el("div", { text: `已選取 ${count} 個項目` }));
-      return;
-    }
-
-    if (obj) {
-      const s = this.app.store.getState();
-      const ref = worldToTile(obj.x, obj.z, s.tile);
-      const wall = obj.z - s.classroom.z;
-      const w = num("寬 (m)", obj.width, 0.05, (v) => this.app.updateSelectedObject({ width: v }), 0.05);
-      const d = num("深 (m)", obj.depth, 0.05, (v) => this.app.updateSelectedObject({ depth: v }), 0.05);
-      const rot = num("旋轉 (°)", obj.rotationDeg, 5, (v) => this.app.updateSelectedObject({ rotationDeg: v }));
-      this.dynamic.append(
-        el("div", { class: "subhead", text: OBJECT_DEFAULTS[obj.kind].label }),
-        el("div", { class: "readout" }, [
-          el("div", { text: formatTileRef(ref) }),
-          el("div", { text: `座標：${obj.x.toFixed(2)}, ${obj.z.toFixed(2)} m` }),
-          el("div", { text: `距上牆：${wall.toFixed(2)} m` }),
-        ]),
-        el("div", { class: "grid2" }, [w, d, rot]),
-      );
-    } else if (zone) {
-      const name = textField("名稱", zone.name, (v) => this.app.updateSelectedZone({ name: v }));
-      const w = num("寬 (m)", zone.width, 0.1, (v) => this.app.updateSelectedZone({ width: v }), 0.2);
-      const d = num("深 (m)", zone.depth, 0.1, (v) => this.app.updateSelectedZone({ depth: v }), 0.2);
-      this.dynamic.append(
-        el("div", { class: "subhead", text: `區域：${ZONE_DEFAULTS[zone.type].label}` }),
-        name,
-        el("div", { class: "grid2" }, [w, d]),
-      );
-    } else {
-      this.dynamic.append(el("div", { text: "已選取動線（可於動線區編輯）" }));
-    }
   }
 
   private renderBox(rect: { minX: number; minY: number; maxX: number; maxY: number } | null): void {
-    if (!rect) {
-      this.box.style.display = "none";
-      return;
-    }
+    if (!rect) { this.box.style.display = "none"; return; }
     this.box.style.display = "block";
-    this.box.style.left = `${rect.minX}px`;
-    this.box.style.top = `${rect.minY}px`;
-    this.box.style.width = `${rect.maxX - rect.minX}px`;
-    this.box.style.height = `${rect.maxY - rect.minY}px`;
+    this.box.style.left = `${rect.minX}px`; this.box.style.top = `${rect.minY}px`;
+    this.box.style.width = `${rect.maxX - rect.minX}px`; this.box.style.height = `${rect.maxY - rect.minY}px`;
   }
 
   private bindKeys(): void {
     window.addEventListener("keydown", (e) => {
-      const target = e.target as HTMLElement;
-      if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
-        e.preventDefault();
-        this.app.undo();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
-        e.preventDefault();
-        this.app.redo();
-      } else if (e.key === "Delete" || e.key === "Backspace") {
-        this.app.deleteSelection();
-      } else if (e.key.toLowerCase() === "r") {
-        this.app.rotateSelection(15);
-      } else if (e.key.toLowerCase() === "d") {
-        this.app.duplicateSelection();
-      }
+      const tgt = e.target as HTMLElement;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "SELECT" || tgt.tagName === "TEXTAREA")) return;
+      const k = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); this.app.undo(); }
+      else if ((e.ctrlKey || e.metaKey) && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); this.app.redo(); }
+      else if (e.key === "Escape") { this.app.cancelPlacement(); if (this.app.session.mode === "measure") this.app.stopMeasure(); }
+      else if (e.key === "Delete" || e.key === "Backspace") this.app.deleteSelection();
+      else if (k === "r") { if (this.app.session.mode === "place") this.app.rotateGhost(); else this.app.rotateSelection(15); }
+      else if (k === "d") this.app.duplicateSelection();
     });
   }
 }
 
-function layerLabel(l: string): string {
-  return { areas: "區域", tiles: "格線", zones: "小區", objects: "物件", routes: "動線" }[l] ?? l;
-}
-
-function setPressed(root: HTMLElement, group: string, pred: (index: number) => boolean): void {
-  const container = root.querySelector(`[data-group="${group}"]`);
-  if (!container) return;
-  const buttons = Array.from(container.querySelectorAll("button"));
-  buttons.forEach((b, i) => b.setAttribute("aria-pressed", String(pred(i))));
+function setPressed(root: HTMLElement, group: string, pred: (i: number) => boolean): void {
+  const c = root.querySelector(`[data-group="${group}"]`);
+  if (!c) return;
+  Array.from(c.querySelectorAll("button")).forEach((b, i) => b.setAttribute("aria-pressed", String(pred(i))));
 }
