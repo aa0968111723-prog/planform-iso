@@ -1,4 +1,5 @@
-import { App } from "../app/App";
+import QRCode from "qrcode";
+import { App, type Focus } from "../app/App";
 import {
   OBJECT_DEFAULTS,
   ZONE_DEFAULTS,
@@ -7,6 +8,7 @@ import {
   type ZoneType,
 } from "../core/model";
 import { matArrayFootprint, zoneMatCapacity } from "../core/mat";
+import { legendEntries } from "../core/summary";
 import { formatTileRef, metersToCm, worldToTile } from "../core/units";
 import type { SnapMode } from "../core/units";
 import { migrate } from "../state/store";
@@ -16,6 +18,12 @@ import {
   importProjectJson,
 } from "../export/exporters";
 import { button, el, num, section, textField } from "./dom";
+
+const FOCUS: { id: Focus; label: string }[] = [
+  { id: "all", label: "全部" },
+  { id: "zones", label: "區域" },
+  { id: "flow", label: "動線" },
+];
 
 const VIEWS: { id: ViewName; label: string }[] = [
   { id: "iso", label: "等角" },
@@ -43,21 +51,70 @@ export class UI {
   private dynamic = el("div");
   private matReadout = el("div", { class: "readout" });
   private inputs: Record<string, HTMLInputElement> = {};
+  private legend: HTMLElement;
+  private presentBar: HTMLElement;
+  private summaryBox = el("div", { class: "readout" });
+  private modal: HTMLElement;
 
   constructor(private app: App, private root: HTMLElement) {
     this.topbar = el("header", { class: "topbar" });
     this.panel = el("aside", { class: "panel" });
     this.selBar = el("div", { class: "selbar", style: "display:none" });
     this.box = el("div", { class: "boxsel", style: "display:none" });
-    root.append(this.topbar, this.panel, this.selBar, this.box);
+    this.legend = el("div", { class: "legend", style: "display:none" });
+    this.presentBar = el("div", { class: "presentbar" });
+    this.modal = el("div", { class: "modal", style: "display:none" });
+    root.append(this.topbar, this.panel, this.selBar, this.box, this.legend, this.presentBar, this.modal);
 
     this.buildTopbar();
     this.buildPanel();
+    this.buildLegend();
 
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onChange(() => this.update());
     this.bindKeys();
+    this.buildOnboarding();
     this.update();
+  }
+
+  private buildOnboarding(): void {
+    const KEY = "planform-iso:onboarded";
+    try {
+      if (localStorage.getItem(KEY)) return;
+    } catch {
+      return;
+    }
+    const steps = [
+      "1. 在右側「大區域 / 地磚」設定教室與地磚實際尺寸",
+      "2. 用「加入小區域 / 加入物件」放置區域與門、桌椅等",
+      "3. 「地墊模擬」預覽排列，看數量與是否超界，再確認擺放",
+      "4. 「動線」模式點地面畫出流程路線",
+      "5. 上方「檢視」給夥伴看，「分享」產生連結／QR／分享圖",
+    ];
+    const card = el("div", { class: "onboard__card" }, [
+      el("div", { class: "onboard__title", text: "快速上手" }),
+      el("div", { class: "onboard__steps" }, steps.map((s) => el("div", { text: s }))),
+      button("開始使用", () => {
+        try {
+          localStorage.setItem(KEY, "1");
+        } catch {
+          /* ignore */
+        }
+        overlay.remove();
+      }),
+    ]);
+    const overlay = el("div", { class: "onboard" }, [card]);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        try {
+          localStorage.setItem(KEY, "1");
+        } catch {
+          /* ignore */
+        }
+        overlay.remove();
+      }
+    });
+    this.root.append(overlay);
   }
 
   // --- top bar -----------------------------------------------------------
@@ -85,9 +142,20 @@ export class UI {
       (["areas", "tiles", "zones", "objects", "routes"] as const).map((l) =>
         button(layerLabel(l), () => this.app.toggleLayer(l), "chip chip--sm")));
 
+    const focus = el("div", { class: "group", "data-group": "focus" },
+      FOCUS.map((f) => button(f.label, () => this.app.setFocus(f.id), "chip chip--sm")));
+
+    const view2 = el("div", { class: "group", "data-group": "view2" }, [
+      button("名稱", () => this.app.setShowLabels(!this.app.session.showLabels), "chip chip--sm"),
+      button("圖例", () => this.toggleLegend(), "chip chip--sm"),
+      button("檢視", () => this.app.setPresentation(!this.app.session.presentation), "chip"),
+    ]);
+
+    const share = button("分享", () => this.openShare(), "chip chip--primary");
+
     const panelToggle = button("面板", () => this.root.classList.toggle("panel-open"), "chip");
 
-    this.topbar.append(title, views, modes, snap, layers, history, panelToggle);
+    this.topbar.append(title, views, focus, view2, modes, snap, layers, history, share, panelToggle);
   }
 
   // --- panel -------------------------------------------------------------
@@ -103,8 +171,97 @@ export class UI {
       this.objectSection(),
       this.matSection(),
       this.routeSection(),
+      section("場佈摘要", [
+        el("p", { class: "hint", text: "給不看 3D 圖的夥伴的白話摘要。" }),
+        this.summaryBox,
+      ]),
       section("選取資訊", [this.dynamic]),
     );
+  }
+
+  private buildLegend(): void {
+    const entries = legendEntries();
+    const items = entries.map((e) =>
+      el("div", { class: "legend__row" }, [
+        el("span", { class: "legend__swatch", style: `background:${e.color}` }),
+        el("span", { text: e.label }),
+      ]),
+    );
+    this.legend.append(
+      el("div", { class: "legend__head" }, [
+        el("strong", { text: "圖例" }),
+        button("×", () => this.toggleLegend(false), "chip chip--sm"),
+      ]),
+      el("div", { class: "legend__grid" }, items),
+    );
+  }
+
+  private toggleLegend(force?: boolean): void {
+    const show = force ?? this.legend.style.display === "none";
+    this.legend.style.display = show ? "block" : "none";
+  }
+
+  private async openShare(): Promise<void> {
+    const url = this.app.getShareUrl();
+    this.modal.innerHTML = "";
+    const link = el("input", { type: "text", value: url, readOnly: true, class: "field__input" }) as HTMLInputElement;
+
+    const copy = button("複製連結", async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        copy.textContent = "已複製 ✓";
+        setTimeout(() => (copy.textContent = "複製連結"), 1500);
+      } catch {
+        link.select();
+        document.execCommand("copy");
+      }
+    });
+
+    const actions: HTMLElement[] = [copy];
+    if (typeof navigator.share === "function") {
+      actions.push(button("系統分享", () => {
+        void navigator.share({ title: this.app.getSummary().title, url });
+      }, "btn btn--ghost"));
+    }
+    actions.push(button("下載分享圖", async () => {
+      const img = await this.app.buildShareImage();
+      downloadPng(img, "planform-share.png");
+    }, "btn btn--ghost"));
+
+    const qrCanvas = el("canvas", { class: "qr" }) as HTMLCanvasElement;
+    const qrNote = el("p", { class: "hint" });
+    if (url.length <= 1800) {
+      try {
+        await QRCode.toCanvas(qrCanvas, url, { width: 220, margin: 1 });
+        qrNote.textContent = "用手機掃描即可開啟這份平面圖。";
+      } catch {
+        qrNote.textContent = "無法產生 QR code。";
+      }
+    } else {
+      qrNote.textContent = "平面圖較大，連結過長無法產生 QR code，請用「複製連結」分享。";
+      qrCanvas.style.display = "none";
+    }
+
+    const card = el("div", { class: "modal__card" }, [
+      el("div", { class: "modal__head" }, [
+        el("strong", { text: "分享平面圖" }),
+        button("×", () => this.closeShare(), "chip chip--sm"),
+      ]),
+      el("p", { class: "hint", text: "分享連結已包含整份平面圖，對方開啟即可看到，不需帳號或後端。" }),
+      link,
+      el("div", { class: "row" }, actions),
+      el("div", { class: "qr-wrap" }, [qrCanvas]),
+      qrNote,
+    ]);
+    this.modal.append(card);
+    this.modal.style.display = "flex";
+    this.modal.onclick = (e) => {
+      if (e.target === this.modal) this.closeShare();
+    };
+  }
+
+  private closeShare(): void {
+    this.modal.style.display = "none";
   }
 
   private projectSection(): HTMLElement {
@@ -299,6 +456,12 @@ export class UI {
     setPressed(this.topbar, "snap", (b) => SNAPS[b].id === sess.snap);
     const layerKeys = ["areas", "tiles", "zones", "objects", "routes"] as const;
     setPressed(this.topbar, "layers", (b) => s.layers[layerKeys[b]]);
+    setPressed(this.topbar, "focus", (b) => FOCUS[b].id === sess.focus);
+    setPressed(this.topbar, "view2", (b) =>
+      b === 0 ? sess.showLabels : b === 1 ? this.legend.style.display !== "none" : sess.presentation);
+
+    this.updatePresentation();
+    this.updateSummary();
 
     // Refresh static input values (undo/redo/import may have changed them).
     this.setVal("projName", s.name);
@@ -322,6 +485,32 @@ export class UI {
     this.updateMatReadout();
     this.updateRoutesList();
     this.updateSelection();
+  }
+
+  private updateSummary(): void {
+    const summary = this.app.getSummary();
+    this.summaryBox.innerHTML = "";
+    for (const line of summary.lines) this.summaryBox.append(el("div", { text: line }));
+    if (summary.lines.length === 0) this.summaryBox.append(el("span", { class: "hint", text: "尚無內容。" }));
+  }
+
+  private updatePresentation(): void {
+    const on = this.app.session.presentation;
+    this.root.classList.toggle("present", on);
+    if (on) this.toggleLegend(true);
+    this.presentBar.innerHTML = "";
+    if (!on) return;
+    const summary = this.app.getSummary();
+    this.presentBar.append(
+      el("div", { class: "presentbar__main" }, [
+        el("div", { class: "presentbar__title", text: summary.title }),
+        el("div", { class: "presentbar__lines" }, summary.lines.map((l) => el("span", { text: l }))),
+      ]),
+      el("div", { class: "presentbar__actions" }, [
+        button("分享", () => this.openShare(), "chip chip--primary"),
+        button("退出檢視", () => this.app.setPresentation(false), "chip"),
+      ]),
+    );
   }
 
   private setVal(key: string, value: string | number): void {

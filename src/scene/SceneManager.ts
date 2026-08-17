@@ -25,6 +25,7 @@ import {
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   OBJECT_DEFAULTS,
+  type ObjectKind,
   type Project,
   type ViewName,
   type Zone,
@@ -35,6 +36,15 @@ import { TextLabel } from "./label";
 const SELECT_COLOR = new Color(0x38bdf8);
 const deg2rad = (d: number) => (d * Math.PI) / 180;
 
+/** Objects worth labelling in-scene; chairs/tables/mats would just be noise. */
+const LANDMARK_KINDS: ReadonlySet<ObjectKind> = new Set<ObjectKind>([
+  "door",
+  "screen",
+  "regTable",
+  "computer",
+  "switch",
+]);
+
 export interface PickResult {
   type: "object" | "zone" | "routeNode";
   id: string;
@@ -42,9 +52,14 @@ export interface PickResult {
   index?: number;
 }
 
+type LayerKey = keyof Project["layers"];
+
 interface SessionView {
   selection: Set<string>;
   matPreview: MatPreviewState | null;
+  showLabels?: boolean;
+  /** Transient per-view visibility override (focus filters) that does not mutate the project. */
+  layerOverride?: Partial<Record<LayerKey, boolean>> | null;
 }
 
 export class SceneManager {
@@ -64,6 +79,7 @@ export class SceneManager {
   private previewGroup = new Group();
 
   private objectMeshes = new Map<string, { mesh: Mesh; sig: string }>();
+  private objectLabels = new Map<string, TextLabel>();
   private zoneNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodeMeshes: Mesh[] = [];
@@ -156,9 +172,16 @@ export class SceneManager {
   // --- sync from state ---------------------------------------------------
 
   sync(project: Project, session: SessionView): void {
-    this.layersState = project.layers;
+    const override = session.layerOverride ?? {};
+    this.layersState = {
+      areas: override.areas ?? project.layers.areas,
+      zones: override.zones ?? project.layers.zones,
+      objects: override.objects ?? project.layers.objects,
+      tiles: override.tiles ?? project.layers.tiles,
+      routes: override.routes ?? project.layers.routes,
+    };
     this.syncAreasAndTiles(project);
-    this.syncObjects(project, session.selection);
+    this.syncObjects(project, session.selection, session.showLabels ?? false);
     this.syncZones(project, session.selection);
     this.syncRoutes(project, session.selection);
     this.syncPreview(session.matPreview);
@@ -223,7 +246,7 @@ export class SceneManager {
     return grid;
   }
 
-  private syncObjects(project: Project, selection: Set<string>): void {
+  private syncObjects(project: Project, selection: Set<string>, showLabels: boolean): void {
     this.objectGroup.visible = this.layersState.objects;
     const seen = new Set<string>();
     for (const obj of project.objects) {
@@ -252,11 +275,33 @@ export class SceneManager {
       mat.emissiveIntensity = selected ? 0.6 : 0;
       mat.opacity = obj.locked ? 0.6 : 1;
       mat.transparent = obj.locked;
+
+      // Landmark name label (optional).
+      const wantLabel = showLabels && !obj.hidden && LANDMARK_KINDS.has(obj.kind);
+      let label = this.objectLabels.get(obj.id);
+      if (wantLabel) {
+        if (!label) {
+          label = new TextLabel();
+          this.objectGroup.add(label.sprite);
+          this.objectLabels.set(obj.id, label);
+        }
+        label.set(OBJECT_DEFAULTS[obj.kind].label, "#e2e8f0");
+        label.sprite.position.set(obj.x, obj.height + 0.4, obj.z);
+        label.sprite.visible = true;
+      } else if (label) {
+        label.sprite.visible = false;
+      }
     }
     for (const [id, entry] of this.objectMeshes) {
       if (!seen.has(id)) {
         this.objectGroup.remove(entry.mesh);
         this.objectMeshes.delete(id);
+        const label = this.objectLabels.get(id);
+        if (label) {
+          this.objectGroup.remove(label.sprite);
+          label.dispose();
+          this.objectLabels.delete(id);
+        }
       }
     }
   }
@@ -502,7 +547,7 @@ export class SceneManager {
     const prevView = project.view;
     const prevLayers = { ...this.layersState };
     // Temporarily emphasize as requested and clear selection highlight.
-    this.sync(project, { selection: new Set(), matPreview: null });
+    this.sync(project, { selection: new Set(), matPreview: null, showLabels: true });
     if (mode === "flow") {
       this.floorGroup.visible = true;
       this.objectGroup.visible = false;

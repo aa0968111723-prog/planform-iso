@@ -12,10 +12,14 @@ import {
 } from "../core/model";
 import { applySnap, type SnapMode } from "../core/units";
 import { matPreviewCenters, type MatArraySpec, type MatPreviewState } from "../core/mat";
-import { Store } from "../state/store";
+import { buildSummary, legendEntries, type PlanSummary } from "../core/summary";
+import { Store, migrate } from "../state/store";
 import { SceneManager } from "../scene/SceneManager";
+import { buildShareUrl } from "../share/share";
+import { buildShareImage } from "../export/shareImage";
 
 export type Mode = "select" | "route";
+export type Focus = "all" | "zones" | "flow";
 
 export interface Session {
   selection: Set<string>;
@@ -23,6 +27,9 @@ export interface Session {
   snap: SnapMode;
   matPreview: MatPreviewState | null;
   activeRouteId: string | null;
+  showLabels: boolean;
+  focus: Focus;
+  presentation: boolean;
 }
 
 interface DragState {
@@ -46,6 +53,9 @@ export class App {
     snap: "intersection",
     matPreview: null,
     activeRouteId: null,
+    showLabels: false,
+    focus: "all",
+    presentation: false,
   };
 
   private drag: DragState | null = null;
@@ -74,7 +84,24 @@ export class App {
   }
 
   private syncScene(): void {
-    this.scene.sync(this.state, { selection: this.session.selection, matPreview: this.session.matPreview });
+    this.scene.sync(this.state, {
+      selection: this.session.selection,
+      matPreview: this.session.matPreview,
+      showLabels: this.session.showLabels,
+      layerOverride: this.focusOverride(),
+    });
+  }
+
+  private focusOverride(): Partial<Record<keyof Project["layers"], boolean>> | null {
+    switch (this.session.focus) {
+      case "zones":
+        return { objects: false, routes: false };
+      case "flow":
+        return { objects: false };
+      case "all":
+      default:
+        return null;
+    }
   }
 
   private render(): void {
@@ -106,6 +133,46 @@ export class App {
 
   toggleLayer(layer: keyof Project["layers"]): void {
     this.store.mutate((p) => (p.layers[layer] = !p.layers[layer]), { history: false });
+  }
+
+  setShowLabels(v: boolean): void {
+    this.session.showLabels = v;
+    this.render();
+  }
+
+  setFocus(focus: Focus): void {
+    this.session.focus = focus;
+    this.render();
+  }
+
+  setPresentation(on: boolean): void {
+    this.session.presentation = on;
+    if (on) {
+      this.session.selection = new Set();
+      this.session.showLabels = true;
+      this.session.mode = "select";
+      this.setView("top");
+    }
+    this.render();
+  }
+
+  // --- summary & sharing -------------------------------------------------
+
+  getSummary(): PlanSummary {
+    return buildSummary(this.state);
+  }
+
+  getShareUrl(): string {
+    return buildShareUrl(this.state);
+  }
+
+  loadShared(partial: Partial<Project>): void {
+    this.store.loadProject(migrate(partial));
+  }
+
+  async buildShareImage(): Promise<string> {
+    const top = this.scene.exportPng(this.state, "top", "layout");
+    return buildShareImage(top, buildSummary(this.state), legendEntries());
   }
 
   undo(): void {
