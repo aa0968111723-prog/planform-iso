@@ -5,6 +5,7 @@
  * v2 → v3: measurements + validationSettings
  * v3 → v4: description, zone icon/capacity, route type + zone links
  * v4 → v5: Asset Catalog assetId / serviceRole / catalogExtras
+ * v5 → v6: Event Flow scenarios / ServiceStations
  */
 
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
@@ -14,14 +15,19 @@ import {
   PROJECT_VERSION,
   ZONE_DEFAULTS,
   type ArrayGroup,
+  type EventScenario,
   type MeasurementAnnotation,
   type ObjectKind,
+  type ParticipantProfile,
   type Project,
   type ProjectCatalogExtra,
   type Route,
   type SceneObject,
   type ServiceRole,
+  type ServiceStation,
+  type StationType,
   type Zone,
+  uid,
 } from "./model";
 
 const KINDS: ReadonlySet<string> = new Set<ObjectKind>([
@@ -190,6 +196,194 @@ function migrateCatalogExtra(raw: Partial<ProjectCatalogExtra>): ProjectCatalogE
   };
 }
 
+function migrateStation(raw: Partial<ServiceStation>): ServiceStation | null {
+  if (!raw || typeof raw.id !== "string" || typeof raw.name !== "string") return null;
+  const type = (raw.type as StationType) || "custom";
+  return {
+    id: raw.id,
+    name: raw.name,
+    type,
+    zoneId: raw.zoneId,
+    objectId: raw.objectId,
+    routeWaypoint: raw.routeWaypoint,
+    staffCount: Math.max(1, raw.staffCount ?? 1),
+    parallelServers: Math.max(1, raw.parallelServers ?? 1),
+    meanServiceSeconds: Math.max(1, raw.meanServiceSeconds ?? 30),
+    serviceVariance: raw.serviceVariance,
+    queueCapacity: Math.max(1, raw.queueCapacity ?? 20),
+    x: raw.x ?? 0,
+    z: raw.z ?? 0,
+  };
+}
+
+function migrateProfile(raw: Partial<ParticipantProfile>): ParticipantProfile | null {
+  if (!raw || !raw.id) return null;
+  return {
+    id: raw.id,
+    ratio: typeof raw.ratio === "number" ? Math.max(0, raw.ratio) : 0,
+    branch: Array.isArray(raw.branch) ? raw.branch.filter((b) => typeof b === "string") : [],
+  };
+}
+
+function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
+  if (!raw || typeof raw.id !== "string" || typeof raw.name !== "string") return null;
+  const stations = (Array.isArray(raw.stations) ? raw.stations : [])
+    .map((s) => migrateStation(s as Partial<ServiceStation>))
+    .filter((s): s is ServiceStation => s !== null);
+  const profiles = (Array.isArray(raw.profiles) ? raw.profiles : [])
+    .map((p) => migrateProfile(p as Partial<ParticipantProfile>))
+    .filter((p): p is ParticipantProfile => p !== null);
+  return {
+    id: raw.id,
+    name: raw.name,
+    participantCount: Math.max(1, raw.participantCount ?? 30),
+    arrivalWindowSeconds: Math.max(60, raw.arrivalWindowSeconds ?? 1200),
+    arrivalProfile: raw.arrivalProfile === "front-loaded" ? "front-loaded" : "uniform",
+    profiles: profiles.length
+      ? profiles
+      : [{ id: "general", ratio: 1, branch: stations.map((s) => s.id) }],
+    stations,
+    seed: raw.seed ?? 1,
+    settings: {
+      speedMetersPerSecond: Math.max(0.3, raw.settings?.speedMetersPerSecond ?? 1.0),
+    },
+  };
+}
+
+const STATION_DEFAULTS: Record<StationType, { name: string; meanServiceSeconds: number }> = {
+  entrance: { name: "入口", meanServiceSeconds: 5 },
+  guide: { name: "引導", meanServiceSeconds: 10 },
+  queue: { name: "排隊點", meanServiceSeconds: 5 },
+  checkin: { name: "報到", meanServiceSeconds: 45 },
+  payment: { name: "收費", meanServiceSeconds: 60 },
+  shoe: { name: "鞋子", meanServiceSeconds: 20 },
+  backpack: { name: "背包", meanServiceSeconds: 20 },
+  seating: { name: "入座", meanServiceSeconds: 15 },
+  group: { name: "小組", meanServiceSeconds: 30 },
+  custom: { name: "自訂站點", meanServiceSeconds: 30 },
+};
+
+/** Build a usable default scenario from current zones / service-role objects. */
+export function createDefaultScenario(
+  project: Project,
+  opts?: Partial<Pick<EventScenario, "name" | "participantCount" | "seed">>,
+): EventScenario {
+  const stations: ServiceStation[] = [];
+  const push = (type: StationType, x: number, z: number, extra?: Partial<ServiceStation>) => {
+    const def = STATION_DEFAULTS[type];
+    stations.push({
+      id: uid("stn"),
+      name: extra?.name ?? def.name,
+      type,
+      staffCount: extra?.staffCount ?? 1,
+      parallelServers: extra?.parallelServers ?? 1,
+      meanServiceSeconds: extra?.meanServiceSeconds ?? def.meanServiceSeconds,
+      queueCapacity: extra?.queueCapacity ?? 30,
+      x,
+      z,
+      zoneId: extra?.zoneId,
+      objectId: extra?.objectId,
+    });
+  };
+
+  // Entrance near corridor mid.
+  const corr = project.corridor;
+  push("entrance", corr.x + corr.length / 2, corr.z + corr.width / 2);
+  push("guide", corr.x + corr.length / 2, corr.z + 0.4);
+
+  const byRole = (role: ServiceRole) =>
+    project.objects.find((o) => !o.hidden && o.serviceRole === role);
+
+  const checkinObj = byRole("checkin") ?? project.objects.find((o) => o.kind === "regTable");
+  const paymentObj = byRole("payment");
+  const checkinZone = project.zones.find((z) => z.type === "registration");
+  const shoeZone = project.zones.find((z) => z.type === "shoe");
+  const bagZone = project.zones.find((z) => z.type === "backpack");
+  const seatZone =
+    project.zones.find((z) => z.type === "group") ??
+    project.zones.find((z) => z.type === "meditation");
+
+  if (checkinObj) {
+    push("checkin", checkinObj.x, checkinObj.z, { objectId: checkinObj.id, name: "報到" });
+  } else if (checkinZone) {
+    push("checkin", checkinZone.x + checkinZone.width / 2, checkinZone.z + checkinZone.depth / 2, {
+      zoneId: checkinZone.id,
+    });
+  } else {
+    push("checkin", project.classroom.x + 2, project.classroom.z + project.classroom.width - 1.5);
+  }
+
+  if (paymentObj) {
+    push("payment", paymentObj.x, paymentObj.z, { objectId: paymentObj.id, name: "收費" });
+  } else {
+    // Combined with checkin by default (same coords, separate station for branching).
+    const ck = stations.find((s) => s.type === "checkin")!;
+    push("payment", ck.x + 1.5, ck.z, { name: "收費" });
+  }
+
+  if (shoeZone) {
+    push("shoe", shoeZone.x + shoeZone.width / 2, shoeZone.z + shoeZone.depth / 2, {
+      zoneId: shoeZone.id,
+    });
+  } else {
+    push("shoe", project.classroom.x + 1.5, project.classroom.z + 1.5);
+  }
+
+  if (bagZone) {
+    push("backpack", bagZone.x + bagZone.width / 2, bagZone.z + bagZone.depth / 2, {
+      zoneId: bagZone.id,
+    });
+  } else {
+    push("backpack", project.classroom.x + 3.5, project.classroom.z + 1.5);
+  }
+
+  if (seatZone) {
+    push("seating", seatZone.x + seatZone.width / 2, seatZone.z + seatZone.depth / 2, {
+      zoneId: seatZone.id,
+    });
+  } else {
+    push(
+      "seating",
+      project.classroom.x + project.classroom.length / 2,
+      project.classroom.z + project.classroom.width / 2,
+    );
+  }
+
+  const idOf = (t: StationType) => stations.find((s) => s.type === t)!.id;
+  const fullBranch = [
+    idOf("entrance"),
+    idOf("guide"),
+    idOf("checkin"),
+    idOf("payment"),
+    idOf("shoe"),
+    idOf("backpack"),
+    idOf("seating"),
+  ];
+  const prepaidBranch = [
+    idOf("entrance"),
+    idOf("guide"),
+    idOf("checkin"),
+    idOf("shoe"),
+    idOf("backpack"),
+    idOf("seating"),
+  ];
+
+  return {
+    id: uid("scn"),
+    name: opts?.name ?? "預設進場流程",
+    participantCount: opts?.participantCount ?? 60,
+    arrivalWindowSeconds: 1200,
+    arrivalProfile: "uniform",
+    profiles: [
+      { id: "prepaid", ratio: 2 / 3, branch: prepaidBranch },
+      { id: "pay-on-site", ratio: 1 / 3, branch: fullBranch },
+    ],
+    stations,
+    seed: opts?.seed ?? 1,
+    settings: { speedMetersPerSecond: 1.0 },
+  };
+}
+
 /** Fill in any missing fields from an older or partial project blob. */
 export function migrateProject(input: Partial<Project>): Project {
   const base = createDefaultProject();
@@ -225,6 +419,19 @@ export function migrateProject(input: Partial<Project>): Project {
   p.catalogExtras = rawExtras
     .map((e) => migrateCatalogExtra(e as Partial<ProjectCatalogExtra>))
     .filter((e): e is ProjectCatalogExtra => e !== null);
+
+  // v6 event-flow scenarios.
+  const rawScenarios = Array.isArray(input.scenarios) ? input.scenarios : [];
+  p.scenarios = rawScenarios
+    .map((s) => migrateScenario(s as Partial<EventScenario>))
+    .filter((s): s is EventScenario => s !== null);
+  p.activeScenarioId =
+    typeof input.activeScenarioId === "string"
+      ? input.activeScenarioId
+      : p.scenarios[0]?.id ?? null;
+  if (p.activeScenarioId && !p.scenarios.some((s) => s.id === p.activeScenarioId)) {
+    p.activeScenarioId = p.scenarios[0]?.id ?? null;
+  }
 
   return p;
 }

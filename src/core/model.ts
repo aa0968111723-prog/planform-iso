@@ -7,9 +7,10 @@
  * v3: measurements + validation settings.
  * v4: visual-comm — description, zone icon/capacity, route type + zone links.
  * v5: Asset Catalog — optional assetId / serviceRole; custom catalogExtras.
+ * v6: Event Flow — ServiceStation / EventScenario for DES simulation.
  */
 
-export const PROJECT_VERSION = 5;
+export const PROJECT_VERSION = 6;
 
 export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
@@ -200,6 +201,61 @@ export interface LayerVisibility {
   routes: boolean;
 }
 
+// --- v6 Event Flow -------------------------------------------------------
+
+export type StationType =
+  | "entrance"
+  | "guide"
+  | "queue"
+  | "checkin"
+  | "payment"
+  | "shoe"
+  | "backpack"
+  | "seating"
+  | "group"
+  | "custom";
+
+export interface ServiceStation {
+  id: string;
+  name: string;
+  type: StationType;
+  zoneId?: string;
+  objectId?: string;
+  routeWaypoint?: { routeId: string; index: number };
+  staffCount: number;
+  parallelServers: number;
+  meanServiceSeconds: number;
+  serviceVariance?: number;
+  queueCapacity: number;
+  /** Spatial position in meters (derived from zone/object when bound). */
+  x: number;
+  z: number;
+}
+
+export type ParticipantProfileId = "general" | "prepaid" | "pay-on-site" | "staff";
+
+export interface ParticipantProfile {
+  id: ParticipantProfileId;
+  /** Fraction of participants using this profile (0–1). Ratios are normalized. */
+  ratio: number;
+  /** Ordered station ids for this profile's branch. */
+  branch: string[];
+}
+
+export type ArrivalProfile = "uniform" | "front-loaded";
+
+export interface EventScenario {
+  id: string;
+  name: string;
+  participantCount: number;
+  arrivalWindowSeconds: number;
+  arrivalProfile: ArrivalProfile;
+  profiles: ParticipantProfile[];
+  stations: ServiceStation[];
+  seed: number;
+  settings: { speedMetersPerSecond: number };
+}
+
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
 export interface ProjectCatalogExtra {
   id: string;
@@ -245,8 +301,11 @@ export interface Project {
   validationSettings: ValidationSettings;
   view: ViewName;
   layers: LayerVisibility;
-  /** v4: user/custom catalog entries (binary blobs referenced via blobIds). */
+  /** v5: user/custom catalog entries (binary blobs referenced via blobIds). */
   catalogExtras?: ProjectCatalogExtra[];
+  /** v6: event-flow simulation scenarios (DES). */
+  scenarios: EventScenario[];
+  activeScenarioId: string | null;
 }
 
 let idCounter = 0;
@@ -285,5 +344,7 @@ export function createDefaultProject(): Project {
     view: "top",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },
     catalogExtras: [],
+    scenarios: [],
+    activeScenarioId: null,
   };
 }
