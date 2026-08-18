@@ -211,6 +211,108 @@ export function pointInDoorSweep(px: number, pz: number, s: DoorSweep): boolean 
   return ang >= lo - 1e-9 && ang <= hi + 1e-9;
 }
 
+export interface Rect { cx: number; cz: number; w: number; d: number; rot: number }
+
+/** Axis-aligned bounds of a rotated rectangle footprint. */
+export function footprintBounds(r: Rect): Bounds {
+  const cs = rectCorners(r.cx, r.cz, r.w, r.d, r.rot);
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const c of cs) {
+    minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
+    minZ = Math.min(minZ, c.z); maxZ = Math.max(maxZ, c.z);
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
+/** Shortest distance between a point and a segment (meters). */
+export function pointToSegmentDist(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
+  const dx = bx - ax, dz = bz - az;
+  const len2 = dx * dx + dz * dz;
+  let t = len2 > 0 ? ((px - ax) * dx + (pz - az) * dz) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx, cz = az + t * dz;
+  return Math.hypot(px - cx, pz - cz);
+}
+
+/** Shortest distance between two segments (meters), 0 if they intersect. */
+export function segSegDist(
+  a1: { x: number; z: number }, a2: { x: number; z: number },
+  b1: { x: number; z: number }, b2: { x: number; z: number },
+): number {
+  if (segmentsIntersect(a1, a2, b1, b2)) return 0;
+  return Math.min(
+    pointToSegmentDist(a1.x, a1.z, b1.x, b1.z, b2.x, b2.z),
+    pointToSegmentDist(a2.x, a2.z, b1.x, b1.z, b2.x, b2.z),
+    pointToSegmentDist(b1.x, b1.z, a1.x, a1.z, a2.x, a2.z),
+    pointToSegmentDist(b2.x, b2.z, a1.x, a1.z, a2.x, a2.z),
+  );
+}
+
+function orient(p: { x: number; z: number }, q: { x: number; z: number }, r: { x: number; z: number }): number {
+  return (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
+}
+
+function onSeg(p: { x: number; z: number }, q: { x: number; z: number }, r: { x: number; z: number }): boolean {
+  return Math.min(p.x, r.x) - 1e-9 <= q.x && q.x <= Math.max(p.x, r.x) + 1e-9 &&
+    Math.min(p.z, r.z) - 1e-9 <= q.z && q.z <= Math.max(p.z, r.z) + 1e-9;
+}
+
+export function segmentsIntersect(
+  a1: { x: number; z: number }, a2: { x: number; z: number },
+  b1: { x: number; z: number }, b2: { x: number; z: number },
+): boolean {
+  const o1 = orient(a1, a2, b1), o2 = orient(a1, a2, b2), o3 = orient(b1, b2, a1), o4 = orient(b1, b2, a2);
+  if (((o1 > 0) !== (o2 > 0)) && ((o3 > 0) !== (o4 > 0))) return true;
+  if (Math.abs(o1) < 1e-9 && onSeg(a1, b1, a2)) return true;
+  if (Math.abs(o2) < 1e-9 && onSeg(a1, b2, a2)) return true;
+  if (Math.abs(o3) < 1e-9 && onSeg(b1, a1, b2)) return true;
+  if (Math.abs(o4) < 1e-9 && onSeg(b1, a2, b2)) return true;
+  return false;
+}
+
+/** Exact segment vs rotated-rectangle test (endpoint inside or edge crossing). */
+export function segmentIntersectsRect(a: { x: number; z: number }, b: { x: number; z: number }, r: Rect): boolean {
+  if (pointInRect(a.x, a.z, r.cx, r.cz, r.w, r.d, r.rot)) return true;
+  if (pointInRect(b.x, b.z, r.cx, r.cz, r.w, r.d, r.rot)) return true;
+  const c = rectCorners(r.cx, r.cz, r.w, r.d, r.rot);
+  for (let i = 0; i < 4; i++) {
+    if (segmentsIntersect(a, b, c[i], c[(i + 1) % 4])) return true;
+  }
+  return false;
+}
+
+/** Minimum gap (meters) between two rotated rectangles; 0 if they overlap. */
+export function obbGap(a: Rect, b: Rect): number {
+  if (rectsOverlap(a, b)) return 0;
+  const ca = rectCorners(a.cx, a.cz, a.w, a.d, a.rot);
+  const cb = rectCorners(b.cx, b.cz, b.w, b.d, b.rot);
+  let min = Infinity;
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      min = Math.min(min, segSegDist(ca[i], ca[(i + 1) % 4], cb[j], cb[(j + 1) % 4]));
+    }
+  }
+  return min;
+}
+
+export interface WallClearances {
+  west: number; east: number; north: number; south: number; nearest: number;
+}
+
+/**
+ * Distance from a footprint's edges to each classroom wall (meters). Uses the
+ * rotated footprint bounds, not just the center, so it matches real clearance.
+ */
+export function wallClearances(r: Rect, classroom: AreaConfig): WallClearances {
+  const fb = footprintBounds(r);
+  const cb = areaBounds(classroom);
+  const west = fb.minX - cb.minX;
+  const east = cb.maxX - fb.maxX;
+  const north = fb.minZ - cb.minZ;
+  const south = cb.maxZ - fb.maxZ;
+  return { west, east, north, south, nearest: Math.min(west, east, north, south) };
+}
+
 /** Find the top-most table/regTable whose footprint contains a point. */
 export function findParentTable(
   px: number,

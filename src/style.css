@@ -179,6 +179,26 @@ html, body {
 
 .boxsel { position: fixed; z-index: 12; border: 1.5px dashed var(--accent); background: rgba(56, 189, 248, 0.12); pointer-events: none; }
 
+/* --- toast / undo snackbar --------------------------------------------- */
+.toast {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: calc(var(--topbar-h) + 10px); z-index: 40;
+  display: flex; gap: 10px; align-items: center;
+  padding: 8px 14px; font-size: 13px;
+  background: var(--panel-solid); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* --- nudge pad ---------------------------------------------------------- */
+.nudgepad { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px; }
+.nudgepad .row { justify-content: center; }
+.nudgepad .chip { min-width: 44px; text-align: center; }
+.nudgestep[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent); }
+
+.issue__msg { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+.issue__hint { font-size: 11px; color: #93c5fd; margin-top: 1px; }
+
 /* --- bottom nav (mobile) ------------------------------------------------ */
 .bottomnav { display: none; }
 

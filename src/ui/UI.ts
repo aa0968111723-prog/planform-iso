@@ -1,13 +1,13 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import type { ViewName } from "../core/model";
+import type { MeasurementType, ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
 import { issueCounts, type Severity } from "../core/validation";
-import { renderConstructionPlan } from "../export/constructionPlan";
+import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanPreset } from "../export/constructionPlan";
 import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
 import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
-import { button, el, num, section, textField } from "./dom";
+import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
   { id: "iso", label: "等角" }, { id: "top", label: "俯視" }, { id: "front", label: "正視" },
@@ -32,19 +32,32 @@ export class UI {
   private placebar = el("div", { class: "placebar-wrap", style: "display:none" });
   private measurebar = el("div", { class: "measurebar", style: "display:none" });
   private box = el("div", { class: "boxsel", style: "display:none" });
+  private toast = el("div", { class: "toast", style: "display:none" });
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
   private snapSel: HTMLSelectElement | null = null;
+  private toastTimer: number | null = null;
+  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true };
 
   constructor(private app: App, private root: HTMLElement) {
-    root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box);
+    root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast);
     this.buildTopbar();
     this.buildNav();
     this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
+    this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.onChange(() => this.update());
     this.bindKeys();
     this.update();
+  }
+
+  private showToast(msg: string, undo = false): void {
+    this.toast.innerHTML = "";
+    this.toast.append(el("span", { text: msg }));
+    if (undo) this.toast.append(button("復原", () => this.app.undo(), "chip chip--sm"));
+    this.toast.style.display = "flex";
+    if (this.toastTimer !== null) window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => { this.toast.style.display = "none"; }, 4000);
   }
 
   private buildTopbar(): void {
@@ -131,37 +144,46 @@ export class UI {
 
   private calibrationSection(): HTMLElement {
     const s = this.app.store.getState();
-    const typeSel = el("select", { class: "field__input" }) as HTMLSelectElement;
-    typeSel.append(el("option", { value: "tile", text: "一塊地磚" }), el("option", { value: "wall", text: "教室長邊牆面" }));
+    const measured = this.app.getCalibrationDistance();
     const actual = el("input", { type: "number", step: "1", class: "field__input", placeholder: "實際 (cm)" }) as HTMLInputElement;
     const readout = el("div", { class: "readout" });
-    const apply = button("套用", () => {
-      const cm = parseFloat(actual.value);
-      if (!cm) return;
-      if (typeSel.value === "tile") this.app.applyCalibrationToTile(cm / 100);
-      else this.app.updateArea("classroom", { length: cm / 100 });
-    });
     const compare = () => {
-      const cm = parseFloat(actual.value);
       readout.innerHTML = "";
-      const modelM = typeSel.value === "tile" ? s.tile.width : s.classroom.length;
-      readout.append(el("div", { text: `目前模型值：${(modelM * 100).toFixed(0)} cm` }));
+      const modelM = measured ?? s.tile.width;
+      readout.append(el("div", { text: `模型量得：${(modelM * 100).toFixed(0)} cm` }));
+      const cm = parseFloat(actual.value);
       if (cm) {
         const c = calibrationCompare(cm / 100, modelM);
         readout.append(el("div", { text: c.matches ? "✓ 與模型一致" : `差異：${(c.deltaMeters * 100).toFixed(1)} cm (${c.deltaPct.toFixed(1)}%)` }));
+        readout.append(el("div", { class: "hint", text: "「套用到地磚 / 教室長」會改動既有場佈比例，可用復原還原。" }));
         readout.classList.toggle("readout--warn", !c.matches);
       }
     };
     actual.addEventListener("input", compare);
-    typeSel.addEventListener("change", compare);
     compare();
-    return section("現場校正", [
-      el("p", { class: "hint", text: "選你在現場量得到的尺寸，輸入實際值核對比例，再選擇是否套用。" }),
-      el("label", { class: "field" }, [el("span", { class: "field__label", text: "校正對象" }), typeSel]),
+
+    const body: HTMLElement[] = [
+      el("p", { class: "hint", text: "① 在畫布點兩個已知距離的端點 ② 輸入實際長度 ③ 選擇套用方式。" }),
+      this.app.session.mode === "calibrate"
+        ? button("重新選點（校正中…）", () => this.app.startCalibration(), "btn btn--primary")
+        : button("在畫布選兩點", () => this.app.startCalibration()),
+    ];
+    body.push(
       el("label", { class: "field" }, [el("span", { class: "field__label", text: "實際長度 (cm)" }), actual]),
       readout,
-      apply,
-    ]);
+      el("div", { class: "row wrap" }, [
+        button("記錄結果", () => this.applyCalib("record", actual)),
+        button("套用到地磚", () => this.applyCalib("tile", actual), "btn btn--ghost"),
+        button("套用到教室長", () => this.applyCalib("classroom-length", actual), "btn btn--ghost"),
+      ]),
+    );
+    return section("現場校正精靈", body);
+  }
+
+  private applyCalib(action: "record" | "tile" | "classroom-length", input: HTMLInputElement): void {
+    const cm = parseFloat(input.value);
+    if (!cm) { this.showToast("請先輸入實際長度"); return; }
+    this.app.applyCalibration(action, cm / 100);
   }
 
   private routeSection(): HTMLElement {
@@ -189,18 +211,35 @@ export class UI {
     for (const iss of issues) {
       const row = el("button", { type: "button", class: `issue issue--${iss.severity}` }, [
         el("span", { class: "issue__icon", text: SEV_ICON[iss.severity] }),
-        el("span", { text: `${SEV_LABEL[iss.severity]}：${iss.message}` }),
+        el("span", {}, [
+          el("strong", { text: `${SEV_LABEL[iss.severity]}·${iss.shortTitle}` }),
+          el("div", { class: "issue__msg", text: iss.message }),
+          ...(iss.suggestedAction ? [el("div", { class: "issue__hint", text: `建議：${iss.suggestedAction}` })] : []),
+        ]),
       ]) as HTMLButtonElement;
-      row.addEventListener("click", () => this.app.focusIssue(iss));
+      row.addEventListener("click", () => { this.app.focusIssue(iss); this.root.classList.remove("show-left"); });
       list.append(row);
     }
-    if (!issues.length) list.append(el("span", { class: "hint", text: "尚未發現問題，點「重新檢查」更新。" }));
+    if (!issues.length) list.append(el("span", { class: "hint", text: "目前沒有問題。修改場佈後會自動重新檢查。" }));
+
+    const vs = this.app.store.getState().validationSettings;
+    const settings = section("檢查規則（門檻可調）", [
+      num("最低走道寬 (cm)", Math.round(vs.minAisleWidth * 100), 5, (v) => this.app.updateValidationSettings({ minAisleWidth: v / 100 }), 0),
+      num("門前淨空 (cm)", Math.round(vs.doorFrontClearance * 100), 5, (v) => this.app.updateValidationSettings({ doorFrontClearance: v / 100 }), 0),
+      num("地墊距牆 (cm)", Math.round(vs.matWallClearance * 100), 5, (v) => this.app.updateValidationSettings({ matWallClearance: v / 100 }), 0),
+      el("div", { class: "row wrap" }, [
+        button(vs.checkScreenView ? "✓ 檢查投影幕視線" : "投影幕視線", () => this.app.updateValidationSettings({ checkScreenView: !vs.checkScreenView }), vs.checkScreenView ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(vs.checkZoneRouteIntrusion ? "✓ 檢查區域擋動線" : "區域擋動線", () => this.app.updateValidationSettings({ checkZoneRouteIntrusion: !vs.checkZoneRouteIntrusion }), vs.checkZoneRouteIntrusion ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      ]),
+    ], false);
+
     return section("檢查中心", [
       el("div", { class: "row" }, [
         button("重新檢查", () => this.app.runValidation()),
         el("span", { class: "hint", text: `⛔ ${counts.error} · ⚠ ${counts.warning} · ℹ ${counts.info}` }),
       ]),
       list,
+      settings,
     ]);
   }
 
@@ -222,10 +261,37 @@ export class UI {
       if (names.includes(cur)) layoutList.value = cur;
     };
     refreshList();
-    return section("匯出 / 儲存", [
-      el("div", { class: "subhead", text: "施工用輸出" }),
-      button("匯出工作人員場佈圖 (PNG)", () => downloadPng(renderConstructionPlan(state()), "planform-construction.png")),
+    const o = this.planOpts;
+    const planSection = section("施工圖輸出", [
+      selectField("圖種", [
+        { value: "full", label: "完整場佈圖" }, { value: "mats", label: "地墊 / 座位圖" },
+        { value: "route", label: "動線圖" }, { value: "staff", label: "工作人員配置圖" },
+      ], o.preset, (v) => { o.preset = v as PlanPreset; }),
+      el("div", { class: "grid2" }, [
+        selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),
+        selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
+      ]),
+      el("div", { class: "row wrap" }, [
+        button(o.dims ? "✓ 尺寸標註" : "尺寸標註", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(o.inventory ? "✓ 數量清單" : "數量清單", () => { o.inventory = !o.inventory; this.update(); }, o.inventory ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      ]),
+      button("匯出施工圖 (PNG)", () => downloadPng(renderConstructionPlan(state(), { ...o }), `planform-${o.preset}.png`)),
       button("匯出 3D 示意圖 (PNG)", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), "planform-3d.png"), "btn btn--ghost"),
+    ]);
+
+    const measureSection = section("現場量測", [
+      selectField("量測類型", [
+        { value: "free-distance", label: "任意距離" }, { value: "object-gap", label: "物件間距" },
+        { value: "wall-clearance", label: "到牆距離" }, { value: "aisle-width", label: "走道寬度" },
+      ], this.app.session.measureType, (v) => this.app.setMeasureType(v as MeasurementType)),
+      button("開始量測（端點自動吸附）", () => this.app.startMeasure(this.app.session.measureType)),
+      this.measurementsList(),
+    ]);
+
+    return section("匯出 / 儲存", [
+      planSection,
+      measureSection,
+      el("div", { class: "subhead", text: "資料" }),
       el("div", { class: "row" }, [
         button("匯出 JSON", () => exportProjectJson(state())),
         button("匯入 JSON", () => importInput.click(), "btn btn--ghost"),
@@ -237,9 +303,22 @@ export class UI {
       el("div", { class: "row" }, [layoutList,
         button("載入", () => { if (layoutList.value) this.app.store.loadNamedLayout(layoutList.value); }, "btn btn--ghost"),
         button("刪除", () => { if (layoutList.value) { this.app.store.deleteNamedLayout(layoutList.value); refreshList(); } }, "btn btn--ghost")]),
-      el("div", { class: "subhead", text: "量測" }),
-      button("開始量測 (兩點距離)", () => this.app.startMeasure()),
     ]);
+  }
+
+  private measurementsList(): HTMLElement {
+    const list = el("div", { class: "list" });
+    const ms = this.app.store.getState().measurements;
+    for (const m of ms) {
+      const len = Math.hypot(m.end.x - m.start.x, m.end.z - m.start.z);
+      list.append(el("div", { class: "list__row" }, [
+        el("span", { text: `${(len * 100).toFixed(0)} cm` }),
+        button(m.visible ? "顯示" : "隱藏", () => this.app.toggleMeasurementVisible(m.id), "chip chip--sm"),
+        button("刪除", () => this.app.deleteMeasurement(m.id), "chip chip--sm chip--danger"),
+      ]));
+    }
+    if (!ms.length) list.append(el("span", { class: "hint", text: "尚無保留的尺寸線。" }));
+    return list;
   }
 
   // --- update ------------------------------------------------------------
@@ -253,7 +332,7 @@ export class UI {
     if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow)));
 
-    if (this.lastWorkflow !== sess.workflow || sess.workflow === "check" || sess.workflow === "route") {
+    if (this.lastWorkflow !== sess.workflow || sess.workflow === "check" || sess.workflow === "route" || sess.workflow === "site" || sess.workflow === "export") {
       this.lastWorkflow = sess.workflow;
       this.rebuildLeft();
     }
@@ -269,18 +348,28 @@ export class UI {
   }
 
   private updateMeasureBar(): void {
-    const on = this.app.session.mode === "measure";
+    const mode = this.app.session.mode;
+    const on = mode === "measure" || mode === "calibrate";
     this.measurebar.style.display = on ? "flex" : "none";
     if (!on) return;
     this.measurebar.innerHTML = "";
+    if (mode === "calibrate") {
+      const d = this.app.getCalibrationDistance();
+      this.measurebar.append(
+        el("span", { class: "measurebar__text", text: d !== null ? `模型距離 ${d.toFixed(2)} m（回校正面板輸入實際值）` : "點兩個已知距離的端點" }),
+        button("取消校正", () => this.app.cancelCalibration(), "chip chip--sm"),
+      );
+      return;
+    }
     const r = this.app.getMeasureResult();
     const text = r
-      ? `${r.meters.toFixed(2)} m（${r.cm.toFixed(0)} cm）· 約 ${r.tilesDiagonal.toFixed(1)} 格`
-      : "點兩個位置量距離";
+      ? `${r.meters.toFixed(2)} m · ${r.cm.toFixed(0)} cm · X ${r.dxCm.toFixed(0)} / Z ${r.dzCm.toFixed(0)} cm · 約 ${r.tilesDiagonal.toFixed(1)} 格`
+      : "點兩個位置量距離（端點會自動吸附）";
     this.measurebar.append(
       el("span", { class: "measurebar__text", text }),
+      button("保留", () => this.app.keepMeasurement(), "chip chip--sm chip--primary"),
       button("清除", () => this.app.clearMeasure(), "chip chip--sm"),
-      button("完成", () => this.app.stopMeasure(), "chip chip--sm chip--primary"),
+      button("完成", () => this.app.stopMeasure(), "chip chip--sm"),
     );
   }
 
@@ -298,10 +387,20 @@ export class UI {
       const k = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); this.app.undo(); }
       else if ((e.ctrlKey || e.metaKey) && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); this.app.redo(); }
-      else if (e.key === "Escape") { this.app.cancelPlacement(); if (this.app.session.mode === "measure") this.app.stopMeasure(); }
+      else if (e.key === "Escape") { this.app.cancelPlacement(); if (this.app.session.mode === "measure") this.app.stopMeasure(); if (this.app.session.mode === "calibrate") this.app.cancelCalibration(); }
       else if (e.key === "Delete" || e.key === "Backspace") this.app.deleteSelection();
       else if (k === "r") { if (this.app.session.mode === "place") this.app.rotateGhost(); else this.app.rotateSelection(15); }
       else if (k === "d") this.app.duplicateSelection();
+      else if (e.key.startsWith("Arrow") && this.app.session.selection.size > 0) {
+        e.preventDefault();
+        const tile = this.app.store.getState().tile;
+        const step = e.shiftKey ? tile.width : 0.05; // Shift = one tile, else 5cm
+        const stepZ = e.shiftKey ? tile.depth : 0.05;
+        if (e.key === "ArrowUp") this.app.nudgeSelection(0, -stepZ);
+        else if (e.key === "ArrowDown") this.app.nudgeSelection(0, stepZ);
+        else if (e.key === "ArrowLeft") this.app.nudgeSelection(-step, 0);
+        else if (e.key === "ArrowRight") this.app.nudgeSelection(step, 0);
+      }
     });
   }
 }

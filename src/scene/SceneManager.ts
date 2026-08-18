@@ -56,6 +56,7 @@ interface SessionView {
   selection: Set<string>;
   ghost: GhostState | null;
   measure: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
+  calibrate: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   showLabels: boolean;
 }
 
@@ -77,13 +78,16 @@ export class SceneManager {
   private arrayGroupRoot = new Group();
   private routeGroup = new Group();
   private ghostGroup = new Group();
-  private overlayGroup = new Group(); // selection + measure
+  private measureGroup = new Group(); // persistent dimension lines
+  private overlayGroup = new Group(); // selection + live measure/calibrate
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
   private arrayNodes = new Map<string, { mesh: InstancedMesh; sig: string }>();
   private zoneNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
+  private measureNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodeMeshes: Mesh[] = [];
+  private liveLabel: TextLabel | null = null;
 
   private layersState = { areas: true, zones: true, objects: true, tiles: true, routes: true };
   private lastAreaSig = "";
@@ -97,7 +101,7 @@ export class SceneManager {
     this.scene.background = new Color(0x0b1120);
     this.scene.add(
       this.floorGroup, this.tileGroup, this.zoneGroup, this.objectGroup,
-      this.arrayGroupRoot, this.routeGroup, this.ghostGroup, this.overlayGroup,
+      this.arrayGroupRoot, this.routeGroup, this.ghostGroup, this.measureGroup, this.overlayGroup,
     );
 
     this.camera = new OrthographicCamera();
@@ -169,7 +173,8 @@ export class SceneManager {
     this.syncZones(project);
     this.syncRoutes(project);
     this.syncGhost(session.ghost);
-    this.syncOverlay(project, session.selection, session.measure);
+    this.syncMeasurements(project);
+    this.syncOverlay(project, session.selection, session.measure, session.calibrate);
   }
 
   private recenter(project: Project): void {
@@ -237,6 +242,14 @@ export class SceneManager {
           o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined);
         group.userData = { type: "object", id: o.id };
         group.traverse((m) => { if (m instanceof Mesh) m.userData = { type: "object", id: o.id }; });
+        // Enlarged invisible pick proxy for thin wall assets (easier touch targets).
+        if (assetDef(o.kind).placementType === "wall") {
+          const pw = Math.max(o.width, 0.5), ph = Math.max(o.height, 1.0), pd = Math.max(o.depth, 0.45);
+          const proxy = new Mesh(new BoxGeometry(pw, ph, pd), new MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }));
+          proxy.position.y = ph / 2;
+          proxy.userData = { type: "object", id: o.id };
+          group.add(proxy);
+        }
         this.objectGroup.add(group);
         const label = LANDMARKS.has(o.kind) ? new TextLabel() : null;
         if (label) this.objectGroup.add(label.sprite);
@@ -442,9 +455,44 @@ export class SceneManager {
     return new LineSegments(geo, new LineBasicMaterial({ color }));
   }
 
-  private syncOverlay(project: Project, selection: Set<string>, measure: SessionView["measure"]): void {
+  private syncMeasurements(project: Project): void {
+    const seen = new Set<string>();
+    for (const m of project.measurements) {
+      if (!m.visible) continue;
+      seen.add(m.id);
+      const sig = `${m.start.x}|${m.start.z}|${m.end.x}|${m.end.z}|${m.color}`;
+      let entry = this.measureNodes.get(m.id);
+      if (!entry || entry.sig !== sig) {
+        if (entry) { this.measureGroup.remove(entry.group); entry.label.dispose(); }
+        entry = this.buildMeasure(m.start, m.end, m.color, sig);
+        this.measureGroup.add(entry.group);
+        this.measureNodes.set(m.id, entry);
+      }
+      entry.label.set(measureText(m.start, m.end), "#fde68a");
+      entry.label.sprite.position.set((m.start.x + m.end.x) / 2, 0.35, (m.start.z + m.end.z) / 2);
+    }
+    for (const [id, entry] of this.measureNodes) {
+      if (!seen.has(id)) { this.measureGroup.remove(entry.group); entry.label.dispose(); this.measureNodes.delete(id); }
+    }
+  }
+
+  private buildMeasure(a: { x: number; z: number }, b: { x: number; z: number }, color: string, sig: string) {
+    const group = new Group();
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new Float32BufferAttribute([a.x, 0.07, a.z, b.x, 0.07, b.z], 3));
+    group.add(new LineSegments(geo, new LineBasicMaterial({ color })));
+    for (const p of [a, b]) {
+      const dot = new Mesh(new BoxGeometry(0.12, 0.12, 0.12), new MeshBasicMaterial({ color }));
+      dot.position.set(p.x, 0.09, p.z);
+      group.add(dot);
+    }
+    const label = new TextLabel();
+    group.add(label.sprite);
+    return { group, label, sig };
+  }
+
+  private syncOverlay(project: Project, selection: Set<string>, measure: SessionView["measure"], calibrate: SessionView["calibrate"]): void {
     clearGroup(this.overlayGroup);
-    // Selection outlines.
     for (const o of project.objects) {
       if (!selection.has(o.id)) continue;
       this.overlayGroup.add(this.footprintOutline(o.x, o.z, o.width, o.depth, o.rotationDeg));
@@ -457,15 +505,24 @@ export class SceneManager {
       if (!selection.has(g.id)) continue;
       for (const m of groupMembers(g)) this.overlayGroup.add(this.footprintOutline(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
     }
-    // Measure line.
-    if (measure && measure.a && measure.b) {
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new Float32BufferAttribute([measure.a.x, 0.06, measure.a.z, measure.b.x, 0.06, measure.b.z], 3));
-      this.overlayGroup.add(new LineSegments(geo, new LineBasicMaterial({ color: 0xfacc15 })));
-      for (const p of [measure.a, measure.b]) {
-        const dot = new Mesh(new BoxGeometry(0.15, 0.15, 0.15), new MeshBasicMaterial({ color: 0xfacc15 }));
-        dot.position.set(p.x, 0.08, p.z);
+    // Live measure / calibrate line + endpoints.
+    const live = measure && (measure.a || measure.b) ? measure : (calibrate && (calibrate.a || calibrate.b) ? calibrate : null);
+    const liveColor = measure && (measure.a || measure.b) ? 0xfacc15 : 0x38bdf8;
+    if (live) {
+      for (const p of [live.a, live.b]) {
+        if (!p) continue;
+        const dot = new Mesh(new BoxGeometry(0.15, 0.15, 0.15), new MeshBasicMaterial({ color: liveColor }));
+        dot.position.set(p.x, 0.1, p.z);
         this.overlayGroup.add(dot);
+      }
+      if (live.a && live.b) {
+        const geo = new BufferGeometry();
+        geo.setAttribute("position", new Float32BufferAttribute([live.a.x, 0.08, live.a.z, live.b.x, 0.08, live.b.z], 3));
+        this.overlayGroup.add(new LineSegments(geo, new LineBasicMaterial({ color: liveColor })));
+        if (!this.liveLabel) { this.liveLabel = new TextLabel(); }
+        this.overlayGroup.add(this.liveLabel.sprite);
+        this.liveLabel.set(measureText(live.a, live.b), "#fef9c3");
+        this.liveLabel.sprite.position.set((live.a.x + live.b.x) / 2, 0.4, (live.a.z + live.b.z) / 2);
       }
     }
   }
@@ -556,6 +613,11 @@ export class SceneManager {
 interface Route2 { id: string; color: string; points: { x: number; z: number }[] }
 
 function round(n: number): number { return Math.round(n * 1000) / 1000; }
+
+function measureText(a: { x: number; z: number }, b: { x: number; z: number }): string {
+  const m = Math.hypot(b.x - a.x, b.z - a.z);
+  return `${m.toFixed(2)} m · ${Math.round(m * 100)} cm`;
+}
 
 function ancestorId(obj: Object3D): string | null {
   let o: Object3D | null = obj;

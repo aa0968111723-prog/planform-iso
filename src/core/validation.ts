@@ -1,21 +1,35 @@
 /**
- * Field validation — turns the plan into an actionable problem list instead of
- * silent console warnings. Each issue carries a severity, a human message, the
- * target id to select and a focus point so the UI can zoom to it.
+ * Field validation 2.0 — an actionable problem list with user-configurable
+ * thresholds (not legal standards). Uses a spatial-hash broad-phase for
+ * overlap checks and exact segment-vs-rotated-rect for route intrusion so
+ * 100+ mats/chairs stay cheap.
  */
 
 import { assetDef } from "./assets";
-import type { ObjectKind, Project } from "./model";
-import { groupMembers } from "./arrays";
+import {
+  DEFAULT_VALIDATION_SETTINGS,
+  type ObjectKind,
+  type Project,
+  type ValidationSettings,
+} from "./model";
+import { groupFootprint, groupMembers } from "./arrays";
 import {
   areaBounds,
   doorSweep,
+  facingVec,
+  footprintBounds,
   pointInDoorSweep,
   pointInRect,
   rectCorners,
   rectsOverlap,
+  segmentIntersectsRect,
+  segmentsIntersect,
   nearestWallSnap,
+  wallClearances,
+  type Bounds,
+  type Rect,
 } from "./placement";
+import { SpatialHash } from "./spatialHash";
 
 export type Severity = "error" | "warning" | "info";
 
@@ -23,36 +37,35 @@ export interface Issue {
   id: string;
   severity: Severity;
   code: string;
+  shortTitle: string;
   message: string;
   targetId: string | null;
   focus: { x: number; z: number };
+  suggestedAction?: string;
 }
 
-interface PObj {
-  id: string; // object id, or the owning group id for members
+interface PObj extends Rect {
+  id: string; // object id, or owning group id for members
   kind: ObjectKind;
-  x: number;
-  z: number;
-  w: number;
-  d: number;
-  rot: number;
   parentId?: string;
 }
 
 const FURNITURE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["table", "chair", "regTable"]);
+const TALL: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["table", "regTable"]);
 const WALL_KINDS: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["door", "switch", "screen"]);
-const WALL_TOLERANCE = 0.3; // meters a wall asset may sit off the wall before flagging
+const WALL_TOLERANCE = 0.3;
+const SCREEN_VIEW_DEPTH = 4;
 
 function expand(project: Project): PObj[] {
   const list: PObj[] = [];
   for (const o of project.objects) {
     if (o.hidden) continue;
-    list.push({ id: o.id, kind: o.kind, x: o.x, z: o.z, w: o.width, d: o.depth, rot: o.rotationDeg, parentId: o.parentId });
+    list.push({ id: o.id, kind: o.kind, cx: o.x, cz: o.z, w: o.width, d: o.depth, rot: o.rotationDeg, parentId: o.parentId });
   }
   for (const g of project.groups) {
     if (g.hidden) continue;
     for (const m of groupMembers(g)) {
-      list.push({ id: g.id, kind: g.sourceKind, x: m.x, z: m.z, w: g.itemWidth, d: g.itemDepth, rot: m.rotationDeg });
+      list.push({ id: g.id, kind: g.sourceKind, cx: m.x, cz: m.z, w: g.itemWidth, d: g.itemDepth, rot: m.rotationDeg });
     }
   }
   return list;
@@ -66,57 +79,82 @@ function insideAny(px: number, pz: number, project: Project): boolean {
   return false;
 }
 
-export function validateProject(project: Project): Issue[] {
+export function validateProject(project: Project, settings?: ValidationSettings): Issue[] {
+  const cfg = settings ?? project.validationSettings ?? DEFAULT_VALIDATION_SETTINGS;
   const issues: Issue[] = [];
   const objs = expand(project);
   let n = 0;
-  const push = (severity: Severity, code: string, message: string, targetId: string | null, focus: { x: number; z: number }) => {
-    issues.push({ id: `iss_${n++}`, severity, code, message, targetId, focus });
+  const push = (
+    severity: Severity, code: string, shortTitle: string, message: string,
+    targetId: string | null, focus: { x: number; z: number }, suggestedAction?: string,
+  ) => {
+    issues.push({ id: `iss_${n++}`, severity, code, shortTitle, message, targetId, focus, suggestedAction });
   };
 
-  // Out of bounds (any footprint corner outside both areas).
+  // Broad-phase spatial hash of every footprint.
+  const hash = new SpatialHash(1);
+  for (const o of objs) hash.insert(o);
+  const pairs = hash.candidatePairs();
+
+  // Bounds.
   for (const o of objs) {
-    const corners = rectCorners(o.x, o.z, o.w, o.d, o.rot);
+    const corners = rectCorners(o.cx, o.cz, o.w, o.d, o.rot);
     if (corners.some((c) => !insideAny(c.x, c.z, project))) {
-      push("error", "bounds", `${assetDef(o.kind).displayName}超出場地邊界`, o.id, { x: o.x, z: o.z });
+      push("error", "bounds", "超出場地", `${assetDef(o.kind).displayName}超出場地邊界`, o.id, { x: o.cx, z: o.cz }, "移回教室或走廊範圍內");
     }
   }
 
-  // Furniture overlap (skip a computer sitting on its own parent table).
-  const furn = objs.filter((o) => FURNITURE.has(o.kind) || o.kind === "computer");
-  for (let i = 0; i < furn.length; i++) {
-    for (let j = i + 1; j < furn.length; j++) {
-      const a = furn[i];
-      const b = furn[j];
-      if (a.parentId === b.id || b.parentId === a.id) continue;
-      if (a.kind === "computer" || b.kind === "computer") continue; // computers handled below
-      if (rectsOverlap(rect(a), rect(b))) {
-        push("warning", "overlap", `${assetDef(a.kind).displayName}與${assetDef(b.kind).displayName}重疊`, a.id, mid(a, b));
+  // Overlaps (broad-phase filtered).
+  const overlapSeen = new Set<string>();
+  const matOverlapReported = new Set<string>();
+  for (const [ia, ib] of pairs) {
+    const a = hash.getItem(ia) as PObj;
+    const b = hash.getItem(ib) as PObj;
+    if (a.id === b.id) continue; // members of same group cannot overlap
+    if (a.parentId === b.id || b.parentId === a.id) continue;
+    const bothMat = a.kind === "mat" && b.kind === "mat";
+    const bothFurn = (FURNITURE.has(a.kind)) && (FURNITURE.has(b.kind));
+    if (!bothMat && !bothFurn) continue;
+    if (!rectsOverlap(a, b)) continue;
+    if (bothMat) {
+      if (!matOverlapReported.has(a.id)) {
+        matOverlapReported.add(a.id);
+        push("warning", "mat-overlap", "地墊重疊", "地墊互相重疊", a.id, mid(a, b), "調整間距或位置");
+      }
+    } else {
+      const key = [a.id, b.id].sort().join("|");
+      if (!overlapSeen.has(key)) {
+        overlapSeen.add(key);
+        push("warning", "overlap", "家具重疊", `${assetDef(a.kind).displayName}與${assetDef(b.kind).displayName}重疊`, a.id, mid(a, b), "分開兩件家具");
       }
     }
   }
 
-  // Mat overlap.
-  const mats = objs.filter((o) => o.kind === "mat");
-  for (let i = 0; i < mats.length; i++) {
-    for (let j = i + 1; j < mats.length; j++) {
-      if (rectsOverlap(rect(mats[i]), rect(mats[j]))) {
-        push("warning", "mat-overlap", "地墊互相重疊", mats[i].id, mid(mats[i], mats[j]));
-        break; // one per mat is enough to avoid noise
-      }
-    }
-  }
-
-  // Door sweep blocked.
+  // Door sweep + entrance clearance.
   for (const door of project.objects) {
     if (door.kind !== "door" || door.hidden) continue;
     const sweep = doorSweep(door);
-    for (const o of objs) {
-      if (o.id === door.id || o.kind === "door") continue;
-      const corners = rectCorners(o.x, o.z, o.w, o.d, o.rot);
-      if (corners.some((c) => pointInDoorSweep(c.x, c.z, sweep))) {
-        push("warning", "door-sweep", `門的開啟範圍被${assetDef(o.kind).displayName}擋住`, door.id, { x: door.x, z: door.z });
-        break;
+    const facing = facingVec(door.rotationDeg);
+    const clearance = Math.max(0, cfg.doorFrontClearance);
+    const front: Rect = { cx: door.x + facing.x * (sweep.radius / 2 + clearance / 2), cz: door.z + facing.z * (sweep.radius / 2 + clearance / 2), w: door.width, d: sweep.radius + clearance, rot: door.rotationDeg };
+    const near = hash.queryRect(front);
+    let sweepBlocked = false;
+    let regBlocked = false;
+    for (const idx of near) {
+      const o = hash.getItem(idx) as PObj;
+      if (o.kind === "door") continue;
+      const corners = rectCorners(o.cx, o.cz, o.w, o.d, o.rot);
+      if (!sweepBlocked && corners.some((c) => pointInDoorSweep(c.x, c.z, sweep))) {
+        sweepBlocked = true;
+        push("warning", "door-sweep", "門被擋", `門的開啟範圍被${assetDef(o.kind).displayName}擋住`, door.id, { x: door.x, z: door.z }, "移開擋住門弧的物件");
+      }
+      if (rectsOverlap(front, o)) {
+        if (o.kind === "regTable" && !regBlocked) {
+          regBlocked = true;
+          push("warning", "registration-blocks-entry", "報到桌擋入口", "報到桌擋住入口動線", o.id, { x: o.cx, z: o.cz }, "把報到桌移離門前淨空區");
+        } else if (o.kind !== "regTable") {
+          push("warning", "entrance-blocked", "入口被擋", `入口前方淨空被${assetDef(o.kind).displayName}佔用`, door.id, { x: front.cx, z: front.cz }, "保留門前淨空");
+        }
       }
     }
   }
@@ -126,20 +164,17 @@ export function validateProject(project: Project): Issue[] {
     if (!WALL_KINDS.has(o.kind) || o.hidden) continue;
     const snap = nearestWallSnap(o.x, o.z, [project.classroom, project.corridor], o.width);
     if (!snap || snap.distance > WALL_TOLERANCE) {
-      push("warning", "wall-off", `${assetDef(o.kind).displayName}沒有貼在牆面上`, o.id, { x: o.x, z: o.z });
+      push("warning", "wall-off", "未貼牆", `${assetDef(o.kind).displayName}沒有貼在牆面上`, o.id, { x: o.x, z: o.z }, "拖到牆邊自動吸附");
     }
   }
 
   // Computer parent integrity.
   for (const o of project.objects) {
-    if (o.kind !== "computer" || o.hidden) continue;
-    if (o.surface === "tabletop") {
-      const parent = o.parentId ? project.objects.find((p) => p.id === o.parentId) : null;
-      if (!parent) {
-        push("error", "orphan", "電腦沒有可放置的桌面", o.id, { x: o.x, z: o.z });
-      } else if (!pointInRect(o.x, o.z, parent.x, parent.z, parent.width, parent.depth, parent.rotationDeg)) {
-        push("warning", "off-table", "電腦超出所在桌面範圍", o.id, { x: o.x, z: o.z });
-      }
+    if (o.kind !== "computer" || o.hidden || o.surface !== "tabletop") continue;
+    const parent = o.parentId ? project.objects.find((p) => p.id === o.parentId) : null;
+    if (!parent) push("error", "orphan", "電腦懸空", "電腦沒有可放置的桌面", o.id, { x: o.x, z: o.z }, "放到桌面上或解除桌面關聯");
+    else if (!pointInRect(o.x, o.z, parent.x, parent.z, parent.width, parent.depth, parent.rotationDeg)) {
+      push("warning", "off-table", "電腦超出桌面", "電腦超出所在桌面範圍", o.id, { x: o.x, z: o.z }, "移回桌面內");
     }
   }
 
@@ -148,22 +183,93 @@ export function validateProject(project: Project): Issue[] {
   for (const z of project.zones) {
     if (z.hidden) continue;
     const corners = rectCorners(z.x, z.z, z.width, z.depth, 0);
-    const outClass = corners.some((c) => c.x < cb.minX - 1e-9 || c.x > cb.maxX + 1e-9 || c.z < cb.minZ - 1e-9 || c.z > cb.maxZ + 1e-9);
-    if (outClass && !corners.every((c) => insideAny(c.x, c.z, project))) {
-      push("warning", "zone-bounds", `小區域「${z.name}」超出教室`, z.id, { x: z.x, z: z.z });
+    if (corners.some((c) => c.x < cb.minX - 1e-9 || c.x > cb.maxX + 1e-9 || c.z < cb.minZ - 1e-9 || c.z > cb.maxZ + 1e-9)
+      && !corners.every((c) => insideAny(c.x, c.z, project))) {
+      push("warning", "zone-bounds", "區域超界", `小區域「${z.name}」超出教室`, z.id, { x: z.x, z: z.z }, "縮小或移入教室");
     }
   }
 
-  // Routes crossing furniture.
+  // Mat too close to wall.
+  for (const o of objs) {
+    if (o.kind !== "mat") continue;
+    const wc = wallClearances(o, project.classroom);
+    if (wc.nearest < cfg.matWallClearance - 1e-6 && wc.nearest > -0.5) {
+      push("warning", "mat-too-close-to-wall", "地墊太靠牆", `地墊距牆僅 ${(wc.nearest * 100).toFixed(0)} cm（低於 ${(cfg.matWallClearance * 100).toFixed(0)} cm）`, o.id, { x: o.cx, z: o.cz }, "調整地墊距牆距離或修改門檻");
+    }
+  }
+
+  // Aisle too narrow between big blocks (array groups + tall furniture).
+  const blocks: { id: string; b: Bounds; focus: { x: number; z: number } }[] = [];
+  for (const g of project.groups) {
+    if (g.hidden) continue;
+    const fp = groupFootprint(g);
+    if (fp.count === 0) continue;
+    const b = groupAabb(g);
+    blocks.push({ id: g.id, b, focus: { x: (b.minX + b.maxX) / 2, z: (b.minZ + b.maxZ) / 2 } });
+  }
+  for (const o of project.objects) {
+    if (o.hidden || !TALL.has(o.kind)) continue;
+    const b = footprintBounds({ cx: o.x, cz: o.z, w: o.width, d: o.depth, rot: o.rotationDeg });
+    blocks.push({ id: o.id, b, focus: { x: o.x, z: o.z } });
+  }
+  for (let i = 0; i < blocks.length; i++) {
+    for (let j = i + 1; j < blocks.length; j++) {
+      const gap = aisleBetween(blocks[i].b, blocks[j].b, cfg.minAisleWidth);
+      if (gap !== null && gap < cfg.minAisleWidth - 1e-6) {
+        push("warning", "aisle-too-narrow", "走道過窄", `走道僅約 ${(gap * 100).toFixed(0)} cm（低於 ${(cfg.minAisleWidth * 100).toFixed(0)} cm）`, blocks[i].id, midB(blocks[i].b, blocks[j].b), "拉開間距或降低走道門檻");
+      }
+    }
+  }
+
+  // Screen view blocked.
+  if (cfg.checkScreenView) {
+    for (const screen of project.objects) {
+      if (screen.kind !== "screen" || screen.hidden) continue;
+      const f = facingVec(screen.rotationDeg);
+      const strip: Rect = { cx: screen.x + f.x * (SCREEN_VIEW_DEPTH / 2), cz: screen.z + f.z * (SCREEN_VIEW_DEPTH / 2), w: screen.width, d: SCREEN_VIEW_DEPTH, rot: screen.rotationDeg };
+      for (const idx of hash.queryRect(strip)) {
+        const o = hash.getItem(idx) as PObj;
+        if (!TALL.has(o.kind)) continue;
+        if (rectsOverlap(strip, o)) {
+          push("info", "screen-view-blocked", "投影幕視線被擋", `投影幕前方視線被${assetDef(o.kind).displayName}擋住`, screen.id, { x: o.cx, z: o.cz }, "移開投影幕正前方的高家具");
+          break;
+        }
+      }
+    }
+  }
+
+  // Route intrusion (exact segment vs OBB) + zone-blocks-route + route conflicts.
+  const furnItems = objs.filter((o) => TALL.has(o.kind) || o.kind === "chair");
   for (const route of project.routes) {
-    if (!route.visible) continue;
-    for (let i = 0; i < route.points.length - 1; i++) {
-      const p = route.points[i];
-      const q = route.points[i + 1];
-      const blocker = furn.find((o) => o.kind !== "computer" && segmentIntersectsRect(p, q, o));
-      if (blocker) {
-        push("info", "route-cross", `動線「${route.name}」穿越${assetDef(blocker.kind).displayName}`, route.id, mid(p, blocker));
-        break;
+    if (!route.visible || route.points.length < 2) continue;
+    outer: for (let i = 0; i < route.points.length - 1; i++) {
+      const p = route.points[i], q = route.points[i + 1];
+      for (const o of furnItems) {
+        if (segmentIntersectsRect(p, q, o)) {
+          push("info", "route-cross", "動線穿越家具", `動線「${route.name}」穿越${assetDef(o.kind).displayName}`, route.id, mid(p, o), "調整動線或移開家具");
+          break outer;
+        }
+      }
+    }
+    if (cfg.checkZoneRouteIntrusion) {
+      for (const z of project.zones) {
+        if (z.hidden || (z.type !== "shoe" && z.type !== "backpack")) continue;
+        const zr: Rect = { cx: z.x, cz: z.z, w: z.width, d: z.depth, rot: 0 };
+        const hit = route.points.some((_, i) => i < route.points.length - 1 && segmentIntersectsRect(route.points[i], route.points[i + 1], zr));
+        if (hit) {
+          const code = z.type === "shoe" ? "shoe-zone-blocks-route" : "backpack-zone-blocks-route";
+          push("info", code, "區域擋動線", `動線「${route.name}」穿越「${z.name}」`, route.id, { x: z.x, z: z.z }, "讓主要動線避開此區域");
+        }
+      }
+    }
+  }
+  // Primary route conflicts (routes crossing each other).
+  for (let a = 0; a < project.routes.length; a++) {
+    for (let b = a + 1; b < project.routes.length; b++) {
+      const ra = project.routes[a], rb = project.routes[b];
+      if (!ra.visible || !rb.visible) continue;
+      if (routesCross(ra.points, rb.points)) {
+        push("info", "primary-route-conflict", "動線交叉", `動線「${ra.name}」與「${rb.name}」交叉`, ra.id, mid(ra.points[0] ?? { x: 0, z: 0 }, rb.points[0] ?? { x: 0, z: 0 }), "檢查是否造成人流衝突");
       }
     }
   }
@@ -180,26 +286,46 @@ export function issueCounts(issues: Issue[]): { error: number; warning: number; 
   };
 }
 
-function rect(o: PObj) {
-  return { cx: o.x, cz: o.z, w: o.w, d: o.d, rot: o.rot };
+function groupAabb(g: import("./model").ArrayGroup): Bounds {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const m of groupMembers(g)) {
+    const fb = footprintBounds({ cx: m.x, cz: m.z, w: g.itemWidth, d: g.itemDepth, rot: m.rotationDeg });
+    minX = Math.min(minX, fb.minX); maxX = Math.max(maxX, fb.maxX);
+    minZ = Math.min(minZ, fb.minZ); maxZ = Math.max(maxZ, fb.maxZ);
+  }
+  return { minX, maxX, minZ, maxZ };
 }
 
-function mid(a: { x: number; z: number }, b: { x: number; z: number }): { x: number; z: number } {
-  return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+/** Gap between two AABBs if they form a passage (overlap on one axis), else null. */
+function aisleBetween(a: Bounds, b: Bounds, cap: number): number | null {
+  const overlapX = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+  const overlapZ = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+  const gapX = Math.max(a.minX, b.minX) - Math.min(a.maxX, b.maxX);
+  const gapZ = Math.max(a.minZ, b.minZ) - Math.min(a.maxZ, b.maxZ);
+  // A passage exists when blocks overlap on one axis and are separated on the other.
+  if (overlapZ > 0.5 && gapX > 0 && gapX < cap) return gapX;
+  if (overlapX > 0.5 && gapZ > 0 && gapZ < cap) return gapZ;
+  return null;
 }
 
-function segmentIntersectsRect(
-  p: { x: number; z: number },
-  q: { x: number; z: number },
-  o: PObj,
-): boolean {
-  // Cheap: sample the segment and test rect containment.
-  const steps = 12;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const x = p.x + (q.x - p.x) * t;
-    const z = p.z + (q.z - p.z) * t;
-    if (pointInRect(x, z, o.x, o.z, o.w, o.d, o.rot)) return true;
+function routesCross(a: { x: number; z: number }[], b: { x: number; z: number }[]): boolean {
+  for (let i = 0; i < a.length - 1; i++) {
+    for (let j = 0; j < b.length - 1; j++) {
+      if (segmentsIntersect(a[i], a[i + 1], b[j], b[j + 1])) return true;
+    }
   }
   return false;
+}
+
+function pt(o: { x?: number; z?: number; cx?: number; cz?: number }): { x: number; z: number } {
+  return { x: o.cx ?? o.x ?? 0, z: o.cz ?? o.z ?? 0 };
+}
+
+function mid(a: { x?: number; z?: number; cx?: number; cz?: number }, b: { x?: number; z?: number; cx?: number; cz?: number }): { x: number; z: number } {
+  const pa = pt(a), pb = pt(b);
+  return { x: (pa.x + pb.x) / 2, z: (pa.z + pb.z) / 2 };
+}
+
+function midB(a: Bounds, b: Bounds): { x: number; z: number } {
+  return { x: ((a.minX + a.maxX) / 2 + (b.minX + b.maxX) / 2) / 2, z: ((a.minZ + a.maxZ) / 2 + (b.minZ + b.maxZ) / 2) / 2 };
 }
