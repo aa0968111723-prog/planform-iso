@@ -206,13 +206,17 @@ function migrateStation(raw: Partial<ServiceStation>): ServiceStation | null {
     zoneId: raw.zoneId,
     objectId: raw.objectId,
     routeWaypoint: raw.routeWaypoint,
-    staffCount: Math.max(1, raw.staffCount ?? 1),
-    parallelServers: Math.max(1, raw.parallelServers ?? 1),
+    staffCount: Math.max(0, raw.staffCount ?? 1),
+    parallelServers: Math.max(0, raw.parallelServers ?? 1),
     meanServiceSeconds: Math.max(1, raw.meanServiceSeconds ?? 30),
     serviceVariance: raw.serviceVariance,
     queueCapacity: Math.max(1, raw.queueCapacity ?? 20),
     x: raw.x ?? 0,
     z: raw.z ?? 0,
+    facingDeg: typeof raw.facingDeg === "number" ? raw.facingDeg : undefined,
+    queueDirectionDeg:
+      typeof raw.queueDirectionDeg === "number" ? raw.queueDirectionDeg : undefined,
+    queueSpacing: typeof raw.queueSpacing === "number" ? raw.queueSpacing : undefined,
   };
 }
 
@@ -233,12 +237,26 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
   const profiles = (Array.isArray(raw.profiles) ? raw.profiles : [])
     .map((p) => migrateProfile(p as Partial<ParticipantProfile>))
     .filter((p): p is ParticipantProfile => p !== null);
+  const arrivalRaw = String(raw.arrivalProfile ?? "uniform");
+  const arrivalProfile =
+    arrivalRaw === "front-loaded" || arrivalRaw === "early"
+      ? "front-loaded"
+      : arrivalRaw === "back-loaded" || arrivalRaw === "late"
+        ? "back-loaded"
+        : "uniform";
+  const layoutVariant =
+    raw.layoutVariant === "combined" ||
+    raw.layoutVariant === "separated" ||
+    raw.layoutVariant === "entrance-split" ||
+    raw.layoutVariant === "parallel-checkin"
+      ? raw.layoutVariant
+      : undefined;
   return {
     id: raw.id,
     name: raw.name,
     participantCount: Math.max(1, raw.participantCount ?? 30),
     arrivalWindowSeconds: Math.max(60, raw.arrivalWindowSeconds ?? 1200),
-    arrivalProfile: raw.arrivalProfile === "front-loaded" ? "front-loaded" : "uniform",
+    arrivalProfile,
     profiles: profiles.length
       ? profiles
       : [{ id: "general", ratio: 1, branch: stations.map((s) => s.id) }],
@@ -247,6 +265,7 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
     settings: {
       speedMetersPerSecond: Math.max(0.3, raw.settings?.speedMetersPerSecond ?? 1.0),
     },
+    layoutVariant,
   };
 }
 
@@ -283,6 +302,9 @@ export function createDefaultScenario(
       z,
       zoneId: extra?.zoneId,
       objectId: extra?.objectId,
+      facingDeg: extra?.facingDeg ?? 0,
+      queueDirectionDeg: extra?.queueDirectionDeg ?? 180,
+      queueSpacing: extra?.queueSpacing ?? 0.55,
     });
   };
 

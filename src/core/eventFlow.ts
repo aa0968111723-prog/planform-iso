@@ -1,18 +1,30 @@
 /**
- * Event-flow discrete-event simulation (DES).
+ * Event-flow discrete-event simulation (DES) — Simulation 2.0.
  *
  * Local, deterministic, no AI. Participants arrive, travel between service
- * stations, queue, get served by parallel staff, and follow profile branches
- * (e.g. prepaid skips payment). Playback samples are produced once so the UI
- * does not re-run the full model every animation frame.
+ * stations (distance / route / aisle-aware), queue along physical lanes, get
+ * served by parallel staff, and follow profile branches (e.g. prepaid skips
+ * payment). Playback samples are produced once so the UI does not re-run the
+ * full model every animation frame.
  */
 
 import type {
   EventScenario,
   ParticipantProfile,
   ParticipantProfileId,
+  Project,
+  Route,
   ServiceStation,
 } from "./model";
+import {
+  deriveSpatialIssues,
+  narrowAislePenaltySeconds,
+  peakCongestionTime,
+  queueSlotPosition,
+  syncScenarioToLayout,
+  travelDistanceMeters,
+  type SpatialIssue,
+} from "./spatialFlow";
 
 // --- PRNG -----------------------------------------------------------------
 
@@ -35,10 +47,14 @@ export interface StationStats {
   type: ServiceStation["type"];
   maxQueue: number;
   avgWaitSeconds: number;
+  maxWaitSeconds: number;
   totalWaitSeconds: number;
   served: number;
   utilization: number; // 0–1 over [0, horizon]
   busyServerSeconds: number;
+  /** Seconds the station queue stayed at/above congestion threshold. */
+  bottleneckDurationSeconds: number;
+  overflowCount: number;
 }
 
 export interface SimulationResult {
@@ -50,9 +66,17 @@ export interface SimulationResult {
   avgJourneySeconds: number;
   maxJourneySeconds: number;
   finishTimeSeconds: number;
+  /** Global mean wait across all completed services. */
+  avgWaitSeconds: number;
+  maxWaitSeconds: number;
+  maxQueue: number;
+  peakCongestionTime: number;
+  bottleneckDurationSeconds: number;
+  staffUsed: number;
   stations: StationStats[];
   bottleneckStationId: string | null;
   bottleneckName: string | null;
+  spatialIssues: SpatialIssue[];
   summaryLines: string[];
   /** Sparse playback samples at fixed dt for canvas markers. */
   playback: PlaybackFrame[];
@@ -65,6 +89,8 @@ export interface PlaybackAgent {
   z: number;
   stationId: string | null;
   state: "traveling" | "queued" | "serving" | "done" | "pending";
+  /** Index in station queue when queued (0 = front). */
+  queueIndex?: number;
 }
 
 export interface PlaybackFrame {
@@ -81,6 +107,7 @@ export interface ScenarioCompareResult {
   deltas: {
     finishTimeSeconds: number;
     avgJourneySeconds: number;
+    avgWaitSeconds: number;
     maxQueue: number;
   };
 }
@@ -108,8 +135,10 @@ interface AgentRuntime {
   x: number;
   z: number;
   stationId: string | null;
+  queueIndex: number;
   waitAccum: number;
   enqueueT: number | null;
+  lastWait: number;
 }
 
 interface StationRuntime {
@@ -118,15 +147,15 @@ interface StationRuntime {
   busyUntil: number[]; // per-server free time
   maxQueue: number;
   totalWait: number;
+  maxWait: number;
   served: number;
   busyServerSeconds: number;
+  overflowCount: number;
+  congestedSeconds: number;
+  lastCongestT: number | null;
 }
 
 // --- Helpers --------------------------------------------------------------
-
-function dist(a: { x: number; z: number }, b: { x: number; z: number }): number {
-  return Math.hypot(a.x - b.x, a.z - b.z);
-}
 
 function effectiveServers(st: ServiceStation): number {
   if (st.staffCount <= 0 || st.parallelServers <= 0) return 0;
@@ -157,8 +186,16 @@ function arrivalTimes(
   const times: number[] = [];
   for (let i = 0; i < count; i++) {
     const u = rng();
-    // Front-loaded: beta-ish via square — more early arrivals.
-    const t = profile === "front-loaded" ? windowSeconds * (u * u) : windowSeconds * u;
+    let t: number;
+    if (profile === "front-loaded") {
+      // More early arrivals.
+      t = windowSeconds * (u * u);
+    } else if (profile === "back-loaded") {
+      // More late arrivals.
+      t = windowSeconds * (1 - (1 - u) * (1 - u));
+    } else {
+      t = windowSeconds * u;
+    }
     times.push(t);
   }
   times.sort((a, b) => a - b);
@@ -178,7 +215,6 @@ function serviceDuration(st: ServiceStation, rng: () => number): number {
 
 function pushEvent(heap: SimEvent[], ev: SimEvent): void {
   heap.push(ev);
-  // Binary heap would be nicer; N≤200 events*participants is fine with sort-on-pop.
 }
 
 function popEvent(heap: SimEvent[]): SimEvent | undefined {
@@ -191,6 +227,27 @@ function stationPos(st: ServiceStation): { x: number; z: number } {
   return { x: st.x, z: st.z };
 }
 
+function applyQueuePositions(st: StationRuntime, agents: AgentRuntime[]): void {
+  st.queue.forEach((agentId, index) => {
+    const agent = agents[agentId];
+    if (!agent) return;
+    const slot = queueSlotPosition(st.def, index);
+    agent.x = slot.x;
+    agent.z = slot.z;
+    agent.queueIndex = index;
+  });
+}
+
+function updateCongestionClock(st: StationRuntime, t: number, threshold = 3): void {
+  const congested = st.queue.length >= threshold;
+  if (congested) {
+    if (st.lastCongestT === null) st.lastCongestT = t;
+  } else if (st.lastCongestT !== null) {
+    st.congestedSeconds += t - st.lastCongestT;
+    st.lastCongestT = null;
+  }
+}
+
 // --- Core run -------------------------------------------------------------
 
 export interface RunOptions {
@@ -198,32 +255,46 @@ export interface RunOptions {
   sampleDt?: number;
   /** Hard stop horizon. Default arrivalWindow + 2h. */
   maxHorizonSeconds?: number;
+  /** Optional project for layout sync + spatial issues + aisle penalty. */
+  project?: Project;
+  /** Optional routes for path-aware travel. */
+  routes?: Route[];
+  /** Sync station x/z from bound objects/zones before running. Default true when project set. */
+  syncLayout?: boolean;
 }
 
 export function runDiscreteEvent(
   scenario: EventScenario,
   opts: RunOptions = {},
 ): SimulationResult {
-  const rng = createRng(scenario.seed >>> 0 || 1);
-  const profiles = normalizeProfiles(scenario.profiles);
-  if (!scenario.stations.length || !profiles.length) {
-    return emptyResult(scenario, "沒有站點或參與者設定。");
+  let stationsList = scenario.stations.map((s) => ({ ...s }));
+  if (opts.project && opts.syncLayout !== false) {
+    stationsList = syncScenarioToLayout(opts.project, { stations: stationsList });
   }
-  const stationMap = new Map(scenario.stations.map((s) => [s.id, s]));
+  const working: EventScenario = { ...scenario, stations: stationsList };
+
+  const rng = createRng(working.seed >>> 0 || 1);
+  const profiles = normalizeProfiles(working.profiles);
+  if (!working.stations.length || !profiles.length) {
+    return emptyResult(working, "沒有站點或參與者設定。");
+  }
+  const stationMap = new Map(working.stations.map((s) => [s.id, s]));
   for (const p of profiles) {
     for (const sid of p.branch) {
       if (!stationMap.has(sid)) {
-        return emptyResult(scenario, `站點 ${sid} 不存在於流程中。`);
+        return emptyResult(working, `站點 ${sid} 不存在於流程中。`);
       }
     }
   }
 
   const sampleDt = opts.sampleDt ?? 1;
   const maxHorizon =
-    opts.maxHorizonSeconds ?? scenario.arrivalWindowSeconds + 7200;
+    opts.maxHorizonSeconds ?? working.arrivalWindowSeconds + 7200;
+  const routes = opts.routes ?? opts.project?.routes ?? [];
+  const project = opts.project;
 
   const stations: Record<string, StationRuntime> = {};
-  for (const s of scenario.stations) {
+  for (const s of working.stations) {
     const n = effectiveServers(s);
     stations[s.id] = {
       def: s,
@@ -231,27 +302,32 @@ export function runDiscreteEvent(
       busyUntil: Array.from({ length: n }, () => 0),
       maxQueue: 0,
       totalWait: 0,
+      maxWait: 0,
       served: 0,
       busyServerSeconds: 0,
+      overflowCount: 0,
+      congestedSeconds: 0,
+      lastCongestT: null,
     };
   }
 
   const arrivals = arrivalTimes(
-    scenario.participantCount,
-    scenario.arrivalWindowSeconds,
-    scenario.arrivalProfile,
+    working.participantCount,
+    working.arrivalWindowSeconds,
+    working.arrivalProfile,
     rng,
   );
 
   const agents: AgentRuntime[] = [];
   const events: SimEvent[] = [];
   let seq = 0;
+  const overflowStationIds = new Set<string>();
 
   const firstStationPos = stationPos(stationMap.get(profiles[0].branch[0])!);
 
   for (let i = 0; i < arrivals.length; i++) {
     const profile = pickProfile(rng, profiles);
-    const branch = profile.branch.length ? profile.branch : [scenario.stations[0].id];
+    const branch = profile.branch.length ? profile.branch : [working.stations[0].id];
     agents.push({
       id: i,
       profileId: profile.id,
@@ -264,13 +340,15 @@ export function runDiscreteEvent(
       x: firstStationPos.x,
       z: firstStationPos.z,
       stationId: null,
+      queueIndex: 0,
       waitAccum: 0,
       enqueueT: null,
+      lastWait: 0,
     });
     pushEvent(events, { t: arrivals[i], kind: "arrive", agentId: i, seq: seq++ });
   }
 
-  const speed = Math.max(0.2, scenario.settings.speedMetersPerSecond);
+  const speed = Math.max(0.2, working.settings.speedMetersPerSecond);
   const playback: PlaybackFrame[] = [];
   let nextSample = 0;
 
@@ -286,6 +364,7 @@ export function runDiscreteEvent(
         z: a.z,
         stationId: a.stationId,
         state: a.state,
+        queueIndex: a.state === "queued" ? a.queueIndex : undefined,
       })),
       queues: { ...queues },
     });
@@ -293,8 +372,7 @@ export function runDiscreteEvent(
 
   const tryStartService = (stationId: string, t: number) => {
     const st = stations[stationId];
-    if (!st || !st.queue.length) return;
-    // Find a free server
+    if (!st || !st.queue.length || st.busyUntil.length === 0) return;
     let freeIdx = -1;
     let freeAt = Infinity;
     for (let i = 0; i < st.busyUntil.length; i++) {
@@ -305,19 +383,25 @@ export function runDiscreteEvent(
     }
     if (freeIdx < 0) return;
     const agentId = st.queue.shift()!;
+    applyQueuePositions(st, agents);
     const agent = agents[agentId];
     if (agent.enqueueT !== null) {
-      agent.waitAccum += t - agent.enqueueT;
-      st.totalWait += t - agent.enqueueT;
+      const waited = t - agent.enqueueT;
+      agent.waitAccum += waited;
+      agent.lastWait = waited;
+      st.totalWait += waited;
+      st.maxWait = Math.max(st.maxWait, waited);
       agent.enqueueT = null;
     }
     agent.state = "serving";
     agent.stationId = stationId;
+    agent.queueIndex = 0;
     agent.x = st.def.x;
     agent.z = st.def.z;
     const dur = serviceDuration(st.def, rng);
     st.busyUntil[freeIdx] = t + dur;
     st.busyServerSeconds += dur;
+    updateCongestionClock(st, t);
     pushEvent(events, {
       t: t + dur,
       kind: "finishService",
@@ -327,30 +411,54 @@ export function runDiscreteEvent(
     });
   };
 
-  const enqueue = (agent: AgentRuntime, stationId: string, t: number) => {
+  const enqueue = (agent: AgentRuntime, stationId: string, t: number): boolean => {
     const st = stations[stationId];
+    const cap = Math.max(0, st.def.queueCapacity);
+    if (st.queue.length >= cap) {
+      st.overflowCount += 1;
+      overflowStationIds.add(stationId);
+      // Soft balk: retry after a short delay (still counts unfinished if horizon ends).
+      pushEvent(events, {
+        t: t + 5,
+        kind: "arriveStation",
+        agentId: agent.id,
+        stationId,
+        seq: seq++,
+      });
+      agent.state = "traveling";
+      agent.stationId = stationId;
+      return false;
+    }
     agent.state = "queued";
     agent.stationId = stationId;
-    agent.x = st.def.x;
-    agent.z = st.def.z;
     agent.enqueueT = t;
     st.queue.push(agent.id);
     st.maxQueue = Math.max(st.maxQueue, st.queue.length);
+    applyQueuePositions(st, agents);
+    updateCongestionClock(st, t);
     tryStartService(stationId, t);
+    return true;
   };
 
   const sendToStation = (agent: AgentRuntime, stationId: string, t: number) => {
     const st = stationMap.get(stationId)!;
     const from = { x: agent.x, z: agent.z };
     const to = stationPos(st);
-    const travel = dist(from, to) / speed;
+    const meters = travelDistanceMeters(from, to, routes);
+    const aislePenalty = narrowAislePenaltySeconds(
+      project,
+      from,
+      to,
+      project?.validationSettings.minAisleWidth ?? 0.9,
+    );
+    const travel = meters / speed + aislePenalty;
     agent.state = "traveling";
     agent.stationId = stationId;
-    // Approximate mid-travel position for samples; snap on arrive.
+    agent.queueIndex = 0;
     agent.x = from.x;
     agent.z = from.z;
     pushEvent(events, {
-      t: t + travel,
+      t: t + Math.max(0.05, travel),
       kind: "arriveStation",
       agentId: agent.id,
       stationId,
@@ -364,15 +472,13 @@ export function runDiscreteEvent(
   while (events.length) {
     const ev = popEvent(events)!;
     if (ev.t > maxHorizon) break;
-    // Emit samples up to this event.
     while (nextSample + sampleDt <= ev.t + 1e-9) {
       nextSample += sampleDt;
-      // Interpolate traveling agents roughly toward their target station.
       for (const a of agents) {
         if (a.state === "traveling" && a.stationId) {
           const st = stationMap.get(a.stationId);
           if (st) {
-            const d = dist(a, st);
+            const d = Math.hypot(a.x - st.x, a.z - st.z);
             const step = speed * sampleDt;
             if (d > 1e-6) {
               const f = Math.min(1, step / d);
@@ -397,7 +503,6 @@ export function runDiscreteEvent(
           agent.journeyEnd = ev.t;
           break;
         }
-        // Spawn at first station (zero travel from "outside").
         agent.x = stationMap.get(first)!.x;
         agent.z = stationMap.get(first)!.z;
         enqueue(agent, first, ev.t);
@@ -405,6 +510,12 @@ export function runDiscreteEvent(
       }
       case "arriveStation": {
         if (!ev.stationId) break;
+        // If already past this station in branch (stale overflow retry), ignore.
+        if (agent.state === "done") break;
+        if (agent.branch[agent.branchIndex] !== ev.stationId && agent.state !== "traveling") {
+          // Allow overflow retries while still targeting this station.
+          if (agent.stationId !== ev.stationId) break;
+        }
         agent.x = stationMap.get(ev.stationId)!.x;
         agent.z = stationMap.get(ev.stationId)!.z;
         enqueue(agent, ev.stationId, ev.t);
@@ -422,7 +533,7 @@ export function runDiscreteEvent(
         } else {
           sendToStation(agent, agent.branch[agent.branchIndex], ev.t);
         }
-        // Free server may take next in queue.
+        updateCongestionClock(st, ev.t);
         tryStartService(ev.stationId, ev.t);
         break;
       }
@@ -431,12 +542,19 @@ export function runDiscreteEvent(
     }
   }
 
-  // Final sample
+  // Close open congestion intervals.
+  for (const st of Object.values(stations)) {
+    if (st.lastCongestT !== null) {
+      st.congestedSeconds += simT - st.lastCongestT;
+      st.lastCongestT = null;
+    }
+  }
+
   if (!playback.length || playback[playback.length - 1].t < simT) snapshot(simT);
 
   const completedAgents = agents.filter((a) => a.journeyEnd !== null);
   const unfinished = agents.length - completedAgents.length;
-  const journeys = completedAgents.map((a) => (a.journeyEnd! - a.journeyStart));
+  const journeys = completedAgents.map((a) => a.journeyEnd! - a.journeyStart);
   const avgJourney =
     journeys.length ? journeys.reduce((s, v) => s + v, 0) / journeys.length : 0;
   const maxJourney = journeys.length ? Math.max(...journeys) : 0;
@@ -445,30 +563,64 @@ export function runDiscreteEvent(
     : simT;
 
   const horizon = Math.max(finishTime, 1);
-  const stationStats: StationStats[] = scenario.stations.map((s) => {
+  const stationStats: StationStats[] = working.stations.map((s) => {
     const st = stations[s.id];
-    const servers = effectiveServers(s);
+    const servers = Math.max(1, effectiveServers(s) || 1);
     return {
       stationId: s.id,
       name: s.name,
       type: s.type,
       maxQueue: st.maxQueue,
       avgWaitSeconds: st.served ? st.totalWait / st.served : 0,
+      maxWaitSeconds: st.maxWait,
       totalWaitSeconds: st.totalWait,
       served: st.served,
-      utilization: Math.min(1, st.busyServerSeconds / (horizon * servers)),
+      utilization:
+        effectiveServers(s) === 0
+          ? 0
+          : Math.min(1, st.busyServerSeconds / (horizon * servers)),
       busyServerSeconds: st.busyServerSeconds,
+      bottleneckDurationSeconds: st.congestedSeconds,
+      overflowCount: st.overflowCount,
     };
   });
 
   let bottleneck: StationStats | null = null;
   for (const s of stationStats) {
-    if (!bottleneck || s.maxQueue > bottleneck.maxQueue ||
-      (s.maxQueue === bottleneck.maxQueue && s.avgWaitSeconds > bottleneck.avgWaitSeconds)) {
+    if (
+      !bottleneck ||
+      s.maxQueue > bottleneck.maxQueue ||
+      (s.maxQueue === bottleneck.maxQueue &&
+        s.avgWaitSeconds > bottleneck.avgWaitSeconds)
+    ) {
       bottleneck = s;
     }
   }
   if (bottleneck && bottleneck.maxQueue < 2) bottleneck = null;
+
+  const totalWaitAll = stationStats.reduce((s, st) => s + st.totalWaitSeconds, 0);
+  const totalServedAll = stationStats.reduce((s, st) => s + st.served, 0) || 1;
+  const avgWaitSeconds = totalWaitAll / totalServedAll;
+  const maxWaitSeconds = Math.max(0, ...stationStats.map((s) => s.maxWaitSeconds));
+  const maxQueue = Math.max(0, ...stationStats.map((s) => s.maxQueue));
+  const peak = peakCongestionTime(playback);
+  const bottleneckDurationSeconds = bottleneck?.bottleneckDurationSeconds ?? 0;
+  const staffUsed = working.stations.reduce(
+    (s, st) => s + Math.max(0, effectiveServers(st)),
+    0,
+  );
+
+  const maxQueues: Record<string, number> = {};
+  for (const s of stationStats) maxQueues[s.stationId] = s.maxQueue;
+
+  const spatialIssues = deriveSpatialIssues({
+    stations: working.stations,
+    maxQueues,
+    peakTime: peak.time,
+    project,
+    routes,
+    overflowStationIds: [...overflowStationIds],
+  });
 
   const summaryLines: string[] = [];
   summaryLines.push(
@@ -481,20 +633,34 @@ export function runDiscreteEvent(
   } else {
     summaryLines.push("未偵測到明顯站點瓶頸。");
   }
-  summaryLines.push(`平均全程 ${Math.round(avgJourney)} 秒。`);
+  summaryLines.push(
+    `平均全程 ${Math.round(avgJourney)} 秒 · 平均等待 ${Math.round(avgWaitSeconds)} 秒 · 人力 ${staffUsed}。`,
+  );
+  if (spatialIssues.some((i) => i.severity !== "info")) {
+    summaryLines.push(
+      `空間注意：${spatialIssues.filter((i) => i.severity !== "info").length} 項。`,
+    );
+  }
 
   return {
-    scenarioId: scenario.id,
-    seed: scenario.seed,
-    participantCount: scenario.participantCount,
+    scenarioId: working.id,
+    seed: working.seed,
+    participantCount: working.participantCount,
     completed: completedAgents.length,
     unfinished,
     avgJourneySeconds: avgJourney,
     maxJourneySeconds: maxJourney,
     finishTimeSeconds: finishTime,
+    avgWaitSeconds,
+    maxWaitSeconds,
+    maxQueue,
+    peakCongestionTime: peak.time,
+    bottleneckDurationSeconds,
+    staffUsed,
     stations: stationStats,
     bottleneckStationId: bottleneck?.stationId ?? null,
     bottleneckName: bottleneck?.name ?? null,
+    spatialIssues,
     summaryLines,
     playback,
   };
@@ -510,12 +676,25 @@ function emptyResult(scenario: EventScenario, msg: string): SimulationResult {
     avgJourneySeconds: 0,
     maxJourneySeconds: 0,
     finishTimeSeconds: 0,
+    avgWaitSeconds: 0,
+    maxWaitSeconds: 0,
+    maxQueue: 0,
+    peakCongestionTime: 0,
+    bottleneckDurationSeconds: 0,
+    staffUsed: 0,
     stations: [],
     bottleneckStationId: null,
     bottleneckName: null,
+    spatialIssues: [],
     summaryLines: [msg],
     playback: [],
   };
+}
+
+export function formatSimDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 function formatMin(seconds: number): string {
@@ -529,15 +708,13 @@ export function compareScenarioResults(
   a: SimulationResult,
   b: SimulationResult,
 ): ScenarioCompareResult {
-  const maxQueueA = Math.max(0, ...a.stations.map((s) => s.maxQueue));
-  const maxQueueB = Math.max(0, ...b.stations.map((s) => s.maxQueue));
   const deltas = {
     finishTimeSeconds: b.finishTimeSeconds - a.finishTimeSeconds,
     avgJourneySeconds: b.avgJourneySeconds - a.avgJourneySeconds,
-    maxQueue: maxQueueB - maxQueueA,
+    avgWaitSeconds: b.avgWaitSeconds - a.avgWaitSeconds,
+    maxQueue: b.maxQueue - a.maxQueue,
   };
 
-  // Prefer lower finish time, then lower max queue, then lower avg journey.
   let score = 0;
   if (Math.abs(deltas.finishTimeSeconds) > 5) {
     score += deltas.finishTimeSeconds < 0 ? 2 : -2;
@@ -545,7 +722,9 @@ export function compareScenarioResults(
   if (Math.abs(deltas.maxQueue) >= 1) {
     score += deltas.maxQueue < 0 ? 2 : -2;
   }
-  if (Math.abs(deltas.avgJourneySeconds) > 5) {
+  if (Math.abs(deltas.avgWaitSeconds) > 5) {
+    score += deltas.avgWaitSeconds < 0 ? 1 : -1;
+  } else if (Math.abs(deltas.avgJourneySeconds) > 5) {
     score += deltas.avgJourneySeconds < 0 ? 1 : -1;
   }
 
@@ -560,12 +739,13 @@ export function compareScenarioResults(
     const better = winner === "a" ? "A" : "B";
     const parts: string[] = [];
     if (Math.abs(deltas.finishTimeSeconds) > 5) {
-      parts.push(
-        `完成時間差 ${Math.abs(Math.round(deltas.finishTimeSeconds))} 秒`,
-      );
+      parts.push(`完成時間差 ${Math.abs(Math.round(deltas.finishTimeSeconds))} 秒`);
     }
     if (Math.abs(deltas.maxQueue) >= 1) {
       parts.push(`最大排隊差 ${Math.abs(deltas.maxQueue)} 人`);
+    }
+    if (Math.abs(deltas.avgWaitSeconds) > 5) {
+      parts.push(`平均等待差 ${Math.abs(Math.round(deltas.avgWaitSeconds))} 秒`);
     }
     reason = `方案 ${better} 較順（${parts.join("、") || "整體指標較佳"}）。`;
     if (winner === "b" && b.bottleneckName) {
@@ -581,7 +761,9 @@ export function compareScenarioResults(
 /** Deep-clone a scenario and apply a patch (for A/B variants). */
 export function cloneScenario(
   scenario: EventScenario,
-  patch?: Partial<EventScenario> & { stationPatches?: Record<string, Partial<ServiceStation>> },
+  patch?: Partial<EventScenario> & {
+    stationPatches?: Record<string, Partial<ServiceStation>>;
+  },
 ): EventScenario {
   const stations = scenario.stations.map((s) => {
     const p = patch?.stationPatches?.[s.id];
@@ -617,8 +799,8 @@ export function buildCheckinPaymentVariants(base: EventScenario): {
   const payment = base.stations.find((s) => s.type === "payment");
   if (!checkin || !payment) {
     return {
-      combined: cloneScenario(base, { name: "A 同桌" }),
-      separated: cloneScenario(base, { name: "B 分桌" }),
+      combined: cloneScenario(base, { name: "A 同桌", layoutVariant: "combined" }),
+      separated: cloneScenario(base, { name: "B 分桌", layoutVariant: "separated" }),
     };
   }
 
@@ -634,12 +816,17 @@ export function buildCheckinPaymentVariants(base: EventScenario): {
       };
     }
     if (s.id === payment.id) {
-      // Keep node for spatial binding but take it out of active service.
-      return { ...s, x: checkin.x, z: checkin.z, staffCount: 0, parallelServers: 0, meanServiceSeconds: 1 };
+      return {
+        ...s,
+        x: checkin.x,
+        z: checkin.z,
+        staffCount: 0,
+        parallelServers: 0,
+        meanServiceSeconds: 1,
+      };
     }
     return { ...s };
   });
-  // All profiles skip the inert payment station; service time already folded into checkin.
   const combinedProfiles = base.profiles.map((p) => ({
     ...p,
     branch: p.branch.filter((id) => id !== payment.id),
@@ -649,6 +836,7 @@ export function buildCheckinPaymentVariants(base: EventScenario): {
     ...base,
     id: `${base.id}_combined`,
     name: "A 報到＋收費同桌",
+    layoutVariant: "combined",
     stations: combinedStations,
     profiles: combinedProfiles,
     settings: { ...base.settings },
@@ -657,6 +845,7 @@ export function buildCheckinPaymentVariants(base: EventScenario): {
   const separated = cloneScenario(base, {
     id: `${base.id}_separated`,
     name: "B 報到／收費分桌",
+    layoutVariant: "separated",
     stationPatches: {
       [checkin.id]: {
         staffCount: Math.max(1, checkin.staffCount),
@@ -685,3 +874,5 @@ export function frameAt(result: SimulationResult, t: number): PlaybackFrame | nu
   }
   return best;
 }
+
+export { syncScenarioToLayout };

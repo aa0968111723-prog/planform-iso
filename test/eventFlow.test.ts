@@ -130,6 +130,89 @@ describe("runDiscreteEvent", () => {
     expect(r.completed).toBeGreaterThan(80);
     expect(ms).toBeLessThan(2000);
   });
+
+  it("station distance changes travel and finish time", () => {
+    const near = miniScenario({
+      participantCount: 24,
+      seed: 21,
+      arrivalWindowSeconds: 180,
+      settings: { speedMetersPerSecond: 1.0 },
+    });
+    const far = cloneScenario(near, {
+      stationPatches: {
+        seat: { x: 40, z: 0 },
+        pay: { x: 30, z: 0 },
+      },
+    });
+    const rNear = runDiscreteEvent(near, { sampleDt: 2 });
+    const rFar = runDiscreteEvent(far, { sampleDt: 2 });
+    expect(rFar.finishTimeSeconds).toBeGreaterThan(rNear.finishTimeSeconds);
+    expect(rFar.avgJourneySeconds).toBeGreaterThan(rNear.avgJourneySeconds);
+  });
+
+  it("enforces queue capacity with overflow counts", () => {
+    const scn = miniScenario({
+      participantCount: 30,
+      seed: 8,
+      arrivalWindowSeconds: 30,
+    });
+    scn.stations = scn.stations.map((s) =>
+      s.id === "ck"
+        ? { ...s, queueCapacity: 2, meanServiceSeconds: 90, staffCount: 1, parallelServers: 1 }
+        : s,
+    );
+    const r = runDiscreteEvent(scn, { sampleDt: 2 });
+    const ck = r.stations.find((s) => s.stationId === "ck")!;
+    expect(ck.maxQueue).toBeLessThanOrEqual(2);
+    expect(ck.overflowCount).toBeGreaterThan(0);
+    expect(r.spatialIssues.some((i) => i.kind === "queue-overflow")).toBe(true);
+  });
+
+  it("queued agents are spaced apart in playback", () => {
+    const scn = miniScenario({
+      participantCount: 20,
+      seed: 4,
+      arrivalWindowSeconds: 40,
+    });
+    scn.stations = scn.stations.map((s) =>
+      s.id === "ck"
+        ? {
+            ...s,
+            meanServiceSeconds: 80,
+            staffCount: 1,
+            parallelServers: 1,
+            queueDirectionDeg: 0,
+            queueSpacing: 0.6,
+          }
+        : s,
+    );
+    const r = runDiscreteEvent(scn, { sampleDt: 1 });
+    const frame = r.playback.find((f) => (f.queues["ck"] ?? 0) >= 3);
+    expect(frame).toBeTruthy();
+    const queued = frame!.agents.filter((a) => a.state === "queued" && a.stationId === "ck");
+    expect(queued.length).toBeGreaterThanOrEqual(2);
+    const zs = queued.map((a) => a.z).sort((a, b) => a - b);
+    expect(zs[1] - zs[0]).toBeGreaterThan(0.4);
+  });
+
+  it("back-loaded arrivals differ from front-loaded", () => {
+    const base = miniScenario({ participantCount: 50, arrivalWindowSeconds: 400, seed: 11 });
+    base.stations = base.stations.map((s) =>
+      s.id === "ck" ? { ...s, meanServiceSeconds: 45, staffCount: 1 } : s,
+    );
+    const front = runDiscreteEvent({ ...base, arrivalProfile: "front-loaded" });
+    const back = runDiscreteEvent({ ...base, arrivalProfile: "back-loaded" });
+    expect(front.peakCongestionTime).not.toBe(back.peakCongestionTime);
+  });
+
+  it("exposes peak congestion and staff usage metrics", () => {
+    const scn = miniScenario({ participantCount: 30, seed: 2 });
+    const r = runDiscreteEvent(scn);
+    expect(r.maxQueue).toBeGreaterThanOrEqual(0);
+    expect(r.staffUsed).toBeGreaterThan(0);
+    expect(typeof r.peakCongestionTime).toBe("number");
+    expect(r.avgWaitSeconds).toBeGreaterThanOrEqual(0);
+  });
 });
 
 describe("compareScenarioResults / variants", () => {

@@ -891,7 +891,11 @@ export class App {
 
   runEventSimulation(): SimulationResult {
     const scn = this.ensureEventScenario(false);
-    const result = runDiscreteEvent(scn, { sampleDt: 1 });
+    const result = runDiscreteEvent(scn, {
+      sampleDt: 1,
+      project: this.state,
+      routes: this.state.routes,
+    });
     this.session.simResult = result;
     this.session.simCompare = null;
     this.notifyUi();
@@ -901,8 +905,16 @@ export class App {
   compareCheckinPayment(): ScenarioCompareResult {
     const scn = this.ensureEventScenario(false);
     const { combined, separated } = buildCheckinPaymentVariants(scn);
-    const a = runDiscreteEvent(combined, { sampleDt: 2 });
-    const b = runDiscreteEvent(separated, { sampleDt: 2 });
+    const a = runDiscreteEvent(combined, {
+      sampleDt: 2,
+      project: this.state,
+      routes: this.state.routes,
+    });
+    const b = runDiscreteEvent(separated, {
+      sampleDt: 2,
+      project: this.state,
+      routes: this.state.routes,
+    });
     const cmp = compareScenarioResults(a, b);
     this.session.simCompare = cmp;
     this.session.simResult = cmp.winner === "b" ? b : a;

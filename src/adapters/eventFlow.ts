@@ -138,7 +138,11 @@ export const eventFlowAdapter = {
     if (!scn.stations.length) {
       return routeWalkSummary(project, participants);
     }
-    const result = runDiscreteEvent(scn, { sampleDt: 2 });
+    const result = runDiscreteEvent(scn, {
+      sampleDt: 2,
+      project,
+      routes: project.routes,
+    });
     const bottlenecks = result.stations
       .filter((s) => s.maxQueue >= 3)
       .map((s) => {
@@ -262,8 +266,16 @@ export const eventFlowAdapter = {
   } {
     const base = ensureScenario(project, participants);
     const { combined, separated } = buildCheckinPaymentVariants(base);
-    const a = runDiscreteEvent(combined, { sampleDt: 2 });
-    const b = runDiscreteEvent(separated, { sampleDt: 2 });
+    const a = runDiscreteEvent(combined, {
+      sampleDt: 2,
+      project,
+      routes: project.routes,
+    });
+    const b = runDiscreteEvent(separated, {
+      sampleDt: 2,
+      project,
+      routes: project.routes,
+    });
     const comparison = compareScenarioResults(a, b);
     return {
       available: true,

@@ -230,6 +230,12 @@ export interface ServiceStation {
   /** Spatial position in meters (derived from zone/object when bound). */
   x: number;
   z: number;
+  /** Service / facing yaw in degrees (0 = +Z). */
+  facingDeg?: number;
+  /** Queue grows opposite to facing by default; override in degrees. */
+  queueDirectionDeg?: number;
+  /** Meters between queued people. Default 0.55. */
+  queueSpacing?: number;
 }
 
 export type ParticipantProfileId = "general" | "prepaid" | "pay-on-site" | "staff";
@@ -242,7 +248,14 @@ export interface ParticipantProfile {
   branch: string[];
 }
 
-export type ArrivalProfile = "uniform" | "front-loaded";
+export type ArrivalProfile = "uniform" | "front-loaded" | "back-loaded";
+
+/** Layout topology used by Registration Flow Wizard / optimizer. */
+export type LayoutVariantId =
+  | "combined"
+  | "separated"
+  | "entrance-split"
+  | "parallel-checkin";
 
 export interface EventScenario {
   id: string;
@@ -254,6 +267,8 @@ export interface EventScenario {
   stations: ServiceStation[];
   seed: number;
   settings: { speedMetersPerSecond: number };
+  /** Optional wizard / optimizer layout tag. */
+  layoutVariant?: LayoutVariantId;
 }
 
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
