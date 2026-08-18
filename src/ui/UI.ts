@@ -122,9 +122,9 @@ export class UI {
 
   private buildNav(): void {
     const items: { w: Workflow; label: string; icon: string }[] = [
-      { w: "site", label: "場地", icon: "▦" }, { w: "layout", label: "素材", icon: "▤" },
+      { w: "site", label: "場地", icon: "▦" }, { w: "layout", label: "場佈", icon: "▤" },
       { w: "route", label: "動線", icon: "↝" }, { w: "check", label: "檢查", icon: "✓" },
-      { w: "export", label: "更多", icon: "⋯" },
+      { w: "export", label: "分享", icon: "↗" },
     ];
     this.nav.append(...items.map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.w }, [
