@@ -11,6 +11,7 @@ import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
 import { buildCustomAssetFlow } from "./customAssetFlow";
+import { buildVenueCaptureFlow } from "./venueCapture";
 import { refreshSimPanel } from "./simPanel";
 import { button, el, num, section, selectField, textField } from "./dom";
 
@@ -157,6 +158,7 @@ export class UI {
     const wf = this.app.session.workflow;
     if (wf === "site") this.left.append(
       this.areaSection(), this.tileSection(), this.calibrationSection(),
+      buildVenueCaptureFlow(this.app),
       el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
       buildLibrary(this.app, { categories: ["fixture"] }),
     );

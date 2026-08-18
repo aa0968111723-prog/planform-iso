@@ -56,6 +56,10 @@ import {
   type ScenarioCompareResult,
   type SimulationResult,
 } from "../core/eventFlow";
+import {
+  detectionsToObjects,
+  type VenueCaptureSession,
+} from "../assets/venueCapture";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
 import { QuickAgent } from "../agent/quickAgent";
@@ -241,6 +245,21 @@ export class App {
       else list.push(entry as never);
       p.catalogExtras = list;
     });
+  }
+
+  /** Commit confirmed venue-capture detections (undoable). */
+  commitVenueCapture(session: VenueCaptureSession): number {
+    const { objects, skipped } = detectionsToObjects(session, this.state);
+    if (!objects.length) {
+      this.toast(skipped[0] ?? "沒有可寫入的物件");
+      return 0;
+    }
+    this.store.mutate((p) => {
+      p.objects.push(...objects);
+    });
+    const notes = skipped.length ? `（略過：${skipped.join("、")}）` : "";
+    this.toast(`已寫入 ${objects.length} 個掃描物件${notes}`, true);
+    return objects.length;
   }
 
   onChange(cb: () => void): () => void { this.uiListeners.add(cb); return () => this.uiListeners.delete(cb); }
