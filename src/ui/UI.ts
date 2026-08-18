@@ -9,6 +9,8 @@ import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanP
 import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
 import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
+import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
+import { buildCustomAssetFlow } from "./customAssetFlow";
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
@@ -43,10 +45,10 @@ export class UI {
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true, simplify: false };
+  private agentSheet: QuickAgentSheetHandles | null = null;
   private smartBox = el("div", { class: "list" });
   private simBox = el("div", { class: "readout" });
   private participants = 30;
-
   constructor(private app: App, private root: HTMLElement) {
     root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast, this.teambar, this.ctxbar);
     this.buildTopbar();
@@ -54,8 +56,11 @@ export class UI {
     this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
     this.app.onChange(() => this.update());
     this.bindKeys();
+    this.agentSheet = buildQuickAgentSheet(app);
+    root.append(this.agentSheet.root);
     this.update();
     this.buildQuickStart();
   }
@@ -112,6 +117,7 @@ export class UI {
       button("名稱", () => this.app.setShowLabels(!this.app.session.showLabels), "chip chip--sm"),
       button("置中", () => this.app.recenterView(), "chip chip--sm desktop-only"),
       snapSel,
+      button("✦ AI", () => this.agentSheet?.open(), "chip chip--sm chip--accent"),
     ]);
     const viewToggle = button("視角", () => {
       this.app.setView(this.app.store.getState().view === "top" ? "iso" : "top");
@@ -153,7 +159,11 @@ export class UI {
       el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
       buildLibrary(this.app, { categories: ["fixture"] }),
     );
-    else if (wf === "layout") this.left.append(this.smartLayoutSection(), buildLibrary(this.app, { categories: ["furniture", "equipment", "floor"], zones: true, arrays: true }));
+    else if (wf === "layout") this.left.append(
+      this.smartLayoutSection(),
+      buildCustomAssetFlow(this.app),
+      buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true }),
+    );
     else if (wf === "route") this.left.append(this.routeSection());
     else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());

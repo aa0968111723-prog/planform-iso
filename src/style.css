@@ -289,3 +289,47 @@ html, body {
 
   .placebar-wrap, .measurebar { bottom: calc(72px + env(safe-area-inset-bottom)); }
 }
+
+/* --- Quick Agent compact sheet ----------------------------------------- */
+.chip--accent { border-color: #38bdf8; color: #bae6fd; }
+.agent-sheet {
+  position: absolute;
+  left: 12px; right: 12px;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  max-height: 42vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+}
+.agent-sheet__body { padding: 12px 14px 14px; }
+.agent-sheet__title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+.agent-sheet__actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.agent-sheet__input { width: 100%; min-height: 52px; resize: vertical; }
+.agent-sheet__cards { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.agent-card {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.55);
+  font-size: 13px;
+}
+.agent-card__title { font-weight: 600; color: var(--accent); font-size: 12px; }
+.agent-card__detail { color: var(--text); margin-top: 2px; }
+.agent-sheet__preview {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 10px; padding: 8px;
+  border: 1px dashed rgba(56, 189, 248, 0.45);
+  border-radius: 10px;
+}
+.agent-sheet__preview-label { font-size: 12px; color: #bae6fd; margin-right: auto; }
+
+@media (min-width: 821px) {
+  .agent-sheet {
+    left: auto; right: 16px; width: 360px;
+    bottom: 16px; max-height: 48vh;
+  }
+}

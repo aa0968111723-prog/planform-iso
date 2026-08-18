@@ -1,9 +1,7 @@
 import {
-  AmbientLight,
   BoxGeometry,
   BufferGeometry,
   Color,
-  DirectionalLight,
   DoubleSide,
   EdgesGeometry,
   Float32BufferAttribute,
@@ -27,18 +25,22 @@ import {
   WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { assetDef } from "../core/assets";
+import { AssetCatalog } from "../core/catalog";
+import { catalogFromProject } from "../core/migrate";
 import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
 import { groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
-import { buildAssetGroup, buildMergedGeometry, assetInstanceMaterial } from "./assets";
+import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
+import { applyRendererLook, installStudioLighting } from "./lighting";
 import { TextLabel } from "./label";
+import { resolveVisualGroup } from "./visualRegistry";
 
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
 
 export interface GhostState {
   kind: ObjectKind;
+  assetId?: string;
   dims: { width: number; depth: number; height: number };
   x: number;
   z: number;
@@ -101,9 +103,12 @@ export class SceneManager {
   private lastAreaSig = "";
   private lastGhostSig = "";
 
+  private catalog: AssetCatalog = new AssetCatalog();
+
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    applyRendererLook(this.renderer);
 
     this.scene = new Scene();
     this.scene.background = new Color(0x0b1120);
@@ -116,13 +121,7 @@ export class SceneManager {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
 
-    this.scene.add(new AmbientLight(0xffffff, 0.82));
-    const sun = new DirectionalLight(0xffffff, 0.95);
-    sun.position.set(8, 16, 6);
-    this.scene.add(sun);
-    const fill = new DirectionalLight(0xffffff, 0.35);
-    fill.position.set(-6, 10, -4);
-    this.scene.add(fill);
+    installStudioLighting(this.scene);
 
     this.setView("iso");
     this.resize();
@@ -174,6 +173,7 @@ export class SceneManager {
   private hasCentered = false;
 
   sync(project: Project, session: SessionView): void {
+    this.catalog = catalogFromProject(project);
     this.layersState = project.layers;
     const simplify = session.simplify ?? false;
     this.syncAreasAndTiles(project, simplify);
@@ -248,16 +248,23 @@ export class SceneManager {
     const seen = new Set<string>();
     for (const o of project.objects) {
       seen.add(o.id);
-      const sig = `${o.kind}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}`;
+      const catalogEntry = this.catalog.resolve(o.assetId, o.kind);
+      const quality = "standard";
+      const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
       let entry = this.objectNodes.get(o.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.objectGroup.remove(entry.group); disposeObject(entry.group); entry.label?.dispose(); }
-        const group = buildAssetGroup(o.kind, { width: o.width, depth: o.depth, height: o.height },
-          o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined);
+        const group = resolveVisualGroup(
+          catalogEntry,
+          o.kind,
+          { width: o.width, depth: o.depth, height: o.height },
+          o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined,
+          quality,
+        );
         group.userData = { type: "object", id: o.id };
         group.traverse((m) => { if (m instanceof Mesh) m.userData = { type: "object", id: o.id }; });
         // Enlarged invisible pick proxy for thin wall assets (easier touch targets).
-        if (assetDef(o.kind).placementType === "wall") {
+        if (catalogEntry.placementType === "wall") {
           const pw = Math.max(o.width, 0.5), ph = Math.max(o.height, 1.0), pd = Math.max(o.depth, 0.45);
           const proxy = new Mesh(new BoxGeometry(pw, ph, pd), new MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }));
           proxy.position.y = ph / 2;
@@ -265,7 +272,7 @@ export class SceneManager {
           group.add(proxy);
         }
         this.objectGroup.add(group);
-        const label = LANDMARKS.has(o.kind) ? new TextLabel() : null;
+        const label = LANDMARKS.has(o.kind) || catalogEntry.category === "service" ? new TextLabel() : null;
         if (label) this.objectGroup.add(label.sprite);
         entry = { group, label, sig };
         this.objectNodes.set(o.id, entry);
@@ -276,7 +283,7 @@ export class SceneManager {
       if (entry.label) {
         entry.label.sprite.visible = showLabels && !o.hidden;
         if (showLabels) {
-          entry.label.set(assetDef(o.kind).displayName, "#e2e8f0");
+          entry.label.set(catalogEntry.name, "#e2e8f0");
           entry.label.sprite.position.set(o.x, o.elevation + o.height + 0.35, o.z);
         }
       }
@@ -451,7 +458,8 @@ export class SceneManager {
     this.lastGhostSig = sig;
     clearGroup(this.ghostGroup);
     if (!ghost) return;
-    const g = buildAssetGroup(ghost.kind, ghost.dims, ghost.door);
+    const catalogEntry = this.catalog.resolve(ghost.assetId, ghost.kind);
+    const g = resolveVisualGroup(catalogEntry, ghost.kind, ghost.dims, ghost.door, "detail");
     const color = ghost.validity === "ok" ? 0x22c55e : ghost.validity === "warn" ? 0xf59e0b : 0xef4444;
     g.traverse((m) => {
       if (m instanceof Mesh) {

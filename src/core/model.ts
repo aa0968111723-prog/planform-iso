@@ -1,14 +1,17 @@
 /**
- * Local-first project data model (v2). All spatial values are in meters
+ * Local-first project data model. All spatial values are in meters
  * (1 Three.js unit = 1 meter). Angles are in degrees; an object's rotationDeg
  * is its yaw about +Y and also defines the direction it faces (0 = facing +Z).
  *
- * v2 upgrades objects from interchangeable boxes to semantic assets with a
- * placement surface, elevation, parent (tabletop), wall anchor and door
- * behaviour, and adds ArrayGroups for repeated layouts. See assets.ts.
+ * v2: semantic placement (surface / elevation / parent / wall / door) + arrays.
+ * v3: measurements + validation settings.
+ * v4: visual-comm — description, zone icon/capacity, route type + zone links.
+ * v5: Asset Catalog — optional assetId / serviceRole; custom catalogExtras.
  */
 
-export const PROJECT_VERSION = 4;
+export const PROJECT_VERSION = 5;
+
+export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
 export interface AreaConfig {
   id: "classroom" | "corridor";
@@ -78,6 +81,11 @@ export interface SceneObject {
   hinge?: HingeSide;
   openInward?: boolean;
   openDeg?: number;
+
+  // v4 Asset Catalog
+  /** Catalog entry id (builtin:kind or custom:*). */
+  assetId?: string;
+  serviceRole?: ServiceRole;
 }
 
 export type NumberOrder = "row" | "col";
@@ -192,6 +200,34 @@ export interface LayerVisibility {
   routes: boolean;
 }
 
+/** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
+export interface ProjectCatalogExtra {
+  id: string;
+  name: string;
+  semanticType: string;
+  sourceType: string;
+  category: string;
+  placementType: Surface;
+  dimensions: { width: number; depth: number; height: number };
+  defaultFacingDeg: number;
+  clearanceFront: number;
+  blocksFlow: boolean;
+  serviceRole?: ServiceRole;
+  kind: ObjectKind;
+  icon: string;
+  color: string;
+  visualRef: string;
+  planSymbolRef?: string;
+  thumbnailRef?: string;
+  tags: string[];
+  createdBy: "photo" | "import" | "agent" | "builtin";
+  version: number;
+  blobIds?: { sourceImage?: string; glb?: string; thumbnail?: string };
+  allowCustomSize?: boolean;
+  defaultElevation?: number;
+  allowedParents?: ObjectKind[];
+}
+
 export interface Project {
   version: number;
   name: string;
@@ -209,6 +245,8 @@ export interface Project {
   validationSettings: ValidationSettings;
   view: ViewName;
   layers: LayerVisibility;
+  /** v4: user/custom catalog entries (binary blobs referenced via blobIds). */
+  catalogExtras?: ProjectCatalogExtra[];
 }
 
 let idCounter = 0;
@@ -246,5 +284,6 @@ export function createDefaultProject(): Project {
     validationSettings: { ...DEFAULT_VALIDATION_SETTINGS },
     view: "top",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },
+    catalogExtras: [],
   };
 }

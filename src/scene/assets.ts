@@ -1,13 +1,12 @@
 /**
- * Procedural, low-poly, real-scale 3D asset geometry. Each builder returns a
- * Group whose local origin is on the floor (y=0) so the SceneManager can place
- * it at (x, elevation, z). Materials/geometry are shared/cached for phones, and
- * a merged single-geometry variant powers InstancedMesh array groups.
+ * Procedural real-scale 3D asset geometry (Standard quality).
+ * Uses MaterialPreset library. Visual variants keyed by visualRef / kind.
  */
 
 import {
   BoxGeometry,
   BufferGeometry,
+  CylinderGeometry,
   Group,
   Mesh,
   MeshStandardMaterial,
@@ -15,19 +14,17 @@ import {
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { assetDef } from "../core/assets";
 import type { ObjectKind } from "../core/model";
+import { materialFromPreset, type MaterialPresetId } from "./materials";
+
+export type VisualQuality = "plan" | "standard" | "detail";
+
+export interface DoorParams {
+  hinge?: "left" | "right";
+  openInward?: boolean;
+  openDeg?: number;
+}
 
 const D2R = Math.PI / 180;
-
-const materialCache = new Map<string, MeshStandardMaterial>();
-function mat(color: string, roughness = 0.85): MeshStandardMaterial {
-  const key = `${color}|${roughness}`;
-  let m = materialCache.get(key);
-  if (!m) {
-    m = new MeshStandardMaterial({ color, roughness, metalness: 0.02 });
-    materialCache.set(key, m);
-  }
-  return m;
-}
 
 const geomCache = new Map<string, BoxGeometry>();
 function boxGeom(w: number, h: number, d: number): BoxGeometry {
@@ -44,29 +41,32 @@ function part(
   w: number,
   h: number,
   d: number,
-  color: string,
+  preset: MaterialPresetId,
   x: number,
   y: number,
   z: number,
+  tint?: string,
+  shade = 0,
 ): Mesh {
-  const m = new Mesh(boxGeom(w, h, d), mat(color));
+  const m = new Mesh(boxGeom(w, h, d), materialFromPreset(preset, tint, shade));
   m.position.set(x, y, z);
   return m;
 }
 
-function shade(hex: string, amt: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const clamp = (v: number) => Math.max(0, Math.min(255, v));
-  const r = clamp((n >> 16) + amt);
-  const g = clamp(((n >> 8) & 0xff) + amt);
-  const b = clamp((n & 0xff) + amt);
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
-}
-
-export interface DoorParams {
-  hinge?: "left" | "right";
-  openInward?: boolean;
-  openDeg?: number;
+function cyl(
+  rTop: number,
+  rBot: number,
+  h: number,
+  preset: MaterialPresetId,
+  x: number,
+  y: number,
+  z: number,
+  tint?: string,
+): Mesh {
+  const g = new CylinderGeometry(rTop, rBot, h, 10);
+  const m = new Mesh(g, materialFromPreset(preset, tint));
+  m.position.set(x, y, z);
+  return m;
 }
 
 /** Detailed multi-part model for a single asset (also used for the ghost). */
@@ -74,96 +74,220 @@ export function buildAssetGroup(
   kind: ObjectKind,
   dims: { width: number; depth: number; height: number },
   door?: DoorParams,
+  quality: VisualQuality = "standard",
+): Group {
+  return buildVisualGroup(`proc:${kind}`, kind, dims, door, quality);
+}
+
+/** Build by visualRef (proc:* variants) with ObjectKind fallback. */
+export function buildVisualGroup(
+  visualRef: string,
+  kind: ObjectKind,
+  dims: { width: number; depth: number; height: number },
+  door?: DoorParams,
+  quality: VisualQuality = "standard",
 ): Group {
   const g = new Group();
-  const c = assetDef(kind).color;
   const { width: w, depth: d, height: h } = dims;
+  const detail = quality === "detail";
+  const tint = assetDef(kind).color;
 
-  switch (kind) {
-    case "chair": {
-      const seatH = Math.min(0.45, h * 0.5);
-      const legR = 0.03;
-      g.add(part(w, 0.05, d, c, 0, seatH, 0)); // seat
-      g.add(part(w, h - seatH, 0.05, shade(c, -20), 0, (h + seatH) / 2, -d / 2 + 0.03)); // back
-      const lx = w / 2 - legR;
-      const lz = d / 2 - legR;
-      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-        g.add(part(legR * 2, seatH, legR * 2, shade(c, -30), sx * lx, seatH / 2, sz * lz));
-      }
+  switch (visualRef) {
+    case "proc:payment-desk":
+      buildDesk(g, w, d, h, tint, "payment", detail);
       break;
-    }
-    case "table":
-    case "regTable": {
-      const topT = 0.04;
-      g.add(part(w, topT, d, c, 0, h - topT / 2, 0)); // top
-      const legR = 0.04;
-      const lx = w / 2 - legR - 0.02;
-      const lz = d / 2 - legR - 0.02;
-      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-        g.add(part(legR * 2, h - topT, legR * 2, shade(c, -25), sx * lx, (h - topT) / 2, sz * lz));
-      }
-      if (kind === "regTable") {
-        // Modesty front panel + a small "報到" sign board so it reads as a desk.
-        g.add(part(w, h - topT - 0.1, 0.03, shade(c, -12), 0, (h - topT) / 2 + 0.02, d / 2 - 0.02));
-        g.add(part(w * 0.5, 0.18, 0.03, "#f8fafc", 0, h + 0.12, d / 2 - 0.02));
-        g.add(part(w * 0.5, 0.02, 0.03, shade(c, -30), 0, h + 0.02, d / 2 - 0.02));
-      }
+    case "proc:signage-stand":
+      buildSignage(g, w, d, h, detail);
       break;
-    }
-    case "computer": {
-      const baseH = 0.02;
-      g.add(part(w * 0.5, baseH, d * 0.8, shade(c, -30), 0, baseH / 2, d * 0.15)); // base
-      g.add(part(0.05, h * 0.45, 0.05, shade(c, -20), 0, h * 0.25, d * 0.15)); // stand
-      const screen = part(w, h * 0.55, 0.03, shade(c, 30), 0, h * 0.72, 0); // screen
-      screen.rotation.x = -8 * D2R;
-      g.add(screen);
+    case "proc:queue-barrier":
+      buildBarrier(g, w, d, h);
       break;
-    }
-    case "door": {
-      const jamb = 0.06;
-      const wallDepth = Math.max(d, 0.1);
-      // Frame: two jambs + head, lying in the wall plane (thin along Z).
-      g.add(part(jamb, h, wallDepth, "#9ca3af", -w / 2 + jamb / 2, h / 2, 0));
-      g.add(part(jamb, h, wallDepth, "#9ca3af", w / 2 - jamb / 2, h / 2, 0));
-      g.add(part(w, jamb, wallDepth, "#9ca3af", 0, h - jamb / 2, 0));
-      // Leaf, hinged at one jamb and opened inward by openDeg.
-      const hingeSign = door?.hinge === "right" ? 1 : -1;
-      const openDeg = door?.openDeg ?? 90;
-      const openSide = door?.openInward === false ? -1 : 1;
-      const leaf = new Group();
-      const leafMesh = part(w, h - 0.06, 0.04, shade(c, 12), (-hingeSign * w) / 2, (h - 0.06) / 2, 0);
-      leaf.add(leafMesh);
-      leaf.position.set((hingeSign * w) / 2, 0, 0);
-      leaf.rotation.y = hingeSign * openSide * openDeg * D2R;
-      g.add(leaf);
+    case "proc:shoe-rack":
+      buildShoeRack(g, w, d, h, detail);
       break;
-    }
-    case "screen": {
-      const barH = 0.08;
-      g.add(part(w + 0.06, barH, 0.08, "#475569", 0, h, 0)); // top roller bar
-      g.add(part(w, h, 0.015, c, 0, h / 2, 0)); // white surface
-      g.add(part(w, 0.03, 0.02, "#38bdf8", 0, 0.02, 0.03)); // facing marker (front, +Z)
+    case "proc:payment-box":
+      buildPaymentBox(g, w, d, h);
       break;
-    }
-    case "switch": {
-      g.add(part(w, h, d, c, 0, h / 2, 0)); // wall plate
-      g.add(part(w * 0.4, h * 0.5, 0.01, "#94a3b8", 0, h / 2, d / 2)); // toggle
-      break;
-    }
-    case "mat": {
-      const m = new Mesh(boxGeom(w, Math.max(h, 0.02), d), mat(c, 0.95));
-      m.position.y = Math.max(h, 0.02) / 2;
-      g.add(m);
-      g.add(part(w * 0.94, 0.006, d * 0.94, shade(c, 25), 0, Math.max(h, 0.02) + 0.002, 0)); // top inlay
-      break;
-    }
+    default:
+      buildByKind(g, kind, w, d, h, tint, door, detail);
   }
   return g;
 }
 
+function buildByKind(
+  g: Group,
+  kind: ObjectKind,
+  w: number,
+  d: number,
+  h: number,
+  tint: string,
+  door: DoorParams | undefined,
+  detail: boolean,
+): void {
+  switch (kind) {
+    case "chair":
+      buildChair(g, w, d, h, tint, detail);
+      break;
+    case "table":
+      buildDesk(g, w, d, h, tint, "table", detail);
+      break;
+    case "regTable":
+      buildDesk(g, w, d, h, tint, "checkin", detail);
+      break;
+    case "computer":
+      buildComputer(g, w, d, h, tint, detail);
+      break;
+    case "door":
+      buildDoor(g, w, d, h, door, detail);
+      break;
+    case "screen":
+      buildScreen(g, w, d, h, detail);
+      break;
+    case "switch":
+      buildSwitch(g, w, d, h);
+      break;
+    case "mat":
+      buildMat(g, w, d, h, tint);
+      break;
+  }
+}
+
+function buildChair(g: Group, w: number, d: number, h: number, tint: string, detail: boolean): void {
+  const seatH = Math.min(0.45, h * 0.48);
+  const legR = detail ? 0.022 : 0.028;
+  g.add(part(w * 0.92, 0.04, d * 0.88, "fabric", 0, seatH, 0.02, tint));
+  g.add(part(w * 0.92, h - seatH - 0.02, 0.04, "fabric", 0, (h + seatH) / 2, -d / 2 + 0.04, tint, -15));
+  if (detail) {
+    g.add(part(w * 0.88, 0.03, 0.03, "brushed-metal", 0, seatH + 0.02, -d / 2 + 0.05));
+  }
+  const lx = w / 2 - legR - 0.01;
+  const lz = d / 2 - legR - 0.01;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(cyl(legR, legR * 0.9, seatH, "painted-metal", sx * lx, seatH / 2, sz * lz));
+  }
+}
+
+function buildDesk(
+  g: Group,
+  w: number,
+  d: number,
+  h: number,
+  tint: string,
+  variant: "table" | "checkin" | "payment",
+  detail: boolean,
+): void {
+  const topT = detail ? 0.035 : 0.04;
+  const wood: MaterialPresetId = variant === "payment" ? "dark-wood" : "light-wood";
+  g.add(part(w, topT, d, wood, 0, h - topT / 2, 0, tint));
+  if (detail) {
+    g.add(part(w * 0.98, 0.01, d * 0.98, wood, 0, h - topT - 0.005, 0, tint, -20));
+  }
+  const legR = 0.035;
+  const lx = w / 2 - legR - 0.03;
+  const lz = d / 2 - legR - 0.03;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(cyl(legR, legR, h - topT, "painted-metal", sx * lx, (h - topT) / 2, sz * lz));
+  }
+  if (variant === "checkin" || variant === "payment") {
+    g.add(part(w * 0.96, h - topT - 0.12, 0.025, wood, 0, (h - topT) / 2 + 0.02, d / 2 - 0.02, tint, -12));
+    const boardColor = variant === "payment" ? "#fef3c7" : "#f8fafc";
+    g.add(part(w * 0.45, 0.16, 0.025, "paper", 0, h + 0.12, d / 2 - 0.02, boardColor));
+    g.add(part(w * 0.45, 0.02, 0.03, "painted-metal", 0, h + 0.03, d / 2 - 0.02));
+  }
+}
+
+function buildComputer(g: Group, w: number, d: number, h: number, tint: string, detail: boolean): void {
+  const baseH = 0.015;
+  g.add(part(w * 0.45, baseH, d * 0.7, "brushed-metal", 0, baseH / 2, d * 0.12, tint, -20));
+  g.add(cyl(0.02, 0.025, h * 0.4, "brushed-metal", 0, h * 0.22, d * 0.12));
+  const screen = part(w, h * 0.52, detail ? 0.02 : 0.03, "plastic-matte", 0, h * 0.7, 0, tint, 20);
+  screen.rotation.x = -8 * D2R;
+  g.add(screen);
+  const glass = part(w * 0.92, h * 0.46, 0.008, "screen-glass", 0, h * 0.7, 0.012, "#64748b");
+  glass.rotation.x = -8 * D2R;
+  g.add(glass);
+}
+
+function buildDoor(g: Group, w: number, d: number, h: number, door: DoorParams | undefined, detail: boolean): void {
+  const jamb = 0.055;
+  const wallDepth = Math.max(d, 0.1);
+  g.add(part(jamb, h, wallDepth, "painted-metal", -w / 2 + jamb / 2, h / 2, 0, "#9ca3af"));
+  g.add(part(jamb, h, wallDepth, "painted-metal", w / 2 - jamb / 2, h / 2, 0, "#9ca3af"));
+  g.add(part(w, jamb, wallDepth, "painted-metal", 0, h - jamb / 2, 0, "#9ca3af"));
+  const hingeSign = door?.hinge === "right" ? 1 : -1;
+  const openDeg = door?.openDeg ?? 90;
+  const openSide = door?.openInward === false ? -1 : 1;
+  const leaf = new Group();
+  leaf.add(part(w - 0.02, h - 0.08, 0.038, "light-wood", (-hingeSign * w) / 2, (h - 0.08) / 2, 0, "#c4b5a5"));
+  if (detail) {
+    leaf.add(part(w * 0.35, h * 0.35, 0.01, "screen-glass", (-hingeSign * w) / 2, h * 0.55, 0.02, "#cbd5e1"));
+  }
+  // handle
+  leaf.add(part(0.02, 0.12, 0.04, "brushed-metal", (-hingeSign * w) / 2 + hingeSign * (w * 0.35), h * 0.45, 0.03));
+  leaf.position.set((hingeSign * w) / 2, 0, 0);
+  leaf.rotation.y = hingeSign * openSide * openDeg * D2R;
+  g.add(leaf);
+}
+
+function buildScreen(g: Group, w: number, _d: number, h: number, detail: boolean): void {
+  g.add(part(w + 0.08, 0.07, 0.07, "painted-metal", 0, h, 0, "#475569"));
+  g.add(part(w, h, 0.012, "paper", 0, h / 2, 0, "#f8fafc"));
+  if (detail) {
+    g.add(part(w * 0.98, h * 0.98, 0.004, "screen-glass", 0, h / 2, 0.006, "#e2e8f0"));
+  }
+  g.add(part(w * 0.2, 0.025, 0.02, "plastic-gloss", 0, 0.03, 0.03, "#38bdf8"));
+}
+
+function buildSwitch(g: Group, w: number, d: number, h: number): void {
+  g.add(part(w, h, d, "plastic-matte", 0, h / 2, 0, "#e5e7eb"));
+  g.add(part(w * 0.35, h * 0.45, 0.012, "plastic-gloss", 0, h / 2, d / 2 + 0.002, "#94a3b8"));
+}
+
+function buildMat(g: Group, w: number, d: number, h: number, tint: string): void {
+  const th = Math.max(h, 0.025);
+  g.add(part(w, th, d, "mat-soft", 0, th / 2, 0, tint));
+  g.add(part(w * 0.94, 0.006, d * 0.94, "fabric", 0, th + 0.002, 0, tint, 25));
+  g.add(part(w, 0.008, d, "rubber", 0, 0.004, 0, "#4b5563"));
+}
+
+function buildSignage(g: Group, w: number, d: number, h: number, detail: boolean): void {
+  g.add(cyl(0.03, 0.04, h * 0.75, "painted-metal", 0, h * 0.375, 0));
+  g.add(part(w, h * 0.35, 0.03, "paper", 0, h * 0.78, 0, "#f8fafc"));
+  if (detail) {
+    g.add(part(w * 0.7, 0.04, 0.01, "plastic-gloss", 0, h * 0.78, 0.02, "#38bdf8"));
+  }
+  g.add(part(w * 0.5, 0.02, d, "brushed-metal", 0, 0.01, 0));
+}
+
+function buildBarrier(g: Group, w: number, d: number, h: number): void {
+  const postH = h;
+  g.add(cyl(0.04, 0.05, postH, "painted-metal", -w / 2 + 0.05, postH / 2, 0, "#64748b"));
+  g.add(cyl(0.04, 0.05, postH, "painted-metal", w / 2 - 0.05, postH / 2, 0, "#64748b"));
+  g.add(part(w - 0.1, 0.04, 0.04, "brushed-metal", 0, postH * 0.85, 0, "#94a3b8"));
+  g.add(part(Math.max(d, 0.12), 0.02, Math.max(d, 0.12), "painted-metal", -w / 2 + 0.05, 0.01, 0));
+  g.add(part(Math.max(d, 0.12), 0.02, Math.max(d, 0.12), "painted-metal", w / 2 - 0.05, 0.01, 0));
+}
+
+function buildShoeRack(g: Group, w: number, d: number, h: number, detail: boolean): void {
+  g.add(part(w, 0.03, d, "light-wood", 0, 0.02, 0));
+  g.add(part(w, 0.03, d, "light-wood", 0, h / 2, 0));
+  g.add(part(w, 0.03, d, "light-wood", 0, h - 0.02, 0));
+  g.add(part(0.03, h, d, "light-wood", -w / 2 + 0.02, h / 2, 0, undefined, -15));
+  g.add(part(0.03, h, d, "light-wood", w / 2 - 0.02, h / 2, 0, undefined, -15));
+  if (detail) {
+    g.add(part(0.02, h - 0.06, d * 0.9, "painted-metal", 0, h / 2, 0));
+  }
+}
+
+function buildPaymentBox(g: Group, w: number, d: number, h: number): void {
+  g.add(part(w, h, d, "plastic-matte", 0, h / 2, 0, "#475569"));
+  g.add(part(w * 0.7, 0.02, d * 0.15, "brushed-metal", 0, h * 0.7, d / 2 - 0.01));
+  g.add(part(w * 0.4, 0.03, 0.01, "plastic-gloss", 0, h * 0.4, d / 2, "#fbbf24"));
+}
+
 const mergedCache = new Map<string, BufferGeometry>();
 
-/** A single merged geometry (asset base color) for InstancedMesh array groups. */
+/** A single merged geometry for InstancedMesh array groups. */
 export function buildMergedGeometry(
   kind: ObjectKind,
   dims: { width: number; depth: number; height: number },
@@ -188,5 +312,15 @@ export function buildMergedGeometry(
 }
 
 export function assetInstanceMaterial(kind: ObjectKind): MeshStandardMaterial {
-  return mat(assetDef(kind).color);
+  const map: Record<ObjectKind, MaterialPresetId> = {
+    chair: "fabric",
+    table: "light-wood",
+    regTable: "light-wood",
+    computer: "plastic-matte",
+    door: "light-wood",
+    screen: "paper",
+    switch: "plastic-matte",
+    mat: "mat-soft",
+  };
+  return materialFromPreset(map[kind], assetDef(kind).color);
 }

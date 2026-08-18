@@ -7,6 +7,8 @@
  */
 
 import { assetDef } from "../core/assets";
+import { catalogFromProject } from "../core/migrate";
+import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
 import type { ObjectKind, Project, SceneObject } from "../core/model";
 import { groupMembers, memberLabel } from "../core/arrays";
 import { inventory } from "../core/measure";
@@ -121,14 +123,14 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
     for (const o of project.objects) {
       if (o.hidden) continue;
       const fade = fadeFurniture && (o.kind === "table" || o.kind === "chair");
-      withAlpha(ctx, fade ? 0.35 : 1, () => drawObject(ctx, o, t, opt.preset));
+      withAlpha(ctx, fade ? 0.35 : 1, () => drawObject(ctx, o, t, opt.preset, project));
     }
     drawGroups(ctx, project, t, opt.preset === "mats" || opt.preset === "full");
   } else {
     // Route preset: only doors/screens for orientation, faint furniture.
     for (const o of project.objects) {
       if (o.hidden) continue;
-      if (o.kind === "door" || o.kind === "screen") drawObject(ctx, o, t, opt.preset);
+      if (o.kind === "door" || o.kind === "screen") drawObject(ctx, o, t, opt.preset, project);
     }
   }
 
@@ -211,20 +213,24 @@ function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: b
   }
 }
 
-function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, preset: PlanPreset): void {
-  switch (o.kind) {
-    case "door": drawDoor(ctx, o, t); break;
-    case "screen": drawScreen(ctx, o, t); break;
-    case "switch": drawSwitch(ctx, o, t); break;
-    case "computer": drawComputer(ctx, o, t); break;
-    default: {
-      drawRectAt(ctx, o.x, o.z, o.width, o.depth, o.rotationDeg, t, assetDef(o.kind).color, o.kind === "regTable" ? "報到桌" : undefined);
-      if (o.kind === "chair" && preset !== "route") {
-        const f = facingVec(o.rotationDeg);
-        ctx.strokeStyle = NEUTRAL_STROKE;
-        ctx.beginPath(); ctx.moveTo(t.X(o.x), t.Y(o.z)); ctx.lineTo(t.X(o.x + f.x * o.depth * 0.5), t.Y(o.z + f.z * o.depth * 0.5)); ctx.stroke();
-      }
-    }
+function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, preset: PlanPreset, project: Project): void {
+  if (o.kind === "door") { drawDoor(ctx, o, t); return; }
+  if (o.kind === "screen") { drawScreen(ctx, o, t); return; }
+  if (o.kind === "switch") { drawSwitch(ctx, o, t); return; }
+  if (o.kind === "computer") { drawComputer(ctx, o, t); return; }
+
+  const catalog = catalogFromProject(project);
+  const entry = catalog.resolve(o.assetId, o.kind);
+  const spec = planSymbolForObject(o, entry);
+  const wPx = o.width * t.s;
+  const dPx = o.depth * t.s;
+  drawPlanSymbolOverlay(ctx, t.X(o.x), t.Y(o.z), wPx, dPx, o.rotationDeg, spec);
+
+  // Keep chair facing tick in mats/full when symbol didn't already (belt-and-suspenders).
+  if (o.kind === "chair" && preset !== "route" && !spec.showFacing) {
+    const f = facingVec(o.rotationDeg);
+    ctx.strokeStyle = NEUTRAL_STROKE;
+    ctx.beginPath(); ctx.moveTo(t.X(o.x), t.Y(o.z)); ctx.lineTo(t.X(o.x + f.x * o.depth * 0.5), t.Y(o.z + f.z * o.depth * 0.5)); ctx.stroke();
   }
 }
 

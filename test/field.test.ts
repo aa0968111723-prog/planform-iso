@@ -11,7 +11,7 @@ import { SpatialHash } from "../src/core/spatialHash";
 import { inventory, objectGap, snapMeasurePoint } from "../src/core/measure";
 import { validateProject } from "../src/core/validation";
 import { migrateObject, migrateProject } from "../src/core/migrate";
-import { createDefaultProject, type ArrayGroup, type ObjectKind, type SceneObject } from "../src/core/model";
+import { createDefaultProject, PROJECT_VERSION, type ArrayGroup, type ObjectKind, type SceneObject } from "../src/core/model";
 
 function obj(over: Partial<SceneObject> & { kind: ObjectKind }): SceneObject {
   return migrateObject({ x: 5, z: 4, rotationDeg: 0, locked: false, hidden: false, ...over });
@@ -143,13 +143,14 @@ describe("validation 2.0", () => {
   });
 });
 
-describe("migration v2 -> v3", () => {
+describe("migration v2 -> latest", () => {
   it("adds measurements and validation settings with defaults", () => {
     const p = migrateProject({ version: 2, objects: [{ id: "o", kind: "table", x: 1, z: 1, width: 1.2, depth: 0.6, height: 0.74, rotationDeg: 0, surface: "floor", elevation: 0, locked: false, hidden: false }] } as never);
-    expect(p.version).toBe(4);
+    expect(p.version).toBe(PROJECT_VERSION);
     expect(Array.isArray(p.measurements)).toBe(true);
     expect(p.validationSettings.minAisleWidth).toBeGreaterThan(0);
     expect(p.groups).toHaveLength(0);
+    expect(p.objects[0].assetId).toBe("builtin:table");
   });
 
   it("round-trips measurements through JSON", () => {

@@ -1,11 +1,13 @@
 /**
- * Project migration. Older (v1) projects stored objects as plain boxes with no
- * placement semantics; v2 adds surface / elevation / facing / parent / door
- * behaviour and ArrayGroups. Migration derives sensible defaults from the asset
- * registry so existing saved plans keep working and nothing disappears.
+ * Project migration.
+ *
+ * v1 → v2: surface / elevation / facing / parent / door / ArrayGroups
+ * v2 → v3: measurements + validationSettings
+ * v3 → v4: description, zone icon/capacity, route type + zone links
+ * v4 → v5: Asset Catalog assetId / serviceRole / catalogExtras
  */
 
-import { assetDef } from "./assets";
+import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
@@ -15,8 +17,10 @@ import {
   type MeasurementAnnotation,
   type ObjectKind,
   type Project,
+  type ProjectCatalogExtra,
   type Route,
   type SceneObject,
+  type ServiceRole,
   type Zone,
 } from "./model";
 
@@ -31,9 +35,21 @@ const KINDS: ReadonlySet<string> = new Set<ObjectKind>([
   "regTable",
 ]);
 
+const SERVICE_ROLES: ReadonlySet<string> = new Set<ServiceRole>([
+  "checkin",
+  "payment",
+  "guidance",
+  "storage",
+  "none",
+]);
+
+function assetDefFromKind(kind: ObjectKind): AssetCatalogEntry {
+  return new AssetCatalog().resolve(undefined, kind);
+}
+
 export function migrateObject(input: Partial<SceneObject> & { kind: ObjectKind }): SceneObject {
-  const def = assetDef(input.kind);
-  const dims = def.defaultDimensions;
+  const def = assetDefFromKind(input.kind);
+  const dims = def.dimensions;
 
   // A pre-v2 computer with no parent was effectively floor-placed; keep it there
   // rather than instantly flagging it as an orphan tabletop asset.
@@ -44,10 +60,17 @@ export function migrateObject(input: Partial<SceneObject> & { kind: ObjectKind }
   const elevation =
     input.elevation ??
     (surface === "wall"
-      ? def.defaultElevation
+      ? (def.defaultElevation ?? 0)
       : surface === "tabletop"
-        ? def.defaultElevation
+        ? (def.defaultElevation ?? 0)
         : 0);
+
+  const assetId = input.assetId ?? `${BUILTIN_PREFIX}${input.kind}`;
+  const catalogEntry = new AssetCatalog().get(assetId);
+  const serviceRole: ServiceRole | undefined =
+    input.serviceRole && SERVICE_ROLES.has(input.serviceRole)
+      ? input.serviceRole
+      : catalogEntry?.serviceRole;
 
   const obj: SceneObject = {
     id: input.id ?? `obj_${Math.random().toString(36).slice(2)}`,
@@ -66,6 +89,8 @@ export function migrateObject(input: Partial<SceneObject> & { kind: ObjectKind }
     presetId: input.presetId,
     note: input.note,
     wallAnchor: input.wallAnchor,
+    assetId,
+    serviceRole,
   };
 
   if (input.kind === "door") {
@@ -78,16 +103,16 @@ export function migrateObject(input: Partial<SceneObject> & { kind: ObjectKind }
 
 function migrateGroup(g: Partial<ArrayGroup>): ArrayGroup | null {
   if (!g || !g.sourceKind || !KINDS.has(g.sourceKind)) return null;
-  const def = assetDef(g.sourceKind);
+  const def = assetDefFromKind(g.sourceKind);
   return {
     id: g.id ?? `grp_${Math.random().toString(36).slice(2)}`,
     name: g.name ?? "陣列",
     sourceKind: g.sourceKind,
     rows: g.rows ?? 1,
     cols: g.cols ?? 1,
-    itemWidth: g.itemWidth ?? def.defaultDimensions.width,
-    itemDepth: g.itemDepth ?? def.defaultDimensions.depth,
-    itemHeight: g.itemHeight ?? def.defaultDimensions.height,
+    itemWidth: g.itemWidth ?? def.dimensions.width,
+    itemDepth: g.itemDepth ?? def.dimensions.depth,
+    itemHeight: g.itemHeight ?? def.dimensions.height,
     gapX: g.gapX ?? 0.1,
     gapZ: g.gapZ ?? 0.1,
     rotationDeg: g.rotationDeg ?? 0,
@@ -130,6 +155,41 @@ function migrateMeasurement(m: Partial<MeasurementAnnotation>): MeasurementAnnot
   };
 }
 
+function migrateCatalogExtra(raw: Partial<ProjectCatalogExtra>): ProjectCatalogExtra | null {
+  if (!raw || !raw.id || !raw.kind || !KINDS.has(raw.kind)) return null;
+  if (typeof raw.name !== "string" || !raw.dimensions) return null;
+  return {
+    id: raw.id,
+    name: raw.name,
+    semanticType: raw.semanticType ?? "other",
+    sourceType: raw.sourceType ?? "simple-proxy",
+    category: raw.category ?? "custom",
+    placementType: raw.placementType ?? "floor",
+    dimensions: {
+      width: raw.dimensions.width ?? 1,
+      depth: raw.dimensions.depth ?? 1,
+      height: raw.dimensions.height ?? 1,
+    },
+    defaultFacingDeg: raw.defaultFacingDeg ?? 0,
+    clearanceFront: raw.clearanceFront ?? 0,
+    blocksFlow: raw.blocksFlow ?? false,
+    serviceRole: raw.serviceRole && SERVICE_ROLES.has(raw.serviceRole) ? raw.serviceRole : "none",
+    kind: raw.kind,
+    icon: raw.icon ?? "📦",
+    color: raw.color ?? "#64748b",
+    visualRef: raw.visualRef ?? "proxy:missing",
+    planSymbolRef: raw.planSymbolRef,
+    thumbnailRef: raw.thumbnailRef,
+    tags: Array.isArray(raw.tags) ? raw.tags : ["custom"],
+    createdBy: raw.createdBy === "import" || raw.createdBy === "agent" || raw.createdBy === "builtin" ? raw.createdBy : "photo",
+    version: raw.version ?? 1,
+    blobIds: raw.blobIds,
+    allowCustomSize: raw.allowCustomSize ?? true,
+    defaultElevation: raw.defaultElevation ?? 0,
+    allowedParents: raw.allowedParents,
+  };
+}
+
 /** Fill in any missing fields from an older or partial project blob. */
 export function migrateProject(input: Partial<Project>): Project {
   const base = createDefaultProject();
@@ -160,5 +220,19 @@ export function migrateProject(input: Partial<Project>): Project {
     .filter((m): m is MeasurementAnnotation => m !== null);
   p.validationSettings = { ...DEFAULT_VALIDATION_SETTINGS, ...(input.validationSettings ?? {}) };
 
+  // v5 catalog extras (v4 visual-comm fields already handled above).
+  const rawExtras = Array.isArray(input.catalogExtras) ? input.catalogExtras : [];
+  p.catalogExtras = rawExtras
+    .map((e) => migrateCatalogExtra(e as Partial<ProjectCatalogExtra>))
+    .filter((e): e is ProjectCatalogExtra => e !== null);
+
   return p;
+}
+
+export function catalogFromProject(project: Project): AssetCatalog {
+  const catalog = new AssetCatalog();
+  if (project.catalogExtras?.length) {
+    catalog.setExtras(project.catalogExtras as AssetCatalogEntry[]);
+  }
+  return catalog;
 }

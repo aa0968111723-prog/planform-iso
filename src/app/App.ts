@@ -14,6 +14,8 @@ import {
   type ZoneType,
 } from "../core/model";
 import { assetDef } from "../core/assets";
+import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
+import { catalogFromProject } from "../core/migrate";
 import { applySnap, type SnapMode } from "../core/units";
 import {
   findParentTable,
@@ -29,6 +31,8 @@ import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
 import { agentPositions, detectBottlenecks, initSimulation, simulationDone, stepSimulation, type Bottleneck, type SimParams, type SimState } from "../core/simulation";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
+import { QuickAgent } from "../agent/quickAgent";
+import { MockProvider } from "../agent/provider";
 import type { RouteType } from "../core/model";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
@@ -43,6 +47,7 @@ export interface Session {
   snap: SnapMode;
   ghost: GhostState | null;
   placingKind: ObjectKind | null;
+  placingAssetId: string | null;
   placingPreset: string | null;
   ghostRotation: number;
   ghostHinge: "left" | "right";
@@ -53,6 +58,8 @@ export interface Session {
   showLabels: boolean;
   workflow: Workflow;
   issues: Issue[];
+  /** When set, scene shows agent draft instead of committed project. */
+  agentPreview: Project | null;
   // Visual-communication + simulation state
   teamView: boolean;
   simplify: boolean;
@@ -88,6 +95,7 @@ export class App {
     snap: "intersection",
     ghost: null,
     placingKind: null,
+    placingAssetId: null,
     placingPreset: null,
     ghostRotation: 0,
     ghostHinge: "left",
@@ -98,6 +106,7 @@ export class App {
     showLabels: false,
     workflow: "site",
     issues: [],
+    agentPreview: null,
     teamView: false,
     simplify: false,
     focusRouteId: null,
@@ -107,6 +116,22 @@ export class App {
     bottlenecks: [],
     simPlaying: false,
   };
+
+  readonly quickAgent: QuickAgent;
+  notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
+
+  /** Live catalog (builtins + project custom extras). */
+  getCatalog(): AssetCatalog {
+    const catalog = catalogFromProject(this.state);
+    for (const id of this.recentAssetIds) catalog.markRecent(id);
+    return catalog;
+  }
+
+  private recentAssetIds: string[] = [];
+
+  private rememberAsset(id: string): void {
+    this.recentAssetIds = [id, ...this.recentAssetIds.filter((x) => x !== id)].slice(0, 12);
+  }
 
   private drag: DragState | null = null;
   private dragging = false;
@@ -123,6 +148,7 @@ export class App {
   constructor(canvas: HTMLCanvasElement, store: Store) {
     this.store = store;
     this.scene = new SceneManager(canvas);
+    this.quickAgent = new QuickAgent(store, new MockProvider());
     this.store.subscribe(() => {
       this.syncScene();
       if (!this.dragging) {
@@ -135,12 +161,35 @@ export class App {
     this.scene.setView(this.state.view);
   }
 
-  private get state(): Project { return this.store.getState(); }
+  private get state(): Project {
+    return this.store.getState();
+  }
+
+  /** Project currently shown in the scene (draft during agent preview). */
+  private get viewState(): Project {
+    return this.session.agentPreview ?? this.store.getState();
+  }
+
+  applyAgentPreview(project: Project | null): void {
+    this.session.agentPreview = project;
+    this.syncScene();
+    this.notifyUi();
+  }
+
+  upsertCatalogEntry(entry: import("../core/catalog").AssetCatalogEntry): void {
+    this.store.mutate((p) => {
+      const list = [...(p.catalogExtras ?? [])];
+      const i = list.findIndex((e) => e.id === entry.id);
+      if (i >= 0) list[i] = entry as never;
+      else list.push(entry as never);
+      p.catalogExtras = list;
+    });
+  }
 
   onChange(cb: () => void): () => void { this.uiListeners.add(cb); return () => this.uiListeners.delete(cb); }
   private notifyUi(): void { for (const cb of this.uiListeners) cb(); }
   private syncScene(): void {
-    this.scene.sync(this.state, {
+    this.scene.sync(this.viewState, {
       selection: this.session.selection,
       ghost: this.session.ghost,
       measure: this.session.measure,
@@ -176,12 +225,21 @@ export class App {
   // --- placement mode ----------------------------------------------------
 
   beginPlacement(kind: ObjectKind, presetId?: string): void {
-    const def = assetDef(kind);
-    const preset = presetId ? def.presets.find((p) => p.id === presetId) : def.presets[0];
-    this.session.placingKind = kind;
+    this.beginPlacementByAssetId(AssetCatalog.builtinId(kind), presetId);
+  }
+
+  beginPlacementByAssetId(assetId: string, presetId?: string): void {
+    const entry = this.getCatalog().get(assetId);
+    if (!entry) return;
+    const preset = presetId
+      ? entry.presets?.find((p) => p.id === presetId)
+      : entry.presets?.[0];
+    this.session.placingKind = entry.kind;
+    this.session.placingAssetId = entry.id;
     this.session.placingPreset = preset?.id ?? null;
     this.session.mode = "place";
-    this.session.ghostRotation = def.defaultFacingDeg;
+    this.session.ghostRotation = entry.defaultFacingDeg;
+    this.rememberAsset(entry.id);
     const c = this.centerOfClassroom();
     this.updateGhostAt(c.x, c.z);
     this.notifyUi();
@@ -190,8 +248,16 @@ export class App {
   cancelPlacement(): void {
     if (this.session.mode === "place") this.session.mode = "select";
     this.session.placingKind = null;
+    this.session.placingAssetId = null;
     this.session.ghost = null;
     this.render();
+  }
+
+  private placingEntry(): AssetCatalogEntry | null {
+    const id = this.session.placingAssetId;
+    const kind = this.session.placingKind;
+    if (!kind) return null;
+    return this.getCatalog().resolve(id ?? undefined, kind);
   }
 
   rotateGhost(): void {
@@ -205,63 +271,75 @@ export class App {
   }
 
   private currentDims(kind: ObjectKind, presetId: string | null): { width: number; depth: number; height: number } {
-    const def = assetDef(kind);
-    const preset = presetId ? def.presets.find((p) => p.id === presetId) : undefined;
+    const entry = this.placingEntry() ?? this.getCatalog().resolve(undefined, kind);
+    const preset = presetId ? entry.presets?.find((p) => p.id === presetId) : undefined;
     return {
-      width: preset?.width ?? def.defaultDimensions.width,
-      depth: preset?.depth ?? def.defaultDimensions.depth,
-      height: preset?.height ?? def.defaultDimensions.height,
+      width: preset?.width ?? entry.dimensions.width,
+      depth: preset?.depth ?? entry.dimensions.depth,
+      height: preset?.height ?? entry.dimensions.height,
     };
   }
 
   private updateGhostAt(px: number, pz: number): void {
     const kind = this.session.placingKind;
-    if (!kind) return;
-    const def = assetDef(kind);
+    const entry = this.placingEntry();
+    if (!kind || !entry) return;
     const dims = this.currentDims(kind, this.session.placingPreset);
     let x = px, z = pz, rotationDeg = this.session.ghostRotation;
     let elevation: number;
     let validity: GhostState["validity"];
     let door: GhostState["door"];
 
-    if (def.placementType === "wall") {
+    if (entry.placementType === "wall") {
       const snap = nearestWallSnap(px, pz, [this.state.classroom, this.state.corridor], dims.width);
       if (snap) { x = snap.x; z = snap.z; rotationDeg = snap.rotationDeg; }
-      elevation = def.defaultElevation;
+      elevation = entry.defaultElevation ?? 0;
       validity = snap && snap.distance < 3 ? "ok" : "warn";
       if (kind === "door") door = { hinge: this.session.ghostHinge, openInward: true, openDeg: 90 };
-    } else if (def.placementType === "tabletop") {
+    } else if (entry.placementType === "tabletop") {
       const table = findParentTable(px, pz, this.state.objects, TABLE_KINDS);
       if (table) { elevation = table.height; validity = "ok"; }
-      else { elevation = def.defaultElevation; validity = "bad"; }
+      else { elevation = entry.defaultElevation ?? 0; validity = "bad"; }
     } else {
       const s = applySnap(px, pz, this.state.tile, this.session.snap);
       x = s.x; z = s.z;
       elevation = 0;
       validity = this.insideAny(x, z) ? "ok" : "bad";
     }
-    this.session.ghost = { kind, dims, x, z, rotationDeg, elevation, validity, door };
+    this.session.ghost = {
+      kind,
+      assetId: entry.id,
+      dims,
+      x,
+      z,
+      rotationDeg,
+      elevation,
+      validity,
+      door,
+    };
     this.syncScene();
   }
 
   private confirmPlacement(): void {
     const g = this.session.ghost;
     const kind = this.session.placingKind;
-    if (!g || !kind || g.validity === "bad") return;
-    const def = assetDef(kind);
+    const entry = this.placingEntry();
+    if (!g || !kind || !entry || g.validity === "bad") return;
     const id = uid("obj");
     const obj: SceneObject = {
       id, kind, x: g.x, z: g.z, rotationDeg: g.rotationDeg,
       width: g.dims.width, depth: g.dims.depth, height: g.dims.height,
       locked: false, hidden: false,
-      surface: def.placementType, elevation: g.elevation,
+      surface: entry.placementType, elevation: g.elevation,
       presetId: this.session.placingPreset ?? undefined,
+      assetId: entry.id,
+      serviceRole: entry.serviceRole,
     };
-    if (def.placementType === "wall") {
+    if (entry.placementType === "wall") {
       const snap = nearestWallSnap(g.x, g.z, [this.state.classroom, this.state.corridor], g.dims.width);
       if (snap) obj.wallAnchor = { areaId: snap.areaId, edge: snap.edge, offset: snap.offset };
       if (kind === "door") { obj.hinge = this.session.ghostHinge; obj.openInward = true; obj.openDeg = 90; }
-    } else if (def.placementType === "tabletop") {
+    } else if (entry.placementType === "tabletop") {
       const table = findParentTable(g.x, g.z, this.state.objects, TABLE_KINDS);
       if (table) obj.parentId = table.id;
     }
