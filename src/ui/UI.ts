@@ -509,16 +509,47 @@ export class UI {
       el("div", { class: "subhead", text: "模擬摘要" }),
       el("p", { class: "hint", text: this.app.session.simResult
         ? this.app.session.simResult.summaryLines.join(" ")
-        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
+        : "先到「▶ 模擬」跑一次，再回來匯出摘要。" }),
+      ...(this.app.session.optReport?.deltas?.length
+        ? [
+            el("div", { class: "subhead", text: "改善對照" }),
+            el(
+              "div",
+              { class: "readout" },
+              this.app.session.optReport.deltas.map((d) =>
+                el("div", { text: `${d.label}：${d.display}` }),
+              ),
+            ),
+          ]
+        : []),
       button("匯出模擬摘要 PNG", () => {
         const r = this.app.session.simResult ?? this.app.runEventSimulation();
+        const optNotes = this.app.session.optReport?.deltas?.map((d) => `${d.label} ${d.display}`) ?? [];
         downloadPng(renderConstructionPlan(state(), {
           ...o,
           preset: "route",
           simplify: true,
           titleSuffix: "模擬摘要",
-          extraNotes: r.summaryLines,
+          extraNotes: [
+            ...r.summaryLines,
+            ...(optNotes.length ? ["—— 改善 ——", ...optNotes] : []),
+          ],
         }), "planform-sim-summary.png");
+      }, "btn btn--ghost"),
+      button("匯出瓶頸圖 PNG", () => {
+        const r = this.app.session.simResult ?? this.app.runEventSimulation();
+        const issues = r.spatialIssues.map((i) => i.message);
+        downloadPng(renderConstructionPlan(state(), {
+          ...o,
+          preset: "route",
+          simplify: true,
+          titleSuffix: "瓶頸／壅塞",
+          extraNotes: [
+            `最大排隊 ${r.maxQueue} · 平均等待 ${Math.round(r.avgWaitSeconds)}s · 完成 ${Math.round(r.finishTimeSeconds)}s`,
+            r.bottleneckName ? `最塞：${r.bottleneckName}` : "無明顯站點瓶頸",
+            ...issues.slice(0, 6),
+          ],
+        }), "planform-bottleneck.png");
       }, "btn btn--ghost"),
       el("div", { class: "grid2" }, [
         selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),

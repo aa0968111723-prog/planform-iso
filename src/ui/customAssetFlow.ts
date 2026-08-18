@@ -13,7 +13,32 @@ import type { SemanticAssetType, ServiceRole } from "../core/catalog";
 import { button, el, section } from "./dom";
 
 export function buildCustomAssetFlow(app: App): HTMLElement {
+  const statusChip = el("span", { class: "chip chip--sm", text: "可使用" });
   const status = el("div", { class: "hint", text: "拍照或匯入 GLB，立即得到可排場素材。" });
+  const statusRow = el("div", { class: "row wrap", style: "gap:6px;margin-bottom:6px" }, [
+    el("span", { class: "hint", text: "素材狀態" }),
+    statusChip,
+  ]);
+
+  const setStatus = (kind: "ready" | "refining" | "done" | "need-photo", detail: string) => {
+    const labels = {
+      ready: "可使用",
+      refining: "精緻化中",
+      done: "已完成",
+      "need-photo": "需要補照片",
+    } as const;
+    statusChip.textContent = labels[kind];
+    statusChip.className =
+      kind === "done"
+        ? "chip chip--sm chip--primary"
+        : kind === "refining"
+          ? "chip chip--sm chip--accent"
+          : kind === "need-photo"
+            ? "chip chip--sm chip--danger"
+            : "chip chip--sm";
+    status.textContent = detail;
+  };
+
   const nameInput = el("input", { type: "text", class: "field__input", placeholder: "名稱（如：收費桌）" }) as HTMLInputElement;
   const wInput = el("input", { type: "number", class: "field__input", value: "180", step: "1" }) as HTMLInputElement;
   const dInput = el("input", { type: "number", class: "field__input", value: "60", step: "1" }) as HTMLInputElement;
@@ -47,7 +72,7 @@ export function buildCustomAssetFlow(app: App): HTMLElement {
   async function onPhoto(): Promise<void> {
     const file = photoInput.files?.[0];
     if (!file) return;
-    status.textContent = "建立簡化素材中…";
+    setStatus("refining", "建立簡化素材中…");
     const buf = await file.arrayBuffer();
     const name = nameInput.value.trim() || file.name.replace(/\.[^.]+$/, "") || "自訂素材";
     const guessed = guessSemanticFromName(name);
@@ -67,26 +92,30 @@ export function buildCustomAssetFlow(app: App): HTMLElement {
       sourceMimeType: file.type || "image/jpeg",
     });
     app.upsertCatalogEntry(entry);
-    status.textContent = "精緻模型稍後產生，目前已可用簡化素材排場。";
-    app.notifyToast?.(status.textContent);
+    setStatus("ready", "可使用（簡化 proxy）。精緻模型稍後自動替換外觀。");
+    app.notifyToast?.(status.textContent ?? "");
     app.beginPlacementByAssetId(entry.id);
 
-    // Kick mock reconstruction in background.
+    setStatus("refining", "精緻化中（本機重建）…");
     const queue = new ReconstructionQueue();
     const job = queue.enqueue(entry.id, entry.blobIds?.sourceImage);
     const worker = new MockReconstructionWorker(queue);
-    void worker.run(job.id, entry).then(({ entry: next }) => {
-      app.upsertCatalogEntry(next);
-      app.notifyToast?.("精緻模型已替換完成");
-    }).catch(() => {
-      /* keep proxy */
-    });
+    void worker
+      .run(job.id, entry)
+      .then(({ entry: next }) => {
+        app.upsertCatalogEntry(next);
+        setStatus("done", "已完成精緻化，場佈尺寸不變。");
+        app.notifyToast?.("精緻模型已替換完成");
+      })
+      .catch(() => {
+        setStatus("ready", "精緻化失敗，簡化素材仍可使用。");
+      });
   }
 
   async function onGlb(): Promise<void> {
     const file = glbInput.files?.[0];
     if (!file) return;
-    status.textContent = "分析 / 最佳化模型中…";
+    setStatus("refining", "分析 / 最佳化模型中…");
     const data = await file.arrayBuffer();
     const role = roleSel.value as ServiceRole;
     const dims = {
@@ -106,17 +135,25 @@ export function buildCustomAssetFlow(app: App): HTMLElement {
           : undefined,
     });
     if (!result.ok || !result.entry) {
-      status.textContent = result.error ?? "匯入失敗";
+      setStatus("need-photo", result.error ?? "匯入失敗");
       return;
     }
     app.upsertCatalogEntry(result.entry);
-    status.textContent = result.report?.passMobile
-      ? `已匯入「${result.entry.name}」`
-      : `已匯入（已最佳化）：${result.entry.name}`;
+    const rep = result.report;
+    const tech = rep
+      ? `三角形約 ${rep.triangleCount} · 貼圖 ${rep.textureCount} · ${rep.passMobile ? "適合手機" : "已降級／偏重"}`
+      : "";
+    setStatus(
+      result.report?.passMobile ? "done" : "ready",
+      result.report?.passMobile
+        ? `已匯入「${result.entry.name}」。${tech}`
+        : `已匯入並最佳化「${result.entry.name}」。${tech}`,
+    );
     app.beginPlacementByAssetId(result.entry.id);
   }
 
   return section("我的素材", [
+    statusRow,
     status,
     el("label", { class: "field" }, [el("span", { class: "field__label", text: "名稱" }), nameInput]),
     el("div", { class: "grid2" }, [
