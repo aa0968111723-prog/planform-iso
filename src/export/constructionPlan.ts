@@ -31,6 +31,10 @@ export interface PlanOptions {
   inventory: boolean;
   roleFilter: RoleFilter;
   simplify: boolean;
+  /** Optional subtitle override (e.g. 模擬摘要). */
+  titleSuffix?: string;
+  /** Extra notes drawn under the header (simulation summary lines). */
+  extraNotes?: string[];
 }
 
 const DEFAULT_OPTIONS: PlanOptions = { preset: "full", page: "a4", orientation: "landscape", dims: true, inventory: true, roleFilter: null, simplify: false };
@@ -137,7 +141,19 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   withAlpha(ctx, emphasizeRoutes ? 1 : opt.preset === "mats" ? 0.5 : 0.85, () => drawRoutes(ctx, project, t, emphasizeRoutes));
 
   if (opt.dims) drawDimensions(ctx, project, t);
-  drawHeader(ctx, project, cw, PRESET_TITLE[opt.preset]);
+  const subtitle = opt.titleSuffix
+    ? `${PRESET_TITLE[opt.preset]} · ${opt.titleSuffix}`
+    : PRESET_TITLE[opt.preset];
+  drawHeader(ctx, project, cw, subtitle);
+  if (opt.extraNotes?.length) {
+    ctx.fillStyle = "#334155";
+    ctx.font = "13px system-ui, sans-serif";
+    let ny = 78;
+    for (const line of opt.extraNotes.slice(0, 4)) {
+      ctx.fillText(line, 24, ny);
+      ny += 16;
+    }
+  }
   const footerY = ch - footerH + 26;
   drawLegend(ctx, project, footerY, cw);
   if (opt.inventory) drawInventory(ctx, project, footerY, cw);
