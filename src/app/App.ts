@@ -2,11 +2,13 @@ import {
   uid,
   ZONE_DEFAULTS,
   type ArrayGroup,
+  type EventScenario,
   type MeasurementAnnotation,
   type MeasurementType,
   type ObjectKind,
   type Project,
   type Route,
+  type RouteType,
   type SceneObject,
   type ValidationSettings,
   type ViewName,
@@ -15,25 +17,53 @@ import {
 } from "../core/model";
 import { assetDef } from "../core/assets";
 import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
-import { catalogFromProject } from "../core/migrate";
+import { catalogFromProject, createDefaultScenario } from "../core/migrate";
 import { applySnap, type SnapMode } from "../core/units";
 import {
   findParentTable,
   nearestWallSnap,
   wallAnchorToPosition,
+  areaBounds,
 } from "../core/placement";
 import { groupCenter, groupFootprint, groupMembers, setGroupCenter } from "../core/arrays";
 import { validateProject, type Issue } from "../core/validation";
-import { objectFieldInfo, measure, snapMeasurePoint, type MeasureResult, type FieldInfo, type SnappedPoint } from "../core/measure";
-import { areaBounds } from "../core/placement";
+import {
+  objectFieldInfo,
+  measure,
+  snapMeasurePoint,
+  type MeasureResult,
+  type FieldInfo,
+  type SnappedPoint,
+} from "../core/measure";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
-import { agentPositions, detectBottlenecks, initSimulation, simulationDone, stepSimulation, type Bottleneck, type SimParams, type SimState } from "../core/simulation";
+import {
+  agentPositions,
+  detectBottlenecks,
+  initSimulation,
+  simulationDone,
+  stepSimulation,
+  type Bottleneck,
+  type SimParams,
+  type SimState,
+} from "../core/simulation";
+import {
+  buildCheckinPaymentVariants,
+  compareScenarioResults,
+  frameAt,
+  runDiscreteEvent,
+  type PlaybackAgent,
+  type ScenarioCompareResult,
+  type SimulationResult,
+} from "../core/eventFlow";
+import {
+  detectionsToObjects,
+  type VenueCaptureSession,
+} from "../assets/venueCapture";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
 import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
-import type { RouteType } from "../core/model";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
 export type Workflow = "site" | "layout" | "route" | "check" | "export";
@@ -66,9 +96,25 @@ export interface Session {
   focusRouteId: string | null;
   participants: number;
   matCandidates: LayoutCandidate[];
-  simPositions: { x: number; z: number; routeId: string }[];
+  simPositions: { x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
   bottlenecks: Bottleneck[];
   simPlaying: boolean;
+  /** DES playback (preferred over route-walk when a scenario exists). */
+  simMode: "off" | "route-walk" | "event-flow";
+  simPaused: boolean;
+  simSpeed: number;
+  simTime: number;
+  simResult: SimulationResult | null;
+  simQueues: Record<string, number>;
+  simCompare: ScenarioCompareResult | null;
+  simQuick: {
+    participants: number;
+    arrivalWindowSeconds: number;
+    prepaidRatio: number;
+    hasOnsitePayment: boolean;
+    checkinStaff: number;
+    paymentStaff: number;
+  };
 }
 
 interface DragState {
@@ -115,6 +161,21 @@ export class App {
     simPositions: [],
     bottlenecks: [],
     simPlaying: false,
+    simMode: "off",
+    simPaused: false,
+    simSpeed: 1,
+    simTime: 0,
+    simResult: null,
+    simQueues: {},
+    simCompare: null,
+    simQuick: {
+      participants: 60,
+      arrivalWindowSeconds: 1200,
+      prepaidRatio: 2 / 3,
+      hasOnsitePayment: true,
+      checkinStaff: 1,
+      paymentStaff: 1,
+    },
   };
 
   readonly quickAgent: QuickAgent;
@@ -186,6 +247,21 @@ export class App {
     });
   }
 
+  /** Commit confirmed venue-capture detections (undoable). */
+  commitVenueCapture(session: VenueCaptureSession): number {
+    const { objects, skipped } = detectionsToObjects(session, this.state);
+    if (!objects.length) {
+      this.toast(skipped[0] ?? "沒有可寫入的物件");
+      return 0;
+    }
+    this.store.mutate((p) => {
+      p.objects.push(...objects);
+    });
+    const notes = skipped.length ? `（略過：${skipped.join("、")}）` : "";
+    this.toast(`已寫入 ${objects.length} 個掃描物件${notes}`, true);
+    return objects.length;
+  }
+
   onChange(cb: () => void): () => void { this.uiListeners.add(cb); return () => this.uiListeners.delete(cb); }
   private notifyUi(): void { for (const cb of this.uiListeners) cb(); }
   private syncScene(): void {
@@ -199,6 +275,14 @@ export class App {
       simplify: this.session.simplify || this.session.teamView,
       simPositions: this.session.simPositions,
       bottlenecks: this.session.bottlenecks,
+      simQueues: this.session.simQueues,
+      simStations: this.activeScenario()?.stations.map((s) => ({
+        id: s.id,
+        name: s.name,
+        x: s.x,
+        z: s.z,
+        queue: this.session.simQueues[s.id] ?? 0,
+      })),
     });
   }
   private render(): void { this.syncScene(); this.notifyUi(); }
@@ -630,7 +714,6 @@ export class App {
   private toast(msg: string, undo = false): void { this.onToast?.(msg, undo); }
 
   // --- visual communication ---------------------------------------------
-
   setTeamView(on: boolean): void {
     this.session.teamView = on;
     if (on) { this.session.selection = new Set(); this.setView("top"); }
@@ -700,38 +783,264 @@ export class App {
     if (newIds.length) this.setSelection(newIds);
   }
 
-  // --- traffic simulation -----------------------------------------------
+  // --- traffic / event-flow simulation ----------------------------------
+
+  activeScenario(): EventScenario | null {
+    const p = this.state;
+    if (!p.scenarios?.length) return null;
+    return (
+      (p.activeScenarioId && p.scenarios.find((s) => s.id === p.activeScenarioId)) ||
+      p.scenarios[0] ||
+      null
+    );
+  }
+
+  updateSimQuick(patch: Partial<Session["simQuick"]>): void {
+    Object.assign(this.session.simQuick, patch);
+    this.notifyUi();
+  }
+
+  /** Build or refresh the active scenario from Quick Setup + current layout. */
+  ensureEventScenario(forceRebuild = false): EventScenario {
+    const q = this.session.simQuick;
+    const existing = this.activeScenario();
+    if (existing && !forceRebuild) {
+      this.store.mutate((p) => {
+        p.scenarios = p.scenarios.map((s) => {
+          if (s.id !== existing.id) return s;
+          const stations = s.stations.map((st) => {
+            if (st.type === "checkin") {
+              return { ...st, staffCount: q.checkinStaff, parallelServers: q.checkinStaff };
+            }
+            if (st.type === "payment") {
+              return {
+                ...st,
+                staffCount: q.hasOnsitePayment ? q.paymentStaff : 0,
+                parallelServers: q.hasOnsitePayment ? q.paymentStaff : 0,
+              };
+            }
+            return st;
+          });
+          const prepaid = Math.max(0, Math.min(1, q.prepaidRatio));
+          const onsite = q.hasOnsitePayment ? 1 - prepaid : 0;
+          const prepaidBranch = s.profiles.find((pr) => pr.id === "prepaid")?.branch
+            ?? s.stations.filter((st) => st.type !== "payment").map((st) => st.id);
+          const fullBranch = s.profiles.find((pr) => pr.id === "pay-on-site")?.branch
+            ?? s.stations.map((st) => st.id);
+          const profiles = q.hasOnsitePayment
+            ? [
+                { id: "prepaid" as const, ratio: prepaid, branch: prepaidBranch },
+                { id: "pay-on-site" as const, ratio: onsite, branch: fullBranch },
+              ]
+            : [{ id: "prepaid" as const, ratio: 1, branch: prepaidBranch }];
+          return {
+            ...s,
+            participantCount: q.participants,
+            arrivalWindowSeconds: q.arrivalWindowSeconds,
+            stations,
+            profiles,
+          };
+        });
+      });
+      return this.activeScenario()!;
+    }
+
+    let scn = createDefaultScenario(this.state, {
+      participantCount: q.participants,
+      name: "進場流程",
+    });
+    scn = {
+      ...scn,
+      arrivalWindowSeconds: q.arrivalWindowSeconds,
+      stations: scn.stations.map((st) => {
+        if (st.type === "checkin") {
+          return { ...st, staffCount: q.checkinStaff, parallelServers: q.checkinStaff };
+        }
+        if (st.type === "payment") {
+          return {
+            ...st,
+            staffCount: q.hasOnsitePayment ? q.paymentStaff : 0,
+            parallelServers: q.hasOnsitePayment ? q.paymentStaff : 0,
+          };
+        }
+        return st;
+      }),
+    };
+    const prepaid = Math.max(0, Math.min(1, q.prepaidRatio));
+    const paymentId = scn.stations.find((s) => s.type === "payment")?.id;
+    const prepaidBranch = scn.stations.filter((s) => s.type !== "payment").map((s) => s.id);
+    const fullBranch = scn.stations.map((s) => s.id);
+    scn.profiles = q.hasOnsitePayment
+      ? [
+          { id: "prepaid", ratio: prepaid, branch: prepaidBranch },
+          { id: "pay-on-site", ratio: 1 - prepaid, branch: fullBranch },
+        ]
+      : [{ id: "prepaid", ratio: 1, branch: prepaidBranch }];
+    if (!q.hasOnsitePayment && paymentId) {
+      scn.stations = scn.stations.map((s) =>
+        s.id === paymentId ? { ...s, staffCount: 0, parallelServers: 0 } : s,
+      );
+    }
+
+    this.store.mutate((p) => {
+      p.scenarios = [scn, ...p.scenarios.filter((s) => s.id !== scn.id)];
+      p.activeScenarioId = scn.id;
+    });
+    return scn;
+  }
+
+  runEventSimulation(): SimulationResult {
+    const scn = this.ensureEventScenario(false);
+    const result = runDiscreteEvent(scn, { sampleDt: 1 });
+    this.session.simResult = result;
+    this.session.simCompare = null;
+    this.notifyUi();
+    return result;
+  }
+
+  compareCheckinPayment(): ScenarioCompareResult {
+    const scn = this.ensureEventScenario(false);
+    const { combined, separated } = buildCheckinPaymentVariants(scn);
+    const a = runDiscreteEvent(combined, { sampleDt: 2 });
+    const b = runDiscreteEvent(separated, { sampleDt: 2 });
+    const cmp = compareScenarioResults(a, b);
+    this.session.simCompare = cmp;
+    this.session.simResult = cmp.winner === "b" ? b : a;
+    this.notifyUi();
+    return cmp;
+  }
 
   startSimulation(params?: Partial<SimParams>): void {
-    const p: SimParams = { countPerRoute: params?.countPerRoute ?? 8, speed: params?.speed ?? 1.2, spacing: params?.spacing ?? 1.0 };
-    const routes = this.state.routes.filter((r) => r.visible && r.points.length >= 2);
-    if (routes.length === 0) { this.toast("尚無可模擬的動線"); return; }
-    this.simState = initSimulation(routes, p);
+    // Prefer DES when we can build a scenario; else fall back to route-walk.
+    const scn = this.ensureEventScenario(false);
+    if (scn.stations.length >= 2) {
+      this.startEventPlayback();
+      return;
+    }
+    this.startRouteWalk(params);
+  }
+
+  startEventPlayback(): void {
+    const result = this.runEventSimulation();
+    this.stopSimLoopOnly();
+    this.session.simMode = "event-flow";
     this.session.simPlaying = true;
+    this.session.simPaused = false;
+    this.session.simTime = 0;
+    this.applyDesFrame(0, result);
     this.simLast = performance.now();
     this.notifyUi();
     this.simLoop();
   }
+
+  startRouteWalk(params?: Partial<SimParams>): void {
+    const p: SimParams = {
+      countPerRoute: params?.countPerRoute ?? 8,
+      speed: params?.speed ?? 1.2,
+      spacing: params?.spacing ?? 1.0,
+    };
+    const routes = this.state.routes.filter((r) => r.visible && r.points.length >= 2);
+    if (routes.length === 0) {
+      this.toast("尚無可模擬的動線，請先建立活動流程或動線");
+      return;
+    }
+    this.stopSimLoopOnly();
+    this.simState = initSimulation(routes, p);
+    this.session.simMode = "route-walk";
+    this.session.simPlaying = true;
+    this.session.simPaused = false;
+    this.session.simResult = null;
+    this.simLast = performance.now();
+    this.notifyUi();
+    this.simLoop();
+  }
+
+  pauseSimulation(paused = !this.session.simPaused): void {
+    this.session.simPaused = paused;
+    this.simLast = performance.now();
+    this.notifyUi();
+    if (!paused && this.session.simPlaying) this.simLoop();
+  }
+
+  setSimSpeed(speed: number): void {
+    this.session.simSpeed = Math.max(0.5, Math.min(10, speed));
+    this.notifyUi();
+  }
+
+  restartSimulation(): void {
+    if (this.session.simMode === "event-flow") this.startEventPlayback();
+    else if (this.session.simMode === "route-walk") this.startRouteWalk();
+    else this.startSimulation();
+  }
+
   stopSimulation(): void {
+    this.stopSimLoopOnly();
     this.session.simPlaying = false;
-    if (this.simRaf !== null) { cancelAnimationFrame(this.simRaf); this.simRaf = null; }
+    this.session.simPaused = false;
+    this.session.simMode = "off";
     this.session.simPositions = [];
     this.session.bottlenecks = [];
+    this.session.simQueues = {};
+    this.session.simTime = 0;
     this.simState = null;
     this.render();
   }
+
+  private stopSimLoopOnly(): void {
+    if (this.simRaf !== null) {
+      cancelAnimationFrame(this.simRaf);
+      this.simRaf = null;
+    }
+  }
+
+  private applyDesFrame(t: number, result: SimulationResult): void {
+    const frame = frameAt(result, t);
+    if (!frame) return;
+    this.session.simTime = frame.t;
+    this.session.simQueues = frame.queues;
+    this.session.simPositions = frame.agents
+      .filter((a) => a.state !== "pending" && a.state !== "done")
+      .map((a) => ({ x: a.x, z: a.z, state: a.state }));
+    this.session.bottlenecks = result.stations
+      .filter((s) => (frame.queues[s.stationId] ?? 0) >= 3)
+      .map((s) => {
+        const st = this.activeScenario()?.stations.find((x) => x.id === s.stationId);
+        return {
+          x: st?.x ?? 0,
+          z: st?.z ?? 0,
+          count: frame.queues[s.stationId] ?? s.maxQueue,
+        };
+      });
+    this.syncScene();
+  }
+
   private simLoop(): void {
-    if (!this.session.simPlaying || !this.simState) return;
+    if (!this.session.simPlaying || this.session.simPaused) return;
     const now = performance.now();
-    const dt = Math.min(0.1, (now - this.simLast) / 1000);
+    const dt = Math.min(0.1, ((now - this.simLast) / 1000) * this.session.simSpeed);
     this.simLast = now;
+
+    if (this.session.simMode === "event-flow" && this.session.simResult) {
+      const result = this.session.simResult;
+      const nextT = this.session.simTime + dt;
+      if (nextT >= result.finishTimeSeconds) {
+        // Loop
+        this.session.simTime = 0;
+        this.applyDesFrame(0, result);
+      } else {
+        this.applyDesFrame(nextT, result);
+      }
+      this.simRaf = requestAnimationFrame(() => this.simLoop());
+      return;
+    }
+
+    if (!this.simState) return;
     const routes = this.state.routes.filter((r) => r.visible && r.points.length >= 2);
     this.simState = stepSimulation(this.simState, routes, dt);
     this.session.simPositions = agentPositions(this.simState, routes);
     this.session.bottlenecks = detectBottlenecks(this.session.simPositions, 1.2, 4);
     this.syncScene();
     if (simulationDone(this.simState, routes)) {
-      // Loop the run so it stays visible until the user stops it.
       this.simState = initSimulation(routes, this.simState.params);
     }
     this.simRaf = requestAnimationFrame(() => this.simLoop());

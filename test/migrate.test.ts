@@ -58,4 +58,11 @@ describe("project migration", () => {
     expect(p.groups).toHaveLength(1);
     expect(p.groups[0].sourceKind).toBe("mat");
   });
+
+  it("upgrades to v6 with scenarios array", () => {
+    const p = migrateProject({ version: 5, name: "v5" } as never);
+    expect(p.version).toBe(6);
+    expect(p.scenarios).toEqual([]);
+    expect(p.activeScenarioId).toBeNull();
+  });
 });

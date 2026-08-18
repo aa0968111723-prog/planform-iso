@@ -126,25 +126,29 @@ describe("quick agent mock provider", () => {
     expect(r.error).toMatch(/允許清單/);
   });
 
-  it("simulate intent uses route simulation adapter", async () => {
+  it("simulate intent uses DES event-flow adapter", async () => {
     const store = new Store(createDefaultProject());
-    store.mutate((p) => {
-      p.routes.push({
-        id: "r1",
-        name: "入場",
-        color: "#38bdf8",
-        type: "entry",
-        points: [
-          { x: 1, z: 1 },
-          { x: 8, z: 1 },
-        ],
-        visible: true,
-      });
-    });
     const agent = new QuickAgent(store, new MockProvider());
     const result = await agent.run({ text: "模擬 60 人進場" });
+    expect(result.response.message).not.toMatch(/尚未合併/);
     const sim = result.toolResults.find((t) => t.tool === "simulateScenario");
     expect(sim?.ok).toBe(true);
-    expect((sim?.data as { available?: boolean })?.available).toBe(true);
+    const data = sim?.data as { available?: boolean; result?: { completed: number }; message?: string };
+    expect(data?.available).toBe(true);
+    expect(data?.result?.completed).toBeGreaterThan(0);
+  });
+
+  it("compare scenarios tool returns A/B winner reason", async () => {
+    const store = new Store(createDefaultProject());
+    const agent = new QuickAgent(store, new MockProvider());
+    const result = await agent.run({ text: "比較報到收費同桌與分桌" });
+    const cmp = result.toolResults.find((t) => t.tool === "compareScenarios");
+    expect(cmp?.ok).toBe(true);
+    const data = cmp?.data as {
+      available: boolean;
+      comparison: { winner: string; reason: string };
+    };
+    expect(data.available).toBe(true);
+    expect(data.comparison.reason.length).toBeGreaterThan(4);
   });
 });

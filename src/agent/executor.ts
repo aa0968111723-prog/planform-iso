@@ -93,16 +93,76 @@ export class AgentExecutor {
         case "getSimulationSummary":
         case "simulateScenario": {
           const participants = num(call.args?.participants, 60);
+          // Ensure scenario exists on the draft so subsequent tools see it.
+          const ensured = eventFlowAdapter.ensureScenario(draft!, participants);
+          if (!draft!.scenarios.some((s) => s.id === ensured.id)) {
+            this.tx.mutate((p) => {
+              p.scenarios = [...(p.scenarios ?? []), ensured];
+              p.activeScenarioId = ensured.id;
+            });
+          } else if (ensured.participantCount !== draft!.scenarios.find((s) => s.id === ensured.id)?.participantCount) {
+            this.tx.mutate((p) => {
+              p.scenarios = p.scenarios.map((s) =>
+                s.id === ensured.id ? { ...s, participantCount: participants } : s,
+              );
+            });
+          }
           return {
             ok: true,
             tool: call.tool,
-            data: eventFlowAdapter.simulateScenario(draft!, participants),
+            data: eventFlowAdapter.simulateScenario(this.tx.getDraft()!, participants),
           };
         }
-        case "compareScenarios":
-        case "createServiceStation":
-        case "updateServiceStation":
-          return { ok: true, tool: call.tool, data: eventFlowAdapter.createServiceStation() };
+        case "compareScenarios": {
+          const participants = num(call.args?.participants, 60);
+          return {
+            ok: true,
+            tool: call.tool,
+            data: eventFlowAdapter.compareScenarios(draft!, participants),
+          };
+        }
+        case "createServiceStation": {
+          let created: ReturnType<typeof eventFlowAdapter.createServiceStation> | null = null;
+          this.tx.mutate((p) => {
+            created = eventFlowAdapter.createServiceStation(p, {
+              type: str(call.args?.type, "custom") as never,
+              name: str(call.args?.name, "") || undefined,
+              x: typeof call.args?.x === "number" ? call.args.x : undefined,
+              z: typeof call.args?.z === "number" ? call.args.z : undefined,
+              staffCount: typeof call.args?.staffCount === "number" ? call.args.staffCount : undefined,
+              meanServiceSeconds:
+                typeof call.args?.meanServiceSeconds === "number"
+                  ? call.args.meanServiceSeconds
+                  : undefined,
+              objectId: str(call.args?.objectId, "") || undefined,
+              zoneId: str(call.args?.zoneId, "") || undefined,
+            });
+          });
+          return { ok: true, tool: call.tool, data: created };
+        }
+        case "updateServiceStation": {
+          const stationId = str(call.args?.stationId);
+          if (!stationId) return { ok: false, tool: call.tool, error: "缺少 stationId" };
+          let updated: ReturnType<typeof eventFlowAdapter.updateServiceStation> | null = null;
+          this.tx.mutate((p) => {
+            updated = eventFlowAdapter.updateServiceStation(p, {
+              stationId,
+              name: str(call.args?.name, "") || undefined,
+              staffCount: typeof call.args?.staffCount === "number" ? call.args.staffCount : undefined,
+              parallelServers:
+                typeof call.args?.parallelServers === "number" ? call.args.parallelServers : undefined,
+              meanServiceSeconds:
+                typeof call.args?.meanServiceSeconds === "number"
+                  ? call.args.meanServiceSeconds
+                  : undefined,
+              x: typeof call.args?.x === "number" ? call.args.x : undefined,
+              z: typeof call.args?.z === "number" ? call.args.z : undefined,
+              queueCapacity:
+                typeof call.args?.queueCapacity === "number" ? call.args.queueCapacity : undefined,
+            });
+          });
+          return { ok: true, tool: call.tool, data: updated };
+        }
 
         case "createCustomAssetProxy": {
           const semanticType = (str(call.args?.semanticType, "table") as SemanticAssetType) || "table";

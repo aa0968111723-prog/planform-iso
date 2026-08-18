@@ -258,12 +258,27 @@ html, body {
 
   .left, .right {
     top: auto; bottom: calc(60px + env(safe-area-inset-bottom)); width: 100%;
-    max-height: 55dvh;
+    max-height: 45dvh;
     border: 1px solid var(--border);
     border-radius: 16px 16px 0 0;
     transform: translateY(120%);
-    transition: transform 0.22s ease;
+    transition: transform 0.22s ease, max-height 0.22s ease;
     box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+    padding-top: 0;
+  }
+  .left.sheet--collapsed, .right.sheet--collapsed { max-height: 72px; overflow: hidden; }
+  .left.sheet--half, .right.sheet--half { max-height: 45dvh; }
+  .left.sheet--full, .right.sheet--full { max-height: 85dvh; }
+  .sheet-handle {
+    display: flex; align-items: center; justify-content: center;
+    height: 28px; flex-shrink: 0; cursor: grab; touch-action: none;
+    position: sticky; top: 0; z-index: 2;
+    background: linear-gradient(to bottom, var(--panel-solid), transparent);
+  }
+  .sheet-handle::before {
+    content: "";
+    width: 40px; height: 4px; border-radius: 999px;
+    background: var(--border);
   }
   #app.show-left .left { transform: translateY(0); }
   #app.show-inspector .right { transform: translateY(0); }
@@ -290,7 +305,10 @@ html, body {
   .placebar-wrap, .measurebar { bottom: calc(72px + env(safe-area-inset-bottom)); }
 }
 
-/* --- Quick Agent compact sheet ----------------------------------------- */
+/* --- sim panel ---------------------------------------------------------- */
+.sim-panel-host { display: flex; flex-direction: column; gap: 8px; }
+.sim-transport { margin: 6px 0; }
+.sim-panel .readout { margin-top: 6px; }
 .chip--accent { border-color: #38bdf8; color: #bae6fd; }
 .agent-sheet {
   position: absolute;

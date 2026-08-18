@@ -11,6 +11,8 @@ import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
 import { buildCustomAssetFlow } from "./customAssetFlow";
+import { buildVenueCaptureFlow } from "./venueCapture";
+import { refreshSimPanel } from "./simPanel";
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
@@ -47,8 +49,10 @@ export class UI {
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true, simplify: false };
   private agentSheet: QuickAgentSheetHandles | null = null;
   private smartBox = el("div", { class: "list" });
-  private simBox = el("div", { class: "readout" });
+  private simPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
+  private sheetDetent: "collapsed" | "half" | "full" = "half";
+  private sheetHistoryPushed = false;
   constructor(private app: App, private root: HTMLElement) {
     root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast, this.teambar, this.ctxbar);
     this.buildTopbar();
@@ -59,8 +63,10 @@ export class UI {
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
     this.app.onChange(() => this.update());
     this.bindKeys();
+    this.bindSheetGestures();
     this.agentSheet = buildQuickAgentSheet(app);
     root.append(this.agentSheet.root);
+    this.applySheetDetent();
     this.update();
     this.buildQuickStart();
   }
@@ -141,21 +147,102 @@ export class UI {
         const w = b.dataset.nav as Workflow;
         // Re-tapping the active tab collapses the sheet back to full Canvas.
         if (this.app.session.workflow === w && this.root.classList.contains("show-left")) {
-          this.root.classList.remove("show-left");
+          this.closeSheet();
           return;
         }
         this.app.setWorkflow(w);
-        this.root.classList.add("show-left");
+        this.openSheet();
       }));
+  }
+
+  private sheetHandle(): HTMLElement {
+    return el("div", { class: "sheet-handle", title: "拖曳收合面板" });
+  }
+
+  private applySheetDetent(): void {
+    for (const elNode of [this.left, this.right]) {
+      elNode.classList.remove("sheet--collapsed", "sheet--half", "sheet--full");
+      elNode.classList.add(`sheet--${this.sheetDetent}`);
+    }
+  }
+
+  private openSheet(): void {
+    this.root.classList.add("show-left");
+    this.sheetDetent = "half";
+    this.applySheetDetent();
+    if (!this.sheetHistoryPushed && typeof history !== "undefined") {
+      try {
+        history.pushState({ planformSheet: true }, "");
+        this.sheetHistoryPushed = true;
+      } catch { /* ignore */ }
+    }
+  }
+
+  private closeSheet(): void {
+    this.root.classList.remove("show-left");
+    this.root.classList.remove("show-inspector");
+    this.mobilePropsOpen = false;
+    if (this.sheetHistoryPushed && typeof history !== "undefined") {
+      this.sheetHistoryPushed = false;
+      try {
+        if ((history.state as { planformSheet?: boolean } | null)?.planformSheet) history.back();
+      } catch { /* ignore */ }
+    }
+  }
+
+  private bindSheetGestures(): void {
+    if (typeof window === "undefined") return;
+    window.addEventListener("popstate", () => {
+      if (this.root.classList.contains("show-left") || this.root.classList.contains("show-inspector")) {
+        this.root.classList.remove("show-left", "show-inspector");
+        this.mobilePropsOpen = false;
+        this.sheetHistoryPushed = false;
+      }
+    });
+
+    let startY = 0;
+    let dragging = false;
+    const onStart = (e: PointerEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest?.(".sheet-handle")) return;
+      dragging = true;
+      startY = e.clientY;
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!dragging) return;
+      const dy = e.clientY - startY;
+      if (dy > 48) {
+        if (this.sheetDetent === "full") this.sheetDetent = "half";
+        else if (this.sheetDetent === "half") this.sheetDetent = "collapsed";
+        else this.closeSheet();
+        this.applySheetDetent();
+        dragging = false;
+      } else if (dy < -48) {
+        if (this.sheetDetent === "collapsed") this.sheetDetent = "half";
+        else this.sheetDetent = "full";
+        this.applySheetDetent();
+        dragging = false;
+      }
+    };
+    const onEnd = () => { dragging = false; };
+    this.left.addEventListener("pointerdown", onStart);
+    this.left.addEventListener("pointermove", onMove);
+    this.left.addEventListener("pointerup", onEnd);
+    this.right.addEventListener("pointerdown", onStart);
+    this.right.addEventListener("pointermove", onMove);
+    this.right.addEventListener("pointerup", onEnd);
   }
 
   // --- left panel (workflow-driven) --------------------------------------
 
   private rebuildLeft(): void {
     this.left.innerHTML = "";
+    this.left.append(this.sheetHandle());
     const wf = this.app.session.workflow;
     if (wf === "site") this.left.append(
       this.areaSection(), this.tileSection(), this.calibrationSection(),
+      buildVenueCaptureFlow(this.app),
       el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
       buildLibrary(this.app, { categories: ["fixture"] }),
     );
@@ -290,9 +377,7 @@ export class UI {
     const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
       button(`${p.icon} ${p.label.replace("動線", "")}`, () => this.app.newRoutePreset(p.type as RouteType), "chip chip--sm")));
 
-    const sim = this.app.session.simPlaying
-      ? button("停止模擬", () => this.app.stopSimulation(), "btn btn--primary")
-      : button("▶ 模擬動線", () => this.app.startSimulation());
+    refreshSimPanel(this.simPanelRoot, this.app);
 
     return section("動線", [
       el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。" }),
@@ -300,18 +385,8 @@ export class UI {
       el("div", { class: "row" }, [button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
       list,
       el("div", { class: "subhead", text: "模擬活動流程" }),
-      sim,
-      this.simBox,
+      this.simPanelRoot,
     ]);
-  }
-
-  private updateSimBox(): void {
-    this.simBox.innerHTML = "";
-    if (!this.app.session.simPlaying) { this.simBox.append(el("span", { class: "hint", text: "按「模擬動線」用小圓點沿動線移動，找出壅塞與交叉。" })); return; }
-    const bn = this.app.session.bottlenecks.length;
-    this.simBox.append(el("div", { text: `移動中人數：${this.app.session.simPositions.length}` }));
-    this.simBox.append(el("div", { text: bn ? `⚠ 偵測到 ${bn} 處可能壅塞` : "目前無明顯壅塞" }));
-    this.simBox.classList.toggle("readout--warn", bn > 0);
   }
 
   private validationSection(): HTMLElement {
@@ -327,7 +402,12 @@ export class UI {
           ...(iss.suggestedAction ? [el("div", { class: "issue__hint", text: `建議：${iss.suggestedAction}` })] : []),
         ]),
       ]) as HTMLButtonElement;
-      row.addEventListener("click", () => { this.app.focusIssue(iss); this.root.classList.remove("show-left"); });
+      row.addEventListener("click", () => {
+        this.app.focusIssue(iss);
+        this.closeSheet();
+        this.sheetDetent = "collapsed";
+        this.applySheetDetent();
+      });
       list.append(row);
     }
     if (!issues.length) list.append(el("span", { class: "hint", text: "目前沒有問題。修改場佈後會自動重新檢查。" }));
@@ -385,6 +465,20 @@ export class UI {
         button("生活組", () => shot("staff", "life", "life"), "chip chip--sm"),
         button("引導組", () => shot("staff", "guide", "guide"), "chip chip--sm"),
       ]),
+      el("div", { class: "subhead", text: "模擬摘要" }),
+      el("p", { class: "hint", text: this.app.session.simResult
+        ? this.app.session.simResult.summaryLines.join(" ")
+        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
+      button("匯出模擬摘要 PNG", () => {
+        const r = this.app.session.simResult ?? this.app.runEventSimulation();
+        downloadPng(renderConstructionPlan(state(), {
+          ...o,
+          preset: "route",
+          simplify: true,
+          titleSuffix: "模擬摘要",
+          extraNotes: r.summaryLines,
+        }), "planform-sim-summary.png");
+      }, "btn btn--ghost"),
       el("div", { class: "grid2" }, [
         selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),
         selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
@@ -458,7 +552,7 @@ export class UI {
 
     // Smart layout + simulation live boxes.
     this.updateSmartBox();
-    this.updateSimBox();
+    if (sess.workflow === "route") refreshSimPanel(this.simPanelRoot, this.app);
 
     // Team / partner view overlay.
     this.updateTeamView();
@@ -507,6 +601,12 @@ export class UI {
         el("div", {}, [
           el("div", { class: "teambar__title", text: s.name || "活動場佈" }),
           el("div", { class: "teambar__desc", text: s.description || buildSummaryLines(s).slice(0, 2).join("　") }),
+          ...(this.app.session.simResult
+            ? [el("div", {
+              class: "teambar__desc",
+              text: this.app.session.simResult.summaryLines.join(" "),
+            })]
+            : []),
         ]),
         el("div", { class: "row" }, [
           button("分享圖", () => downloadPng(renderConstructionPlan(s, { preset: "full", simplify: true }), "planform-overview.png"), "chip"),

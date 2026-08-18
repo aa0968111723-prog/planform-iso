@@ -104,21 +104,27 @@ export class MockProvider implements AgentProvider {
       const n = Number((text.match(/(\d+)\s*人/) ?? [])[1] ?? 60);
       intents.push({ type: "simulate", participants: n });
       toolCalls.push({ tool: "simulateScenario", args: { participants: n } });
-      messages.push("模擬核心尚未合併，改以 Validation 檢查擁塞風險。");
-      toolCalls.push({ tool: "validateLayout", args: {} });
+      messages.push(`將以本地流程模擬 ${n} 人進場（報到／收費分流）。`);
+    }
+
+    if (/比較|同桌|分桌|報到.*收費.*比/.test(text)) {
+      intents.push({ type: "simulate", participants: 60 });
+      toolCalls.push({ tool: "compareScenarios", args: { participants: 60 } });
+      messages.push("比較「報到＋收費同桌」與「分桌」兩種方案。");
     }
 
     if (/哪裡最塞|瓶頸|塞車/.test(text)) {
       intents.push({ type: "explain-bottleneck" });
+      toolCalls.push({ tool: "simulateScenario", args: { participants: 60 } });
       toolCalls.push({ tool: "getValidationIssues", args: {} });
-      toolCalls.push({ tool: "validateLayout", args: {} });
-      messages.push("根據 Validation 標出可能擁塞處。");
+      messages.push("模擬進場並標出瓶頸站點。");
     }
 
     if (/幫我改善|優化/.test(text)) {
       intents.push({ type: "optimize-layout", objectives: ["clear-doors", "separate-checkin-payment"] });
       toolCalls.push({ tool: "validateLayout", args: { optimize: "clear-doors" } });
-      messages.push("預覽改善：清門前與服務分流。");
+      toolCalls.push({ tool: "compareScenarios", args: { participants: 60 } });
+      messages.push("預覽改善：清門前，並比較報到／收費分流。");
     }
 
     if (/動線圖|給夥伴|整理成/.test(text)) {
@@ -134,6 +140,9 @@ export class MockProvider implements AgentProvider {
       "getValidationIssues",
       "simulateScenario",
       "getSimulationSummary",
+      "compareScenarios",
+      "createServiceStation",
+      "updateServiceStation",
       "getProjectSummary",
     ]);
     const cleaned: AgentToolCall[] = toolCalls.filter((c) => allowed.has(c.tool));
@@ -141,7 +150,7 @@ export class MockProvider implements AgentProvider {
     if (intents.length === 0) {
       intents.push({ type: "unknown", raw: text });
       cleaned.push({ tool: "getProjectSummary", args: {} });
-      messages.push("我可以幫你：建素材、場佈、檢查、優化。試著說「這裡放兩個報到桌」。");
+      messages.push("我可以幫你：建素材、場佈、模擬、比較方案、檢查、優化。試著說「模擬 60 人進場」。");
     }
 
     return {
