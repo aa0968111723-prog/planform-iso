@@ -8,7 +8,7 @@
  * behaviour, and adds ArrayGroups for repeated layouts. See assets.ts.
  */
 
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 4;
 
 export interface AreaConfig {
   id: "classroom" | "corridor";
@@ -156,6 +156,9 @@ export interface Zone {
   color: string;
   locked: boolean;
   hidden: boolean;
+  icon: string;
+  /** Optional people capacity, shown on the zone label for quick comprehension. */
+  capacity: number | null;
 }
 
 export interface RoutePoint {
@@ -163,12 +166,20 @@ export interface RoutePoint {
   z: number;
 }
 
+export type RouteType =
+  | "entry" | "registration" | "shoe" | "backpack" | "seating" | "group" | "staff" | "custom";
+
 export interface Route {
   id: string;
   name: string;
   color: string;
   points: RoutePoint[];
   visible: boolean;
+  type: RouteType;
+  /** Optional zone associations so a route can be re-checked when zones move. */
+  startZoneId?: string;
+  endZoneId?: string;
+  waypointZoneIds?: string[];
 }
 
 export type ViewName = "iso" | "top" | "front" | "left" | "right";
@@ -184,6 +195,8 @@ export interface LayerVisibility {
 export interface Project {
   version: number;
   name: string;
+  /** Short activity description shown in the team/partner view. */
+  description: string;
   classroom: AreaConfig;
   corridor: AreaConfig;
   tile: TileConfig;
@@ -206,20 +219,21 @@ export function uid(prefix = "id"): string {
 
 export const ZONE_DEFAULTS: Record<
   ZoneType,
-  { label: string; color: string; width: number; depth: number }
+  { label: string; color: string; width: number; depth: number; icon: string }
 > = {
-  registration: { label: "報到區", color: "#38bdf8", width: 2.5, depth: 1.5 },
-  life: { label: "生活組區", color: "#34d399", width: 2, depth: 2 },
-  group: { label: "小組組別區", color: "#a78bfa", width: 3, depth: 3 },
-  meditation: { label: "講師禪定區", color: "#f472b6", width: 2, depth: 2 },
-  shoe: { label: "鞋子擺放區", color: "#fbbf24", width: 2, depth: 1 },
-  backpack: { label: "背包放置區", color: "#fb923c", width: 2, depth: 1 },
+  registration: { label: "報到區", color: "#38bdf8", width: 2.5, depth: 1.5, icon: "👋" },
+  life: { label: "生活組區", color: "#34d399", width: 2, depth: 2, icon: "🧺" },
+  group: { label: "小組組別區", color: "#a78bfa", width: 3, depth: 3, icon: "👥" },
+  meditation: { label: "講師禪定區", color: "#f472b6", width: 2, depth: 2, icon: "🧘" },
+  shoe: { label: "鞋子擺放區", color: "#fbbf24", width: 2, depth: 1, icon: "👟" },
+  backpack: { label: "背包放置區", color: "#fb923c", width: 2, depth: 1, icon: "🎒" },
 };
 
 export function createDefaultProject(): Project {
   return {
     version: PROJECT_VERSION,
     name: "未命名平面圖",
+    description: "",
     classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 },
     corridor: { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8 },
     tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
@@ -230,7 +244,7 @@ export function createDefaultProject(): Project {
     routes: [],
     measurements: [],
     validationSettings: { ...DEFAULT_VALIDATION_SETTINGS },
-    view: "iso",
+    view: "top",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },
   };
 }

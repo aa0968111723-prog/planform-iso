@@ -1,7 +1,9 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import type { MeasurementType, ViewName } from "../core/model";
+import type { MeasurementType, RouteType, ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
+import { buildSummaryLines } from "../core/summary";
+import { ROUTE_PRESETS } from "../core/routes";
 import { issueCounts, type Severity } from "../core/validation";
 import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanPreset } from "../export/constructionPlan";
 import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
@@ -10,7 +12,7 @@ import { buildLibrary, buildPlacementToolbar } from "./library";
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
-  { id: "iso", label: "等角" }, { id: "top", label: "俯視" }, { id: "front", label: "正視" },
+  { id: "top", label: "俯視" }, { id: "iso", label: "等角(3D)" }, { id: "front", label: "正視" },
   { id: "left", label: "左視" }, { id: "right", label: "右視" },
 ];
 const SNAPS: { id: SnapMode; label: string }[] = [
@@ -18,8 +20,8 @@ const SNAPS: { id: SnapMode; label: string }[] = [
   { id: "center", label: "中心" }, { id: "half", label: "半格" },
 ];
 const WORKFLOWS: { id: Workflow; label: string }[] = [
-  { id: "site", label: "場地" }, { id: "layout", label: "排佈" }, { id: "route", label: "動線" },
-  { id: "check", label: "檢查" }, { id: "export", label: "匯出" },
+  { id: "site", label: "場地" }, { id: "layout", label: "場佈" }, { id: "route", label: "動線" },
+  { id: "check", label: "檢查" }, { id: "export", label: "分享" },
 ];
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
@@ -33,14 +35,20 @@ export class UI {
   private measurebar = el("div", { class: "measurebar", style: "display:none" });
   private box = el("div", { class: "boxsel", style: "display:none" });
   private toast = el("div", { class: "toast", style: "display:none" });
+  private teambar = el("div", { class: "teambar" });
+  private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
+  private mobilePropsOpen = false;
   private lastWorkflow: Workflow | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
-  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true };
+  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true, simplify: false };
+  private smartBox = el("div", { class: "list" });
+  private simBox = el("div", { class: "readout" });
+  private participants = 30;
 
   constructor(private app: App, private root: HTMLElement) {
-    root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast);
+    root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast, this.teambar, this.ctxbar);
     this.buildTopbar();
     this.buildNav();
     this.placebar.append(buildPlacementToolbar(app));
@@ -49,6 +57,33 @@ export class UI {
     this.app.onChange(() => this.update());
     this.bindKeys();
     this.update();
+    this.buildQuickStart();
+  }
+
+  private buildQuickStart(): void {
+    const KEY = "planform-iso:quickstart";
+    try { if (localStorage.getItem(KEY)) return; } catch { return; }
+    const steps = [
+      "① 場地：設定教室尺寸與地磚，放門 / 投影幕",
+      "② 場佈：建立功能區，輸入人數自動排地墊，放桌椅",
+      "③ 動線：選類型畫人流，可「聚焦」或「▶ 模擬動線」",
+      "④ 分享：匯出場佈總覽 / 動線圖 / 夥伴任務圖，或按「檢視給團隊」",
+    ];
+    const dismiss = () => { try { localStorage.setItem(KEY, "1"); } catch { /* ignore */ } overlay.remove(); };
+    const overlay = el("div", { class: "quickstart" }, [
+      el("div", { class: "quickstart__card" }, [
+        el("div", { class: "quickstart__title", text: "平面場 ISO — 三步驟快速上手" }),
+        el("div", { class: "quickstart__steps" }, steps.map((s) => el("div", { text: s }))),
+        el("p", { class: "hint", text: "手機：下方分頁切換場地 / 場佈 / 動線 / 分享；再點同一分頁可收回、露出畫布。" }),
+        button("開始使用", dismiss),
+      ]),
+    ]);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) dismiss(); });
+    this.root.append(overlay);
+  }
+
+  private isMobile(): boolean {
+    return window.matchMedia("(max-width: 820px)").matches;
   }
 
   private showToast(msg: string, undo = false): void {
@@ -68,31 +103,44 @@ export class UI {
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
     const flows = el("div", { class: "group group--flows", "data-group": "flows" },
       WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
-    const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
+    const snapSel = el("select", { class: "field__input field__input--inline desktop-only", title: "吸附模式" }) as HTMLSelectElement;
     for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
     snapSel.value = this.app.session.snap;
     snapSel.addEventListener("change", () => this.app.setSnap(snapSel.value as SnapMode));
     this.snapSel = snapSel;
     const more = el("div", { class: "group", "data-group": "view2" }, [
       button("名稱", () => this.app.setShowLabels(!this.app.session.showLabels), "chip chip--sm"),
-      button("置中", () => this.app.recenterView(), "chip chip--sm"),
+      button("置中", () => this.app.recenterView(), "chip chip--sm desktop-only"),
       snapSel,
     ]);
-    this.topbar.append(el("div", { class: "topbar__title", text: "平面場 ISO" }), history, flows, views, more);
+    const viewToggle = button("視角", () => {
+      this.app.setView(this.app.store.getState().view === "top" ? "iso" : "top");
+    }, "chip mobile-only");
+    const team = button("檢視給團隊", () => this.app.setTeamView(true), "chip chip--primary");
+    this.topbar.append(el("div", { class: "topbar__title", text: "平面場 ISO" }), history, flows, views, more, viewToggle, team);
   }
 
   private buildNav(): void {
     const items: { w: Workflow; label: string; icon: string }[] = [
-      { w: "site", label: "場地", icon: "▦" }, { w: "layout", label: "素材", icon: "▤" },
+      { w: "site", label: "場地", icon: "▦" }, { w: "layout", label: "場佈", icon: "▤" },
       { w: "route", label: "動線", icon: "↝" }, { w: "check", label: "檢查", icon: "✓" },
-      { w: "export", label: "更多", icon: "⋯" },
+      { w: "export", label: "分享", icon: "↗" },
     ];
     this.nav.append(...items.map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.w }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
-      b.addEventListener("click", () => { this.app.setWorkflow(b.dataset.nav as Workflow); this.root.classList.add("show-left"); }));
+      b.addEventListener("click", () => {
+        const w = b.dataset.nav as Workflow;
+        // Re-tapping the active tab collapses the sheet back to full Canvas.
+        if (this.app.session.workflow === w && this.root.classList.contains("show-left")) {
+          this.root.classList.remove("show-left");
+          return;
+        }
+        this.app.setWorkflow(w);
+        this.root.classList.add("show-left");
+      }));
   }
 
   // --- left panel (workflow-driven) --------------------------------------
@@ -105,7 +153,7 @@ export class UI {
       el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
       buildLibrary(this.app, { categories: ["fixture"] }),
     );
-    else if (wf === "layout") this.left.append(buildLibrary(this.app, { categories: ["furniture", "equipment", "floor"], zones: true, arrays: true }));
+    else if (wf === "layout") this.left.append(this.smartLayoutSection(), buildLibrary(this.app, { categories: ["furniture", "equipment", "floor"], zones: true, arrays: true }));
     else if (wf === "route") this.left.append(this.routeSection());
     else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());
@@ -186,22 +234,74 @@ export class UI {
     this.app.applyCalibration(action, cm / 100);
   }
 
+  private smartLayoutSection(): HTMLElement {
+    const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input" }) as HTMLInputElement;
+    pIn.addEventListener("change", () => { this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0)); });
+    return section("人數場佈（地墊排列器）", [
+      el("p", { class: "hint", text: "輸入人數，系統依空間與走道自動產生地墊方案。先選一個小區域可排在區域內。" }),
+      el("div", { class: "row" }, [
+        el("label", { class: "field" }, [el("span", { class: "field__label", text: "人數" }), pIn]),
+        button("產生方案", () => this.app.computeMatCandidates(this.participants)),
+      ]),
+      this.smartBox,
+    ]);
+  }
+
+  private updateSmartBox(): void {
+    this.smartBox.innerHTML = "";
+    const cands = this.app.session.matCandidates;
+    if (!cands.length) { this.smartBox.append(el("span", { class: "hint", text: "尚未產生方案。" })); return; }
+    for (const c of cands) {
+      const warn = c.warnings.length ? ` ⚠ ${c.warnings.join("、")}` : " ✓ 可放置";
+      this.smartBox.append(el("div", { class: `card smart ${c.fits ? "" : "smart--warn"}` }, [
+        el("span", { class: "card__body" }, [
+          el("span", { class: "card__title", text: `${c.label}（${c.count} 張）` }),
+          el("span", { class: "card__sub", text: `${c.footprint.width.toFixed(1)} × ${c.footprint.depth.toFixed(1)} m${warn}` }),
+        ]),
+        button("套用", () => this.app.applyMatCandidate(c.id), "chip chip--sm chip--primary"),
+      ]));
+    }
+  }
+
   private routeSection(): HTMLElement {
     const s = this.app.store.getState();
     const list = el("div", { class: "list" });
     for (const r of s.routes) {
+      const focused = this.app.session.focusRouteId === r.id;
       list.append(el("div", { class: "list__row" }, [
         el("span", { text: `${r.name}（${r.points.length} 點）` }),
         button(this.app.session.activeRouteId === r.id ? "繪製中" : "編輯", () => this.app.editRoute(r.id), "chip chip--sm"),
+        button(focused ? "取消聚焦" : "聚焦", () => this.app.setRouteFocus(focused ? null : r.id), focused ? "chip chip--sm chip--primary" : "chip chip--sm"),
         button("刪除", () => { this.app.setSelection([r.id]); this.app.deleteSelection(); }, "chip chip--sm chip--danger"),
       ]));
     }
-    if (!s.routes.length) list.append(el("span", { class: "hint", text: "尚無動線。" }));
+    if (!s.routes.length) list.append(el("span", { class: "hint", text: "尚無動線。選一個類型開始畫。" }));
+
+    const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
+      button(`${p.icon} ${p.label.replace("動線", "")}`, () => this.app.newRoutePreset(p.type as RouteType), "chip chip--sm")));
+
+    const sim = this.app.session.simPlaying
+      ? button("停止模擬", () => this.app.stopSimulation(), "btn btn--primary")
+      : button("▶ 模擬動線", () => this.app.startSimulation());
+
     return section("動線", [
-      el("p", { class: "hint", text: "新增後在畫布點擊地面加入節點；可拖曳節點調整。" }),
-      el("div", { class: "row" }, [button("新增動線", () => this.app.newRoute()), button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
+      el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。" }),
+      presetRow,
+      el("div", { class: "row" }, [button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
       list,
+      el("div", { class: "subhead", text: "模擬活動流程" }),
+      sim,
+      this.simBox,
     ]);
+  }
+
+  private updateSimBox(): void {
+    this.simBox.innerHTML = "";
+    if (!this.app.session.simPlaying) { this.simBox.append(el("span", { class: "hint", text: "按「模擬動線」用小圓點沿動線移動，找出壅塞與交叉。" })); return; }
+    const bn = this.app.session.bottlenecks.length;
+    this.simBox.append(el("div", { text: `移動中人數：${this.app.session.simPositions.length}` }));
+    this.simBox.append(el("div", { text: bn ? `⚠ 偵測到 ${bn} 處可能壅塞` : "目前無明顯壅塞" }));
+    this.simBox.classList.toggle("readout--warn", bn > 0);
   }
 
   private validationSection(): HTMLElement {
@@ -262,11 +362,19 @@ export class UI {
     };
     refreshList();
     const o = this.planOpts;
-    const planSection = section("施工圖輸出", [
-      selectField("圖種", [
-        { value: "full", label: "完整場佈圖" }, { value: "mats", label: "地墊 / 座位圖" },
-        { value: "route", label: "動線圖" }, { value: "staff", label: "工作人員配置圖" },
-      ], o.preset, (v) => { o.preset = v as PlanPreset; }),
+    const shot = (preset: PlanPreset, role: "report" | "life" | "guide" | null, name: string) =>
+      downloadPng(renderConstructionPlan(state(), { ...o, preset, roleFilter: role }), `planform-${name}.png`);
+    const planSection = section("分享給夥伴（圖片）", [
+      el("p", { class: "hint", text: "輸出乾淨、可直接給工作人員看的圖，不含編輯控制點。" }),
+      button("場佈總覽", () => shot("full", null, "overview")),
+      button("動線圖", () => shot("route", null, "route"), "btn btn--ghost"),
+      button("地墊圖", () => shot("mats", null, "mats"), "btn btn--ghost"),
+      el("div", { class: "subhead", text: "夥伴任務圖（只顯示相關資訊）" }),
+      el("div", { class: "row wrap" }, [
+        button("報到組", () => shot("staff", "report", "report"), "chip chip--sm"),
+        button("生活組", () => shot("staff", "life", "life"), "chip chip--sm"),
+        button("引導組", () => shot("staff", "guide", "guide"), "chip chip--sm"),
+      ]),
       el("div", { class: "grid2" }, [
         selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),
         selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
@@ -274,9 +382,9 @@ export class UI {
       el("div", { class: "row wrap" }, [
         button(o.dims ? "✓ 尺寸標註" : "尺寸標註", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
         button(o.inventory ? "✓ 數量清單" : "數量清單", () => { o.inventory = !o.inventory; this.update(); }, o.inventory ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(o.simplify ? "✓ 簡化顯示" : "簡化顯示", () => { o.simplify = !o.simplify; this.update(); }, o.simplify ? "chip chip--sm chip--primary" : "chip chip--sm"),
       ]),
-      button("匯出施工圖 (PNG)", () => downloadPng(renderConstructionPlan(state(), { ...o }), `planform-${o.preset}.png`)),
-      button("匯出 3D 示意圖 (PNG)", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), "planform-3d.png"), "btn btn--ghost"),
+      button("3D 示意圖", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), "planform-3d.png"), "btn btn--ghost"),
     ]);
 
     const measureSection = section("現場量測", [
@@ -298,7 +406,8 @@ export class UI {
       ]),
       importInput,
       el("div", { class: "subhead", text: "本機平面圖" }),
-      textField("名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
+      textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
+      textField("簡短說明（團隊檢視顯示）", state().description, (v) => this.app.updateDescription(v)),
       el("div", { class: "row" }, [layoutName, button("儲存", () => { this.app.store.saveNamedLayout(layoutName.value.trim() || state().name); refreshList(); })]),
       el("div", { class: "row" }, [layoutList,
         button("載入", () => { if (layoutList.value) this.app.store.loadNamedLayout(layoutList.value); }, "btn btn--ghost"),
@@ -337,14 +446,65 @@ export class UI {
       this.rebuildLeft();
     }
 
-    // Inspector.
+    // Smart layout + simulation live boxes.
+    this.updateSmartBox();
+    this.updateSimBox();
+
+    // Team / partner view overlay.
+    this.updateTeamView();
+
+    // Inspector vs mobile context bar.
+    const hasSel = sess.selection.size > 0;
+    if (!hasSel) this.mobilePropsOpen = false;
+    const mobile = this.isMobile();
     this.right.innerHTML = "";
+    if (hasSel && mobile && this.mobilePropsOpen) {
+      this.right.append(button("收起屬性", () => { this.mobilePropsOpen = false; this.update(); }, "btn btn--ghost"));
+    }
     this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
-    this.root.classList.toggle("show-inspector", sess.selection.size > 0);
+    const showInspector = hasSel && (!mobile || this.mobilePropsOpen) && !sess.teamView;
+    this.root.classList.toggle("show-inspector", showInspector);
+    this.updateContextBar(hasSel && mobile && !this.mobilePropsOpen && !sess.teamView);
 
     // Placement + measure bars.
     this.placebar.style.display = sess.mode === "place" ? "flex" : "none";
     this.updateMeasureBar();
+  }
+
+  private updateContextBar(show: boolean): void {
+    this.ctxbar.style.display = show ? "flex" : "none";
+    if (!show) return;
+    this.ctxbar.innerHTML = "";
+    this.ctxbar.append(
+      button("旋轉", () => this.app.rotateSelection(15), "chip"),
+      button("複製", () => this.app.duplicateSelection(), "chip"),
+      button("精調", () => { this.mobilePropsOpen = true; this.update(); }, "chip"),
+      button("屬性", () => { this.mobilePropsOpen = true; this.update(); }, "chip chip--primary"),
+    );
+  }
+
+  private updateTeamView(): void {
+    const on = this.app.session.teamView;
+    this.root.classList.toggle("team", on);
+    this.teambar.innerHTML = "";
+    if (!on) return;
+    const s = this.app.store.getState();
+    const legend = el("div", { class: "teambar__legend" });
+    for (const z of s.zones) legend.append(el("span", { class: "teamchip" }, [el("span", { class: "sw", style: `background:${z.color}` }), el("span", { text: `${z.icon ?? ""}${z.name}` })]));
+    for (const r of s.routes) legend.append(el("span", { class: "teamchip" }, [el("span", { class: "sw", style: `background:${r.color}` }), el("span", { text: r.name })]));
+    this.teambar.append(
+      el("div", { class: "teambar__head" }, [
+        el("div", {}, [
+          el("div", { class: "teambar__title", text: s.name || "活動場佈" }),
+          el("div", { class: "teambar__desc", text: s.description || buildSummaryLines(s).slice(0, 2).join("　") }),
+        ]),
+        el("div", { class: "row" }, [
+          button("分享圖", () => downloadPng(renderConstructionPlan(s, { preset: "full", simplify: true }), "planform-overview.png"), "chip"),
+          button("退出檢視", () => this.app.setTeamView(false), "chip chip--primary"),
+        ]),
+      ]),
+      legend,
+    );
   }
 
   private updateMeasureBar(): void {
