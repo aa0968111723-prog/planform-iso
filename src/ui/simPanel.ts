@@ -93,6 +93,34 @@ function render(app: App): HTMLElement {
     ]),
   ]);
 
+  // Candidates sit directly under the wizard so mobile half/full sheets show
+  // metrics without scrolling past transport / advanced blocks.
+  const candidateBlock =
+    candidates?.length
+      ? el("div", { class: "sim-candidates" }, [
+          el("div", { class: "subhead", text: "方案比較" }),
+          ...candidates.map((c) =>
+            el("div", { class: "card smart" }, [
+              el("span", { class: "card__body" }, [
+                el("span", { class: "card__title", text: c.name }),
+                el("span", {
+                  class: "card__sub",
+                  text: `完成 ${formatSimDuration(c.result.finishTimeSeconds)} · 平均等待 ${formatSimDuration(c.result.avgWaitSeconds)} · 最大排隊 ${c.result.maxQueue} · 人力 ${c.result.staffUsed}`,
+                }),
+                c.result.bottleneckName
+                  ? el("span", { class: "card__sub", text: `瓶頸：${c.result.bottleneckName}` })
+                  : el("span", { class: "card__sub", text: "無明顯瓶頸" }),
+              ]),
+              button("套用", () => app.applyWizardCandidate(c.id), "chip chip--sm chip--primary"),
+              button("播放", () => {
+                app.session.simResult = c.result;
+                app.startEventPlayback();
+              }, "chip chip--sm"),
+            ]),
+          ),
+        ])
+      : null;
+
   const advanced = section(
     "進階",
     [
@@ -127,7 +155,9 @@ function render(app: App): HTMLElement {
     button("最壅塞時刻", () => app.jumpToPeakCongestion(), "chip chip--sm"),
   ]);
 
-  const body: HTMLElement[] = [setup, advanced, transport];
+  const body: HTMLElement[] = [setup];
+  if (candidateBlock) body.push(candidateBlock);
+  body.push(advanced, transport);
 
   if (result) {
     const maxT = Math.max(1, result.finishTimeSeconds);
@@ -150,31 +180,6 @@ function render(app: App): HTMLElement {
         }),
         scrub,
       ]),
-    );
-  }
-
-  if (candidates?.length) {
-    body.push(
-      el("div", { class: "subhead", text: "方案比較" }),
-      ...candidates.map((c) =>
-        el("div", { class: "card smart" }, [
-          el("span", { class: "card__body" }, [
-            el("span", { class: "card__title", text: c.name }),
-            el("span", {
-              class: "card__sub",
-              text: `完成 ${formatSimDuration(c.result.finishTimeSeconds)} · 平均等待 ${formatSimDuration(c.result.avgWaitSeconds)} · 最大排隊 ${c.result.maxQueue} · 人力 ${c.result.staffUsed}`,
-            }),
-            c.result.bottleneckName
-              ? el("span", { class: "card__sub", text: `瓶頸：${c.result.bottleneckName}` })
-              : el("span", { class: "card__sub", text: "無明顯瓶頸" }),
-          ]),
-          button("套用", () => app.applyWizardCandidate(c.id), "chip chip--sm chip--primary"),
-          button("播放", () => {
-            app.session.simResult = c.result;
-            app.startEventPlayback();
-          }, "chip chip--sm"),
-        ]),
-      ),
     );
   }
 

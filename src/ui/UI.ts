@@ -58,6 +58,7 @@ export class UI {
   private participants = 30;
   private sheetDetent: "collapsed" | "half" | "full" = "half";
   private sheetHistoryPushed = false;
+  private lastCandidateCount = 0;
   constructor(private app: App, private root: HTMLElement) {
     root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast, this.teambar, this.ctxbar);
     this.buildTopbar();
@@ -649,14 +650,33 @@ export class UI {
     if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow)));
 
-    if (this.lastWorkflow !== sess.workflow || sess.workflow === "check" || sess.workflow === "route" || sess.workflow === "sim" || sess.workflow === "site" || sess.workflow === "export") {
+    // Rebuild left only on workflow change, or for panels that are fully
+    // regenerated from session (check / site / export). Never rebuild sim/route
+    // on every notify — that resets mobile sheet scroll and hides compare cards.
+    if (this.lastWorkflow !== sess.workflow) {
       this.lastWorkflow = sess.workflow;
+      this.rebuildLeft();
+    } else if (sess.workflow === "check" || sess.workflow === "site" || sess.workflow === "export") {
       this.rebuildLeft();
     }
 
     // Smart layout + simulation live boxes.
     this.updateSmartBox();
-    if (sess.workflow === "route" || sess.workflow === "sim") refreshSimPanel(this.simPanelRoot, this.app);
+    if (sess.workflow === "route" || sess.workflow === "sim") {
+      const scrollTop = this.left.scrollTop;
+      refreshSimPanel(this.simPanelRoot, this.app);
+      this.left.scrollTop = scrollTop;
+      const candCount = sess.layoutCandidates?.length ?? 0;
+      if (candCount > 0 && candCount !== this.lastCandidateCount) {
+        if (this.isMobile() && this.sheetDetent !== "full") {
+          this.sheetDetent = "full";
+          this.applySheetDetent();
+        }
+        const cand = this.simPanelRoot.querySelector(".sim-candidates");
+        cand?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+      this.lastCandidateCount = candCount;
+    }
 
     // Team / partner view overlay.
     this.updateTeamView();
