@@ -17,6 +17,15 @@
 - 本機自動儲存與具名平面圖、匯入／匯出 JSON、匯出俯視／動線／模擬摘要 PNG
 - 可「加到主畫面」當成 App 使用
 
+## Major Optimization V2（本分支）
+
+- **報到流程 Wizard**：人數／抵達／已繳／現場繳／人力 → 比較 A 同桌、B 分桌、C 入口分流、D 多桌平行（真實 Scene／Station／Route）
+- **Simulation 2.0**：seed、抵達分布、服務時間、條件分流、排隊容量、利用率／等待／吞吐／瓶頸時長；**場佈距離影響模擬**
+- **人流視覺化**：Queue Lane、heatmap、timeline scrub、「最壅塞時刻」、問題聚焦
+- **EventOptimizationEngine**：本地 deterministic 搜尋最快／最少等待／最低最大排隊／最省人力／最順動線，顯示量化 before/after
+- **Quick Agent 2.0**：短指令 → typed tools → staged Preview → Commit／Cancel／Undo（含「少一個工作人員會怎樣？」）
+- 手機主入口：📷 掃描／🪑 場佈／▶ 模擬／✦ AI
+
 ## 本機開發
 
 需要 Node.js 22+。

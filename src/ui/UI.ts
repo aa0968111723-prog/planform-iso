@@ -75,17 +75,18 @@ export class UI {
     const KEY = "planform-iso:quickstart";
     try { if (localStorage.getItem(KEY)) return; } catch { return; }
     const steps = [
-      "① 場地：設定教室尺寸與地磚，放門 / 投影幕",
+      "① 掃描：拍場地或設教室尺寸，校正後確認寫入",
       "② 場佈：建立功能區，輸入人數自動排地墊，放桌椅",
-      "③ 動線：選類型畫人流，可「聚焦」或「▶ 模擬動線」",
-      "④ 分享：匯出場佈總覽 / 動線圖 / 夥伴任務圖，或按「檢視給團隊」",
+      "③ 模擬：設定人數／現場繳費 → 比較方案 → ▶ 播放看出壅塞",
+      "④ AI：一句話優化／少人力會怎樣（Preview 後才套用）",
+      "⑤ 分享：匯出場佈／動線／模擬摘要給夥伴（⋯更多）",
     ];
     const dismiss = () => { try { localStorage.setItem(KEY, "1"); } catch { /* ignore */ } overlay.remove(); };
     const overlay = el("div", { class: "quickstart" }, [
       el("div", { class: "quickstart__card" }, [
-        el("div", { class: "quickstart__title", text: "平面場 ISO — 三步驟快速上手" }),
+        el("div", { class: "quickstart__title", text: "平面場 ISO — 快速上手" }),
         el("div", { class: "quickstart__steps" }, steps.map((s) => el("div", { text: s }))),
-        el("p", { class: "hint", text: "手機：下方分頁切換場地 / 場佈 / 動線 / 分享；再點同一分頁可收回、露出畫布。" }),
+        el("p", { class: "hint", text: "手機：下方 📷掃描 / 🪑場佈 / ▶模擬 / ✦AI；再點同一分頁可收回、露出畫布。" }),
         button("開始使用", dismiss),
       ]),
     ]);
