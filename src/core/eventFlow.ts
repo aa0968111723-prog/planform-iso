@@ -587,7 +587,8 @@ export function cloneScenario(
     const p = patch?.stationPatches?.[s.id];
     return p ? { ...s, ...p } : { ...s };
   });
-  const { stationPatches: _sp, ...rest } = patch ?? {};
+  const rest = { ...(patch ?? {}) };
+  delete rest.stationPatches;
   return {
     ...scenario,
     ...rest,

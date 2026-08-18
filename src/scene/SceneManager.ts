@@ -64,8 +64,10 @@ interface SessionView {
   showLabels: boolean;
   focusRouteId?: string | null;
   simplify?: boolean;
-  simPositions?: { x: number; z: number; routeId: string }[];
+  simPositions?: { x: number; z: number; routeId?: string; state?: string }[];
   bottlenecks?: { x: number; z: number; count: number }[];
+  simQueues?: Record<string, number>;
+  simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
 }
 
 const SIMPLIFY_HIDE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["switch", "computer"]);
@@ -92,6 +94,7 @@ export class SceneManager {
   private overlayGroup = new Group(); // selection + live measure/calibrate
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
+  private stationLabels = new Map<string, TextLabel>();
   private arrayNodes = new Map<string, { mesh: InstancedMesh; sig: string }>();
   private zoneNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
@@ -549,10 +552,29 @@ export class SceneManager {
       }
     }
 
-    // Simulation markers + bottleneck warnings.
+    // Simulation markers + bottleneck warnings + station queue badges.
+    if (session.simStations?.length) {
+      for (const st of session.simStations) {
+        const q = st.queue;
+        const color = q >= 6 ? 0xef4444 : q >= 3 ? 0xf59e0b : 0x22c55e;
+        const pad = new Mesh(
+          new BoxGeometry(0.7, 0.04, 0.7),
+          new MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false }),
+        );
+        pad.position.set(st.x, 0.55, st.z);
+        this.overlayGroup.add(pad);
+        if (!this.stationLabels.has(st.id)) this.stationLabels.set(st.id, new TextLabel());
+        const label = this.stationLabels.get(st.id)!;
+        this.overlayGroup.add(label.sprite);
+        label.set(`${st.name}${q ? ` ${q}` : ""}`, q >= 6 ? "#fecaca" : q >= 3 ? "#fde68a" : "#bbf7d0");
+        label.sprite.position.set(st.x, 1.1, st.z);
+      }
+    }
     if (session.simPositions && session.simPositions.length) {
       for (const p of session.simPositions) {
-        const dot = new Mesh(new BoxGeometry(0.28, 0.28, 0.28), new MeshBasicMaterial({ color: 0xfef08a }));
+        const col =
+          p.state === "queued" ? 0xfbbf24 : p.state === "serving" ? 0x38bdf8 : 0xfef08a;
+        const dot = new Mesh(new BoxGeometry(0.28, 0.28, 0.28), new MeshBasicMaterial({ color: col }));
         dot.position.set(p.x, 0.5, p.z);
         this.overlayGroup.add(dot);
       }

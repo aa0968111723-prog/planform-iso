@@ -11,6 +11,7 @@ import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
 import { buildCustomAssetFlow } from "./customAssetFlow";
+import { refreshSimPanel } from "./simPanel";
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
@@ -47,7 +48,7 @@ export class UI {
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true, simplify: false };
   private agentSheet: QuickAgentSheetHandles | null = null;
   private smartBox = el("div", { class: "list" });
-  private simBox = el("div", { class: "readout" });
+  private simPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
   constructor(private app: App, private root: HTMLElement) {
     root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast, this.teambar, this.ctxbar);
@@ -290,9 +291,7 @@ export class UI {
     const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
       button(`${p.icon} ${p.label.replace("動線", "")}`, () => this.app.newRoutePreset(p.type as RouteType), "chip chip--sm")));
 
-    const sim = this.app.session.simPlaying
-      ? button("停止模擬", () => this.app.stopSimulation(), "btn btn--primary")
-      : button("▶ 模擬動線", () => this.app.startSimulation());
+    refreshSimPanel(this.simPanelRoot, this.app);
 
     return section("動線", [
       el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。" }),
@@ -300,18 +299,8 @@ export class UI {
       el("div", { class: "row" }, [button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
       list,
       el("div", { class: "subhead", text: "模擬活動流程" }),
-      sim,
-      this.simBox,
+      this.simPanelRoot,
     ]);
-  }
-
-  private updateSimBox(): void {
-    this.simBox.innerHTML = "";
-    if (!this.app.session.simPlaying) { this.simBox.append(el("span", { class: "hint", text: "按「模擬動線」用小圓點沿動線移動，找出壅塞與交叉。" })); return; }
-    const bn = this.app.session.bottlenecks.length;
-    this.simBox.append(el("div", { text: `移動中人數：${this.app.session.simPositions.length}` }));
-    this.simBox.append(el("div", { text: bn ? `⚠ 偵測到 ${bn} 處可能壅塞` : "目前無明顯壅塞" }));
-    this.simBox.classList.toggle("readout--warn", bn > 0);
   }
 
   private validationSection(): HTMLElement {
@@ -458,7 +447,7 @@ export class UI {
 
     // Smart layout + simulation live boxes.
     this.updateSmartBox();
-    this.updateSimBox();
+    if (sess.workflow === "route") refreshSimPanel(this.simPanelRoot, this.app);
 
     // Team / partner view overlay.
     this.updateTeamView();

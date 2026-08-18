@@ -290,7 +290,10 @@ html, body {
   .placebar-wrap, .measurebar { bottom: calc(72px + env(safe-area-inset-bottom)); }
 }
 
-/* --- Quick Agent compact sheet ----------------------------------------- */
+/* --- sim panel ---------------------------------------------------------- */
+.sim-panel-host { display: flex; flex-direction: column; gap: 8px; }
+.sim-transport { margin: 6px 0; }
+.sim-panel .readout { margin-top: 6px; }
 .chip--accent { border-color: #38bdf8; color: #bae6fd; }
 .agent-sheet {
   position: absolute;
