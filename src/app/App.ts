@@ -23,8 +23,13 @@ import {
 import { groupCenter, groupFootprint, groupMembers, setGroupCenter } from "../core/arrays";
 import { validateProject, type Issue } from "../core/validation";
 import { objectFieldInfo, measure, snapMeasurePoint, type MeasureResult, type FieldInfo, type SnappedPoint } from "../core/measure";
+import { areaBounds } from "../core/placement";
+import { routePreset } from "../core/routes";
+import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
+import { agentPositions, detectBottlenecks, initSimulation, simulationDone, stepSimulation, type Bottleneck, type SimParams, type SimState } from "../core/simulation";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
+import type { RouteType } from "../core/model";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
 export type Workflow = "site" | "layout" | "route" | "check" | "export";
@@ -48,6 +53,15 @@ export interface Session {
   showLabels: boolean;
   workflow: Workflow;
   issues: Issue[];
+  // Visual-communication + simulation state
+  teamView: boolean;
+  simplify: boolean;
+  focusRouteId: string | null;
+  participants: number;
+  matCandidates: LayoutCandidate[];
+  simPositions: { x: number; z: number; routeId: string }[];
+  bottlenecks: Bottleneck[];
+  simPlaying: boolean;
 }
 
 interface DragState {
@@ -84,6 +98,14 @@ export class App {
     showLabels: false,
     workflow: "site",
     issues: [],
+    teamView: false,
+    simplify: false,
+    focusRouteId: null,
+    participants: 30,
+    matCandidates: [],
+    simPositions: [],
+    bottlenecks: [],
+    simPlaying: false,
   };
 
   private drag: DragState | null = null;
@@ -92,6 +114,9 @@ export class App {
   private uiListeners = new Set<() => void>();
   private pointers = new Map<number, { x: number; y: number; type: string }>();
   private validationTimer: number | null = null;
+  private simState: SimState | null = null;
+  private simRaf: number | null = null;
+  private simLast = 0;
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
 
@@ -120,7 +145,11 @@ export class App {
       ghost: this.session.ghost,
       measure: this.session.measure,
       calibrate: this.session.calibrate,
-      showLabels: this.session.showLabels,
+      showLabels: this.session.showLabels || this.session.teamView,
+      focusRouteId: this.session.focusRouteId,
+      simplify: this.session.simplify || this.session.teamView,
+      simPositions: this.session.simPositions,
+      bottlenecks: this.session.bottlenecks,
     });
   }
   private render(): void { this.syncScene(); this.notifyUi(); }
@@ -246,7 +275,7 @@ export class App {
   addZone(type: ZoneType): void {
     const d = ZONE_DEFAULTS[type];
     const c = this.centerOfClassroom();
-    const zone: Zone = { id: uid("zone"), type, name: d.label, x: c.x, z: c.z, width: d.width, depth: d.depth, color: d.color, locked: false, hidden: false };
+    const zone: Zone = { id: uid("zone"), type, name: d.label, x: c.x, z: c.z, width: d.width, depth: d.depth, color: d.color, locked: false, hidden: false, icon: d.icon, capacity: null };
     this.store.mutate((p) => p.zones.push(zone));
     this.setSelection([zone.id]);
   }
@@ -404,7 +433,7 @@ export class App {
 
   newRoute(): void {
     const colors = ["#f97316", "#22d3ee", "#a78bfa", "#34d399", "#f43f5e"];
-    const route: Route = { id: uid("route"), name: `動線 ${this.state.routes.length + 1}`, color: colors[this.state.routes.length % colors.length], points: [], visible: true };
+    const route: Route = { id: uid("route"), name: `動線 ${this.state.routes.length + 1}`, color: colors[this.state.routes.length % colors.length], points: [], visible: true, type: "custom" };
     this.store.mutate((p) => p.routes.push(route));
     this.session.mode = "route";
     this.session.activeRouteId = route.id;
@@ -521,6 +550,114 @@ export class App {
     this.validationTimer = window.setTimeout(() => this.runValidation(), 250);
   }
   private toast(msg: string, undo = false): void { this.onToast?.(msg, undo); }
+
+  // --- visual communication ---------------------------------------------
+
+  setTeamView(on: boolean): void {
+    this.session.teamView = on;
+    if (on) { this.session.selection = new Set(); this.setView("top"); }
+    this.render();
+  }
+  setSimplify(on: boolean): void { this.session.simplify = on; this.render(); }
+  setRouteFocus(id: string | null): void { this.session.focusRouteId = id; this.render(); }
+  updateDescription(text: string): void { this.store.mutate((p) => (p.description = text), { history: false }); }
+  updateZoneCapacity(capacity: number | null): void { this.updateSelectedZone({ capacity }); }
+
+  // --- route presets + zone links ---------------------------------------
+
+  newRoutePreset(type: RouteType): void {
+    const pre = routePreset(type);
+    const route: Route = { id: uid("route"), name: pre.label, color: pre.color, points: [], visible: true, type };
+    this.store.mutate((p) => p.routes.push(route));
+    this.session.mode = "route";
+    this.session.activeRouteId = route.id;
+    this.setSelection([route.id]);
+    this.notifyUi();
+  }
+
+  // --- smart layout (participant-driven mats) ---------------------------
+
+  computeMatCandidates(participants: number, opts?: { centralAisleWidth?: number; matWidth?: number; matDepth?: number; gap?: number }): LayoutCandidate[] {
+    this.session.participants = participants;
+    const vs = this.state.validationSettings;
+    const zone = this.getSelectedZone();
+    let bounds;
+    if (zone) {
+      bounds = { minX: zone.x - zone.width / 2, maxX: zone.x + zone.width / 2, minZ: zone.z - zone.depth / 2, maxZ: zone.z + zone.depth / 2 };
+    } else {
+      const b = areaBounds(this.state.classroom);
+      const inset = vs.matWallClearance;
+      bounds = { minX: b.minX + inset, maxX: b.maxX - inset, minZ: b.minZ + inset, maxZ: b.maxZ - inset };
+    }
+    this.session.matCandidates = generateLayouts({
+      participants,
+      matWidth: opts?.matWidth ?? 0.6,
+      matDepth: opts?.matDepth ?? 1.8,
+      gap: opts?.gap ?? 0.1,
+      aisleWidth: opts?.centralAisleWidth ?? Math.max(vs.minAisleWidth, 0.9),
+      bounds,
+    });
+    this.notifyUi();
+    return this.session.matCandidates;
+  }
+
+  applyMatCandidate(id: string): void {
+    const cand = this.session.matCandidates.find((c) => c.id === id);
+    if (!cand) return;
+    const newIds: string[] = [];
+    this.store.mutate((p) => {
+      cand.groups.forEach((g, i) => {
+        const gid = uid("grp");
+        newIds.push(gid);
+        p.groups.push({
+          id: gid, name: `地墊區 ${cand.groups.length > 1 ? String.fromCharCode(65 + i) : ""}`.trim() || "地墊區",
+          sourceKind: "mat", rows: g.rows, cols: g.cols, itemWidth: g.itemWidth, itemDepth: g.itemDepth,
+          itemHeight: 0.04, gapX: g.gapX, gapZ: g.gapZ, rotationDeg: g.rotationDeg, anchorX: g.anchorX, anchorZ: g.anchorZ,
+          locked: false, hidden: false, numberPrefix: cand.groups.length > 1 ? String.fromCharCode(65 + i) : "M", numberOrder: "row", numberStart: "nw",
+        });
+      });
+    });
+    this.session.matCandidates = [];
+    this.toast(`已套用 ${cand.count} 張地墊`, true);
+    if (newIds.length) this.setSelection(newIds);
+  }
+
+  // --- traffic simulation -----------------------------------------------
+
+  startSimulation(params?: Partial<SimParams>): void {
+    const p: SimParams = { countPerRoute: params?.countPerRoute ?? 8, speed: params?.speed ?? 1.2, spacing: params?.spacing ?? 1.0 };
+    const routes = this.state.routes.filter((r) => r.visible && r.points.length >= 2);
+    if (routes.length === 0) { this.toast("尚無可模擬的動線"); return; }
+    this.simState = initSimulation(routes, p);
+    this.session.simPlaying = true;
+    this.simLast = performance.now();
+    this.notifyUi();
+    this.simLoop();
+  }
+  stopSimulation(): void {
+    this.session.simPlaying = false;
+    if (this.simRaf !== null) { cancelAnimationFrame(this.simRaf); this.simRaf = null; }
+    this.session.simPositions = [];
+    this.session.bottlenecks = [];
+    this.simState = null;
+    this.render();
+  }
+  private simLoop(): void {
+    if (!this.session.simPlaying || !this.simState) return;
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - this.simLast) / 1000);
+    this.simLast = now;
+    const routes = this.state.routes.filter((r) => r.visible && r.points.length >= 2);
+    this.simState = stepSimulation(this.simState, routes, dt);
+    this.session.simPositions = agentPositions(this.simState, routes);
+    this.session.bottlenecks = detectBottlenecks(this.session.simPositions, 1.2, 4);
+    this.syncScene();
+    if (simulationDone(this.simState, routes)) {
+      // Loop the run so it stays visible until the user stops it.
+      this.simState = initSimulation(routes, this.simState.params);
+    }
+    this.simRaf = requestAnimationFrame(() => this.simLoop());
+  }
 
   // --- room / tile / calibration ----------------------------------------
 

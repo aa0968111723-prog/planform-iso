@@ -10,11 +10,14 @@ import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
   PROJECT_VERSION,
+  ZONE_DEFAULTS,
   type ArrayGroup,
   type MeasurementAnnotation,
   type ObjectKind,
   type Project,
+  type Route,
   type SceneObject,
+  type Zone,
 } from "./model";
 
 const KINDS: ReadonlySet<string> = new Set<ObjectKind>([
@@ -98,6 +101,21 @@ function migrateGroup(g: Partial<ArrayGroup>): ArrayGroup | null {
   };
 }
 
+function migrateZone(z: Zone): Zone {
+  const def = ZONE_DEFAULTS[z.type] ?? ZONE_DEFAULTS.group;
+  return { ...z, icon: z.icon ?? def.icon, capacity: z.capacity ?? null };
+}
+
+function migrateRoute(r: Route): Route {
+  return {
+    ...r,
+    type: r.type ?? "custom",
+    startZoneId: r.startZoneId,
+    endZoneId: r.endZoneId,
+    waypointZoneIds: Array.isArray(r.waypointZoneIds) ? r.waypointZoneIds : undefined,
+  };
+}
+
 function migrateMeasurement(m: Partial<MeasurementAnnotation>): MeasurementAnnotation | null {
   if (!m || !m.start || !m.end) return null;
   return {
@@ -121,8 +139,9 @@ export function migrateProject(input: Partial<Project>): Project {
   p.tile = { ...base.tile, ...input.tile };
   p.calibration = { ...base.calibration, ...input.calibration };
   p.layers = { ...base.layers, ...input.layers };
-  p.zones = Array.isArray(input.zones) ? input.zones : [];
-  p.routes = Array.isArray(input.routes) ? input.routes : [];
+  p.description = input.description ?? "";
+  p.zones = (Array.isArray(input.zones) ? input.zones : []).map(migrateZone);
+  p.routes = (Array.isArray(input.routes) ? input.routes : []).map(migrateRoute);
 
   const rawObjects: Array<Partial<SceneObject>> = Array.isArray(input.objects) ? input.objects : [];
   p.objects = rawObjects
