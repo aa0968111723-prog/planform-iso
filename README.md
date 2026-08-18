@@ -46,3 +46,13 @@ npm run typecheck # TypeScript 型別檢查
 - 相對路徑 base，可直接部署到 GitHub Pages 子路徑
 
 完整規格見 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)。
+
+## 專業素材與 Quick Agent（PR #11）
+
+- **Asset Catalog**：語意與外觀分離；SceneObject 保留 `kind` 相容，並以 `assetId` 指向 Catalog。
+- **自訂素材**：拍照建立簡化 proxy（可立即排場）／匯入 GLB（glTF Transform 最佳化）／本機 IndexedDB 存 binary。
+- **Img2ThreeJS**：作為 agent-side reconstruction adapter（不 bundle、不 eval）；精緻模型完成後只替換 visual。
+- **Quick Agent**：頂部 `✦ AI` → 建素材／幫我場佈／模擬活動／幫我優化。AI 只能透過 Tool Layer + Preview／套用／取消，並可 Undo。
+- 活動模擬核心若尚未合併，Agent 會清楚回報不可用，場佈與 Validation 仍可離線使用。
+
+詳見 [`docs/PROFESSIONAL_ASSET_ENGINE_QUICK_AGENT_PLAN.md`](docs/PROFESSIONAL_ASSET_ENGINE_QUICK_AGENT_PLAN.md)。

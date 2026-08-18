@@ -7,6 +7,8 @@ import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanP
 import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
 import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
+import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
+import { buildCustomAssetFlow } from "./customAssetFlow";
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
@@ -38,6 +40,7 @@ export class UI {
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true };
+  private agentSheet: QuickAgentSheetHandles | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
     root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast);
@@ -46,8 +49,11 @@ export class UI {
     this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
     this.app.onChange(() => this.update());
     this.bindKeys();
+    this.agentSheet = buildQuickAgentSheet(app);
+    root.append(this.agentSheet.root);
     this.update();
   }
 
@@ -77,6 +83,7 @@ export class UI {
       button("名稱", () => this.app.setShowLabels(!this.app.session.showLabels), "chip chip--sm"),
       button("置中", () => this.app.recenterView(), "chip chip--sm"),
       snapSel,
+      button("✦ AI", () => this.agentSheet?.open(), "chip chip--sm chip--accent"),
     ]);
     this.topbar.append(el("div", { class: "topbar__title", text: "平面場 ISO" }), history, flows, views, more);
   }
@@ -105,7 +112,10 @@ export class UI {
       el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
       buildLibrary(this.app, { categories: ["fixture"] }),
     );
-    else if (wf === "layout") this.left.append(buildLibrary(this.app, { categories: ["furniture", "equipment", "floor"], zones: true, arrays: true }));
+    else if (wf === "layout") this.left.append(
+      buildCustomAssetFlow(this.app),
+      buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true }),
+    );
     else if (wf === "route") this.left.append(this.routeSection());
     else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());

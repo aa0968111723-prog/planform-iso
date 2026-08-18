@@ -27,6 +27,8 @@ import { validateProject, type Issue } from "../core/validation";
 import { objectFieldInfo, measure, snapMeasurePoint, type MeasureResult, type FieldInfo, type SnappedPoint } from "../core/measure";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
+import { QuickAgent } from "../agent/quickAgent";
+import { MockProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
 export type Workflow = "site" | "layout" | "route" | "check" | "export";
@@ -51,6 +53,8 @@ export interface Session {
   showLabels: boolean;
   workflow: Workflow;
   issues: Issue[];
+  /** When set, scene shows agent draft instead of committed project. */
+  agentPreview: Project | null;
 }
 
 interface DragState {
@@ -88,7 +92,11 @@ export class App {
     showLabels: false,
     workflow: "site",
     issues: [],
+    agentPreview: null,
   };
+
+  readonly quickAgent: QuickAgent;
+  notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
 
   /** Live catalog (builtins + project custom extras). */
   getCatalog(): AssetCatalog {
@@ -115,6 +123,7 @@ export class App {
   constructor(canvas: HTMLCanvasElement, store: Store) {
     this.store = store;
     this.scene = new SceneManager(canvas);
+    this.quickAgent = new QuickAgent(store, new MockProvider());
     this.store.subscribe(() => {
       this.syncScene();
       if (!this.dragging) {
@@ -127,12 +136,35 @@ export class App {
     this.scene.setView(this.state.view);
   }
 
-  private get state(): Project { return this.store.getState(); }
+  private get state(): Project {
+    return this.store.getState();
+  }
+
+  /** Project currently shown in the scene (draft during agent preview). */
+  private get viewState(): Project {
+    return this.session.agentPreview ?? this.store.getState();
+  }
+
+  applyAgentPreview(project: Project | null): void {
+    this.session.agentPreview = project;
+    this.syncScene();
+    this.notifyUi();
+  }
+
+  upsertCatalogEntry(entry: import("../core/catalog").AssetCatalogEntry): void {
+    this.store.mutate((p) => {
+      const list = [...(p.catalogExtras ?? [])];
+      const i = list.findIndex((e) => e.id === entry.id);
+      if (i >= 0) list[i] = entry as never;
+      else list.push(entry as never);
+      p.catalogExtras = list;
+    });
+  }
 
   onChange(cb: () => void): () => void { this.uiListeners.add(cb); return () => this.uiListeners.delete(cb); }
   private notifyUi(): void { for (const cb of this.uiListeners) cb(); }
   private syncScene(): void {
-    this.scene.sync(this.state, {
+    this.scene.sync(this.viewState, {
       selection: this.session.selection,
       ghost: this.session.ghost,
       measure: this.session.measure,

@@ -12,7 +12,7 @@ import {
 } from "../core/catalog";
 import { uid } from "../core/model";
 import { getAssetBlobStore } from "./idbStore";
-import { normalizeGroup } from "./normalize";
+import { normalizeGroup, measureBounds } from "./normalize";
 import { optimizeGltfBuffer, inspectGltfBuffer } from "./optimizeGltf";
 import { evaluateQuality, MOBILE_LIMITS, STANDARD_LIMITS, type QualityReport } from "./qualityGate";
 import { cacheGlbGroup } from "../scene/visualRegistry";
@@ -124,7 +124,6 @@ export async function importGltfAsset(req: ImportGltfRequest): Promise<ImportGlt
   }
 
   // Rough bounds before normalize (identity scale).
-  const { measureBounds } = await import("./normalize");
   const raw = measureBounds(group);
   const dims = req.dimensions ?? guessDimsFromBounds(raw);
   const normalized = normalizeGroup(group, { targetDims: dims, forwardAxis: "+Z" });

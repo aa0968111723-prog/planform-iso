@@ -1,5 +1,6 @@
 import type { App } from "../app/App";
-import { ASSET_CATEGORIES, assetsByCategory, type AssetCategory, type AssetDefinition } from "../core/assets";
+import { CATALOG_CATEGORIES } from "../core/assets";
+import type { AssetCatalogEntry, CatalogCategory } from "../core/catalog";
 import { ZONE_DEFAULTS, type ZoneType } from "../core/model";
 import { metersToCm } from "../core/units";
 import { button, card, el, section } from "./dom";
@@ -7,17 +8,23 @@ import { button, card, el, section } from "./dom";
 const PLACEMENT_LABEL: Record<string, string> = { floor: "地面", wall: "牆面", tabletop: "桌面" };
 
 export interface LibraryOptions {
-  categories?: AssetCategory[];
+  categories?: CatalogCategory[];
   zones?: boolean;
   arrays?: boolean;
 }
 
 /** Left "what do I want to place?" library: cards by category, with search. */
 export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
-  const cats = opts.categories ?? ASSET_CATEGORIES.map((c) => c.id);
+  const cats = opts.categories ?? CATALOG_CATEGORIES.map((c) => c.id);
   const root = el("div", { class: "library" });
   const search = el("input", { type: "search", placeholder: "搜尋素材…", class: "field__input" }) as HTMLInputElement;
   root.append(el("label", { class: "field" }, [el("span", { class: "field__label", text: "素材庫" }), search]));
+
+  const catalog = app.getCatalog();
+  const recent = catalog.listRecent();
+  if (recent.length) {
+    root.append(section("常用", [el("div", { class: "cardgrid" }, recent.map((e) => catalogCard(app, e)))]));
+  }
 
   if (opts.zones) {
     root.append(section("功能區域", [
@@ -26,10 +33,11 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     ]));
   }
 
-  for (const c of ASSET_CATEGORIES) {
+  for (const c of CATALOG_CATEGORIES) {
     if (!cats.includes(c.id)) continue;
-    const defs = assetsByCategory(c.id);
-    root.append(section(c.label, [el("div", { class: "cardgrid" }, defs.map((d) => assetCard(app, d)))]));
+    const defs = catalog.list({ category: c.id });
+    if (!defs.length) continue;
+    root.append(section(c.label, [el("div", { class: "cardgrid" }, defs.map((d) => catalogCard(app, d)))]));
   }
 
   if (opts.arrays) {
@@ -52,11 +60,17 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   return root;
 }
 
-function assetCard(app: App, d: AssetDefinition): HTMLButtonElement {
-  const w = Math.round(metersToCm(d.defaultDimensions.width));
-  const dep = Math.round(metersToCm(d.defaultDimensions.depth));
-  const c = card(d.icon, d.displayName, `${w}×${dep}cm · ${PLACEMENT_LABEL[d.placementType]}`, () => app.beginPlacement(d.kind));
-  c.dataset.name = d.displayName.toLowerCase();
+function catalogCard(app: App, d: AssetCatalogEntry): HTMLButtonElement {
+  const w = Math.round(metersToCm(d.dimensions.width));
+  const dep = Math.round(metersToCm(d.dimensions.depth));
+  const role = d.serviceRole && d.serviceRole !== "none" ? ` · ${d.serviceRole}` : "";
+  const c = card(
+    d.icon,
+    d.name,
+    `${w}×${dep}cm · ${PLACEMENT_LABEL[d.placementType] ?? ""}${role}`,
+    () => app.beginPlacementByAssetId(d.id),
+  );
+  c.dataset.name = d.name.toLowerCase();
   return c;
 }
 
