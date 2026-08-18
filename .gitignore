@@ -4,3 +4,4 @@ dev-dist/
 *.local
 .DS_Store
 .vite/
+docs/FIELD_PRECISION_MOBILE_VALIDATION_PLAN.md

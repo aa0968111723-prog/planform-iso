@@ -22,7 +22,8 @@ describe("field info", () => {
     const info = objectFieldInfo(o, p);
     expect(info.tileRef).toContain("行");
     expect(info.zoneName).toBe("小組區");
-    expect(info.distLeftWall).toBeCloseTo(3);
+    // Footprint-based west clearance: mat centered at x=3, width 0.6 → minX 2.7.
+    expect(info.wall.west).toBeCloseTo(2.7);
     expect(info.sizeCm.w).toBe(60);
   });
 });

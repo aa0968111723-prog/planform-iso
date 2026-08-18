@@ -8,8 +8,10 @@
 import { assetDef } from "./assets";
 import {
   createDefaultProject,
+  DEFAULT_VALIDATION_SETTINGS,
   PROJECT_VERSION,
   type ArrayGroup,
+  type MeasurementAnnotation,
   type ObjectKind,
   type Project,
   type SceneObject,
@@ -90,6 +92,23 @@ function migrateGroup(g: Partial<ArrayGroup>): ArrayGroup | null {
     anchorZ: g.anchorZ ?? 0,
     locked: g.locked ?? false,
     hidden: g.hidden ?? false,
+    numberPrefix: g.numberPrefix ?? (g.sourceKind === "mat" ? "M" : g.sourceKind === "chair" ? "C" : "A"),
+    numberOrder: g.numberOrder ?? "row",
+    numberStart: g.numberStart ?? "nw",
+  };
+}
+
+function migrateMeasurement(m: Partial<MeasurementAnnotation>): MeasurementAnnotation | null {
+  if (!m || !m.start || !m.end) return null;
+  return {
+    id: m.id ?? `msr_${Math.random().toString(36).slice(2)}`,
+    type: m.type ?? "free-distance",
+    start: { x: m.start.x ?? 0, z: m.start.z ?? 0 },
+    end: { x: m.end.x ?? 0, z: m.end.z ?? 0 },
+    label: m.label,
+    locked: m.locked ?? false,
+    visible: m.visible ?? true,
+    color: m.color ?? "#facc15",
   };
 }
 
@@ -114,6 +133,13 @@ export function migrateProject(input: Partial<Project>): Project {
   p.groups = rawGroups
     .map((g) => migrateGroup(g as Partial<ArrayGroup>))
     .filter((g): g is ArrayGroup => g !== null);
+
+  // v3 additions.
+  const rawMeasurements = Array.isArray(input.measurements) ? input.measurements : [];
+  p.measurements = rawMeasurements
+    .map((m) => migrateMeasurement(m as Partial<MeasurementAnnotation>))
+    .filter((m): m is MeasurementAnnotation => m !== null);
+  p.validationSettings = { ...DEFAULT_VALIDATION_SETTINGS, ...(input.validationSettings ?? {}) };
 
   return p;
 }

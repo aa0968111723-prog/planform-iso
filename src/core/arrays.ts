@@ -71,3 +71,21 @@ export function setGroupCenter(g: ArrayGroup, x: number, z: number): { anchorX: 
   const cur = groupCenter(g);
   return { anchorX: g.anchorX + (x - cur.x), anchorZ: g.anchorZ + (z - cur.z) };
 }
+
+/** 1-based construction sequence number for a member, honouring order + start corner. */
+export function memberNumber(g: ArrayGroup, row: number, col: number): number {
+  const rows = Math.max(1, Math.floor(g.rows));
+  const cols = Math.max(1, Math.floor(g.cols));
+  let r = row;
+  let c = col;
+  if (g.numberStart === "sw" || g.numberStart === "se") r = rows - 1 - row;
+  if (g.numberStart === "ne" || g.numberStart === "se") c = cols - 1 - col;
+  const seq = g.numberOrder === "col" ? c * rows + r : r * cols + c;
+  return seq + 1;
+}
+
+/** Construction label for a member, e.g. "A-01". */
+export function memberLabel(g: ArrayGroup, row: number, col: number): string {
+  const n = memberNumber(g, row, col);
+  return `${g.numberPrefix}-${String(n).padStart(2, "0")}`;
+}

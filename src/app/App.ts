@@ -2,10 +2,13 @@ import {
   uid,
   ZONE_DEFAULTS,
   type ArrayGroup,
+  type MeasurementAnnotation,
+  type MeasurementType,
   type ObjectKind,
   type Project,
   type Route,
   type SceneObject,
+  type ValidationSettings,
   type ViewName,
   type Zone,
   type ZoneType,
@@ -19,14 +22,15 @@ import {
 } from "../core/placement";
 import { groupCenter, groupFootprint, groupMembers, setGroupCenter } from "../core/arrays";
 import { validateProject, type Issue } from "../core/validation";
-import { objectFieldInfo, measure, type MeasureResult, type FieldInfo } from "../core/measure";
+import { objectFieldInfo, measure, snapMeasurePoint, type MeasureResult, type FieldInfo, type SnappedPoint } from "../core/measure";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
 
-export type Mode = "select" | "place" | "route" | "measure";
+export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
 export type Workflow = "site" | "layout" | "route" | "check" | "export";
 
 const TABLE_KINDS: ReadonlySet<string> = new Set(["table", "regTable"]);
+const MEASURE_COLOR = "#facc15";
 
 export interface Session {
   selection: Set<string>;
@@ -38,7 +42,9 @@ export interface Session {
   ghostRotation: number;
   ghostHinge: "left" | "right";
   activeRouteId: string | null;
-  measure: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
+  measure: { a: SnappedPoint | null; b: SnappedPoint | null } | null;
+  measureType: MeasurementType;
+  calibrate: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   showLabels: boolean;
   workflow: Workflow;
   issues: Issue[];
@@ -52,9 +58,12 @@ interface DragState {
   routeId?: string;
   routeIndex?: number;
   moved: boolean;
+  threshold: number;
 }
 
 const DRAG_THRESHOLD = 4;
+const TOUCH_DRAG_THRESHOLD = 12;
+const TOUCH_GHOST_OFFSET_PX = 46;
 
 export class App {
   readonly store: Store;
@@ -70,6 +79,8 @@ export class App {
     ghostHinge: "left",
     activeRouteId: null,
     measure: null,
+    measureType: "free-distance",
+    calibrate: null,
     showLabels: false,
     workflow: "site",
     issues: [],
@@ -79,12 +90,21 @@ export class App {
   private dragging = false;
   private tapClearStart: { x: number; y: number } | null = null;
   private uiListeners = new Set<() => void>();
+  private pointers = new Map<number, { x: number; y: number; type: string }>();
+  private validationTimer: number | null = null;
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
+  onToast: ((msg: string, undo?: boolean) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, store: Store) {
     this.store = store;
     this.scene = new SceneManager(canvas);
-    this.store.subscribe(() => { this.syncScene(); if (!this.dragging) this.notifyUi(); });
+    this.store.subscribe(() => {
+      this.syncScene();
+      if (!this.dragging) {
+        this.notifyUi();
+        if (this.session.workflow === "check") this.scheduleValidation();
+      }
+    });
     this.bindPointer(canvas);
     this.render();
     this.scene.setView(this.state.view);
@@ -99,6 +119,7 @@ export class App {
       selection: this.session.selection,
       ghost: this.session.ghost,
       measure: this.session.measure,
+      calibrate: this.session.calibrate,
       showLabels: this.session.showLabels,
     });
   }
@@ -241,6 +262,8 @@ export class App {
       rows, cols, itemWidth: dims.width, itemDepth: dims.depth, itemHeight: dims.height,
       gapX: 0.1, gapZ: 0.1, rotationDeg: 0, anchorX: c.x - 1.5, anchorZ: c.z - 1.5,
       locked: false, hidden: false,
+      numberPrefix: kind === "mat" ? "M" : kind === "chair" ? "C" : "A",
+      numberOrder: "row", numberStart: "nw",
     };
     this.store.mutate((p) => p.groups.push(g));
     this.setSelection([g.id]);
@@ -394,14 +417,110 @@ export class App {
 
   // --- measure -----------------------------------------------------------
 
-  startMeasure(): void { this.session.mode = "measure"; this.session.measure = { a: null, b: null }; this.notifyUi(); }
-  clearMeasure(): void { this.session.measure = null; this.render(); }
-  stopMeasure(): void { this.session.mode = "select"; this.notifyUi(); }
+  setMeasureType(t: MeasurementType): void { this.session.measureType = t; this.notifyUi(); }
+  startMeasure(type: MeasurementType = "free-distance"): void {
+    this.session.measureType = type;
+    this.session.mode = "measure";
+    this.session.measure = { a: null, b: null };
+    this.notifyUi();
+  }
+  clearMeasure(): void { this.session.measure = { a: null, b: null }; this.render(); }
+  stopMeasure(): void { this.session.mode = "select"; this.session.measure = null; this.render(); }
   getMeasureResult(): MeasureResult | null {
     const m = this.session.measure;
     if (!m || !m.a || !m.b) return null;
     return measure(m.a, m.b, this.state.tile);
   }
+  keepMeasurement(): void {
+    const m = this.session.measure;
+    if (!m || !m.a || !m.b) return;
+    const ann: MeasurementAnnotation = {
+      id: uid("msr"), type: this.session.measureType,
+      start: { x: m.a.x, z: m.a.z }, end: { x: m.b.x, z: m.b.z },
+      locked: false, visible: true, color: MEASURE_COLOR,
+    };
+    this.store.mutate((p) => p.measurements.push(ann));
+    this.session.measure = { a: null, b: null };
+    this.toast("已保留尺寸線");
+  }
+  deleteMeasurement(id: string): void { this.store.mutate((p) => { p.measurements = p.measurements.filter((m) => m.id !== id); }); }
+  toggleMeasurementVisible(id: string): void { this.store.mutate((p) => { const m = p.measurements.find((x) => x.id === id); if (m) m.visible = !m.visible; }); }
+
+  // --- calibration wizard ------------------------------------------------
+
+  startCalibration(): void { this.session.mode = "calibrate"; this.session.calibrate = { a: null, b: null }; this.notifyUi(); }
+  cancelCalibration(): void { this.session.mode = "select"; this.session.calibrate = null; this.render(); }
+  getCalibrationDistance(): number | null {
+    const c = this.session.calibrate;
+    if (!c || !c.a || !c.b) return null;
+    return Math.hypot(c.b.x - c.a.x, c.b.z - c.a.z);
+  }
+  applyCalibration(action: "record" | "tile" | "classroom-length", actualMeters: number, note = ""): void {
+    if (!actualMeters || actualMeters <= 0) return;
+    if (action === "tile") this.applyCalibrationToTile(actualMeters);
+    else if (action === "classroom-length") this.updateArea("classroom", { length: actualMeters });
+    else this.updateCalibration({ referenceLength: actualMeters, note });
+    this.toast(action === "record" ? "已記錄校正結果" : "已套用校正（可復原）", true);
+    this.cancelCalibration();
+  }
+
+  // --- precision: nudge / rotate / align --------------------------------
+
+  nudgeSelection(dx: number, dz: number): void {
+    const ids = this.session.selection;
+    this.store.mutate((p) => {
+      const moved = new Set<string>();
+      for (const o of p.objects) if (ids.has(o.id) && !o.locked) { o.x += dx; o.z += dz; moved.add(o.id); }
+      for (const o of p.objects) if (o.parentId && moved.has(o.parentId) && !ids.has(o.id)) { o.x += dx; o.z += dz; }
+      for (const z of p.zones) if (ids.has(z.id) && !z.locked) { z.x += dx; z.z += dz; }
+      for (const g of p.groups) if (ids.has(g.id) && !g.locked) { g.anchorX += dx; g.anchorZ += dz; }
+    });
+  }
+  setSelectionRotation(deg: number): void {
+    const ids = this.session.selection;
+    const r = ((deg % 360) + 360) % 360;
+    this.store.mutate((p) => {
+      for (const o of p.objects) if (ids.has(o.id) && !o.locked && o.surface !== "wall") o.rotationDeg = r;
+      for (const g of p.groups) if (ids.has(g.id) && !g.locked) g.rotationDeg = r;
+    });
+  }
+  alignSelection(edge: "left" | "right" | "top" | "bottom"): void {
+    const ids = this.session.selection;
+    const objs = this.state.objects.filter((o) => ids.has(o.id) && !o.locked);
+    if (objs.length < 2) return;
+    const val = edge === "left" ? Math.min(...objs.map((o) => o.x))
+      : edge === "right" ? Math.max(...objs.map((o) => o.x))
+      : edge === "top" ? Math.min(...objs.map((o) => o.z))
+      : Math.max(...objs.map((o) => o.z));
+    this.store.mutate((p) => {
+      for (const o of p.objects) if (ids.has(o.id) && !o.locked) { if (edge === "left" || edge === "right") o.x = val; else o.z = val; }
+    });
+  }
+  distributeSelection(axis: "x" | "z"): void {
+    const ids = this.session.selection;
+    const objs = this.state.objects.filter((o) => ids.has(o.id) && !o.locked).sort((a, b) => (axis === "x" ? a.x - b.x : a.z - b.z));
+    if (objs.length < 3) return;
+    const lo = axis === "x" ? objs[0].x : objs[0].z;
+    const hi = axis === "x" ? objs[objs.length - 1].x : objs[objs.length - 1].z;
+    const step = (hi - lo) / (objs.length - 1);
+    this.store.mutate((p) => {
+      objs.forEach((o, i) => {
+        const t = p.objects.find((x) => x.id === o.id);
+        if (t) { if (axis === "x") t.x = lo + i * step; else t.z = lo + i * step; }
+      });
+    });
+  }
+
+  updateValidationSettings(patch: Partial<ValidationSettings>): void {
+    this.store.mutate((p) => Object.assign(p.validationSettings, patch), { history: false });
+    if (this.session.workflow === "check") this.scheduleValidation();
+  }
+  private scheduleValidation(): void {
+    if (typeof window === "undefined") { this.runValidation(); return; }
+    if (this.validationTimer !== null) window.clearTimeout(this.validationTimer);
+    this.validationTimer = window.setTimeout(() => this.runValidation(), 250);
+  }
+  private toast(msg: string, undo = false): void { this.onToast?.(msg, undo); }
 
   // --- room / tile / calibration ----------------------------------------
 
@@ -459,18 +578,42 @@ export class App {
     canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
     window.addEventListener("pointerup", (e) => this.onPointerUp(e));
+    window.addEventListener("pointercancel", (e) => this.onPointerUp(e));
     canvas.addEventListener("contextmenu", (e) => { if (this.session.mode === "place") { e.preventDefault(); this.cancelPlacement(); } });
   }
 
+  /** Cancel any in-progress single-finger object drag (e.g. when a 2nd finger lands). */
+  private abortDrag(): void {
+    if (this.drag && (this.drag.kind === "move" || this.drag.kind === "routeNode")) this.store.cancelTransient();
+    this.drag = null;
+    this.dragging = false;
+    this.tapClearStart = null;
+    this.onBox?.(null);
+  }
+
   private onPointerDown(e: PointerEvent): void {
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+    // Two or more fingers → this is a camera gesture (pinch/pan). Never drag objects.
+    if (this.pointers.size >= 2) { this.abortDrag(); this.scene.setControlsEnabled(true); return; }
+
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 
     if (this.session.mode === "place") { this.confirmPlacement(); return; }
 
     if (this.session.mode === "measure" && ground) {
+      const snapped = snapMeasurePoint(ground.x, ground.z, this.state, 0.35);
       const m = this.session.measure ?? { a: null, b: null };
-      if (!m.a || (m.a && m.b)) { m.a = ground; m.b = null; } else { m.b = ground; }
+      if (!m.a || (m.a && m.b)) { m.a = snapped; m.b = null; } else { m.b = snapped; }
       this.session.measure = m;
+      this.render();
+      return;
+    }
+
+    if (this.session.mode === "calibrate" && ground) {
+      const snapped = snapMeasurePoint(ground.x, ground.z, this.state, 0.35);
+      const c = this.session.calibrate ?? { a: null, b: null };
+      if (!c.a || (c.a && c.b)) { c.a = { x: snapped.x, z: snapped.z }; c.b = null; } else { c.b = { x: snapped.x, z: snapped.z }; }
+      this.session.calibrate = c;
       this.render();
       return;
     }
@@ -504,7 +647,6 @@ export class App {
       this.session.selection = new Set();
       this.render();
     } else if (this.session.mode === "select" && this.session.selection.size > 0) {
-      // Remember a possible tap-to-clear (a drag becomes an orbit instead).
       this.tapClearStart = { x: e.clientX, y: e.clientY };
     }
   }
@@ -515,14 +657,20 @@ export class App {
     for (const o of this.state.objects) if (this.session.selection.has(o.id)) orig.set(o.id, { x: o.x, z: o.z });
     for (const z of this.state.zones) if (this.session.selection.has(z.id)) orig.set(z.id, { x: z.x, z: z.z });
     for (const g of this.state.groups) if (this.session.selection.has(g.id)) { const c = groupCenter(g); orig.set(g.id, { x: c.x, z: c.z }); }
-    this.drag = { kind: opts.kind, startGround: ground, startClient: { x: e.clientX, y: e.clientY }, orig, routeId: opts.routeId, routeIndex: opts.routeIndex, moved: false };
+    const threshold = e.pointerType === "touch" ? TOUCH_DRAG_THRESHOLD : DRAG_THRESHOLD;
+    this.drag = { kind: opts.kind, startGround: ground, startClient: { x: e.clientX, y: e.clientY }, orig, routeId: opts.routeId, routeIndex: opts.routeIndex, moved: false, threshold };
     if (opts.kind === "move" || opts.kind === "routeNode") { this.store.beginTransient(); this.dragging = true; }
     this.onBox?.(null);
   }
 
   private onPointerMove(e: PointerEvent): void {
+    if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+    if (this.pointers.size >= 2) return; // camera gesture; never move objects
+
     if (this.session.mode === "place") {
-      const ground = this.scene.groundPoint(e.clientX, e.clientY);
+      // On touch, lift the ghost above the finger so it (and its snap/legality) stays visible.
+      const gy = e.pointerType === "touch" ? e.clientY - TOUCH_GHOST_OFFSET_PX : e.clientY;
+      const ground = this.scene.groundPoint(e.clientX, gy);
       if (ground) this.updateGhostAt(ground.x, ground.z);
       return;
     }
@@ -530,7 +678,7 @@ export class App {
     if (!drag) return;
     const dx = e.clientX - drag.startClient.x;
     const dy = e.clientY - drag.startClient.y;
-    if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
     drag.moved = true;
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 
@@ -567,6 +715,8 @@ export class App {
   }
 
   private onPointerUp(e?: PointerEvent): void {
+    if (e) this.pointers.delete(e.pointerId);
+    if (this.pointers.size >= 1 && this.drag) return; // still mid multi-touch gesture
     const drag = this.drag;
     this.drag = null;
     this.dragging = false;

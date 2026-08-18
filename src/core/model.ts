@@ -8,7 +8,7 @@
  * behaviour, and adds ArrayGroups for repeated layouts. See assets.ts.
  */
 
-export const PROJECT_VERSION = 2;
+export const PROJECT_VERSION = 3;
 
 export interface AreaConfig {
   id: "classroom" | "corridor";
@@ -80,6 +80,9 @@ export interface SceneObject {
   openDeg?: number;
 }
 
+export type NumberOrder = "row" | "col";
+export type NumberStart = "nw" | "ne" | "sw" | "se";
+
 /** A repeated layout (e.g. a mat block or a chair grid) kept as one editable unit. */
 export interface ArrayGroup {
   id: string;
@@ -97,7 +100,42 @@ export interface ArrayGroup {
   anchorZ: number;
   locked: boolean;
   hidden: boolean;
+  // v3 construction numbering
+  numberPrefix: string; // e.g. "A" → A-01
+  numberOrder: NumberOrder; // row-first or column-first
+  numberStart: NumberStart; // which corner is #1
 }
+
+export type MeasurementType = "free-distance" | "wall-clearance" | "object-gap" | "aisle-width";
+
+/** A persistent (or session) on-canvas dimension line. */
+export interface MeasurementAnnotation {
+  id: string;
+  type: MeasurementType;
+  start: { x: number; z: number };
+  end: { x: number; z: number };
+  label?: string;
+  locked: boolean;
+  visible: boolean;
+  color: string;
+}
+
+/** User-configurable field rules (thresholds, not legal standards). */
+export interface ValidationSettings {
+  minAisleWidth: number; // meters
+  doorFrontClearance: number; // extra meters kept clear in front of a door
+  matWallClearance: number; // min meters between mats and walls
+  checkScreenView: boolean;
+  checkZoneRouteIntrusion: boolean;
+}
+
+export const DEFAULT_VALIDATION_SETTINGS: ValidationSettings = {
+  minAisleWidth: 0.9,
+  doorFrontClearance: 0.6,
+  matWallClearance: 0.3,
+  checkScreenView: true,
+  checkZoneRouteIntrusion: true,
+};
 
 export type ZoneType =
   | "registration"
@@ -154,6 +192,8 @@ export interface Project {
   objects: SceneObject[];
   groups: ArrayGroup[];
   routes: Route[];
+  measurements: MeasurementAnnotation[];
+  validationSettings: ValidationSettings;
   view: ViewName;
   layers: LayerVisibility;
 }
@@ -188,6 +228,8 @@ export function createDefaultProject(): Project {
     objects: [],
     groups: [],
     routes: [],
+    measurements: [],
+    validationSettings: { ...DEFAULT_VALIDATION_SETTINGS },
     view: "iso",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },
   };

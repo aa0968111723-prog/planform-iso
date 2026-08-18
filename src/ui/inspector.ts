@@ -2,7 +2,12 @@ import type { App } from "../app/App";
 import { assetDef } from "../core/assets";
 import { metersToCm } from "../core/units";
 import { buildSummaryLines } from "../core/summary";
+import { memberLabel } from "../core/arrays";
+import type { NumberOrder, NumberStart } from "../core/model";
 import { button, el, num, selectField, textField } from "./dom";
+
+// Nudge step persists across inspector rebuilds.
+let nudgeStep = 0.01;
 
 /** Right-side inspector: answers "what have I selected?" — contextual only. */
 export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boolean) => void): HTMLElement {
@@ -21,7 +26,6 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
     return root;
   }
 
-  // Common action row.
   root.append(el("div", { class: "toolrow" }, [
     button("旋轉", () => app.rotateSelection(15), "chip chip--sm"),
     button("複製", () => app.duplicateSelection(), "chip chip--sm"),
@@ -32,6 +36,16 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
 
   if (count > 1) {
     root.append(el("div", { text: `已選取 ${count} 個項目` }));
+    root.append(el("div", { class: "subhead", text: "對齊 / 分佈" }));
+    root.append(el("div", { class: "row wrap" }, [
+      button("左", () => app.alignSelection("left"), "chip chip--sm"),
+      button("右", () => app.alignSelection("right"), "chip chip--sm"),
+      button("上", () => app.alignSelection("top"), "chip chip--sm"),
+      button("下", () => app.alignSelection("bottom"), "chip chip--sm"),
+      button("水平等距", () => app.distributeSelection("x"), "chip chip--sm"),
+      button("垂直等距", () => app.distributeSelection("z"), "chip chip--sm"),
+    ]));
+    root.append(nudgePanel(app));
     return root;
   }
 
@@ -42,28 +56,67 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
   return root;
 }
 
+function nudgePanel(app: App): HTMLElement {
+  const tile = app.store.getState().tile;
+  const steps: { label: string; v: number }[] = [
+    { label: "1cm", v: 0.01 }, { label: "5cm", v: 0.05 },
+    { label: "半格", v: tile.width / 2 }, { label: "一格", v: tile.width },
+  ];
+  const stepRow = el("div", { class: "row wrap" }, steps.map((s) =>
+    button(s.label, () => { nudgeStep = s.v; markStep(); }, "chip chip--sm nudgestep")));
+  const markStep = () => stepRow.querySelectorAll<HTMLButtonElement>(".nudgestep").forEach((b, i) =>
+    b.setAttribute("aria-pressed", String(Math.abs(steps[i].v - nudgeStep) < 1e-6)));
+  markStep();
+  const pad = el("div", { class: "nudgepad" }, [
+    button("↑", () => app.nudgeSelection(0, -nudgeStep), "chip"),
+    el("div", { class: "row" }, [
+      button("←", () => app.nudgeSelection(-nudgeStep, 0), "chip"),
+      button("→", () => app.nudgeSelection(nudgeStep, 0), "chip"),
+    ]),
+    button("↓", () => app.nudgeSelection(0, nudgeStep), "chip"),
+  ]);
+  return el("div", {}, [el("div", { class: "subhead", text: "精準移動" }), stepRow, pad]);
+}
+
+function rotationPanel(app: App, cur: number): HTMLElement {
+  const custom = el("input", { type: "number", step: "1", value: Math.round(cur), class: "field__input field__input--inline" }) as HTMLInputElement;
+  custom.addEventListener("change", () => app.setSelectionRotation(parseFloat(custom.value) || 0));
+  return el("div", {}, [
+    el("div", { class: "subhead", text: "旋轉" }),
+    el("div", { class: "row wrap" }, [
+      button("15°", () => app.rotateSelection(15), "chip chip--sm"),
+      button("45°", () => app.rotateSelection(45), "chip chip--sm"),
+      button("90°", () => app.rotateSelection(90), "chip chip--sm"),
+      custom,
+    ]),
+  ]);
+}
+
 function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["getSelectedObject"]> & object, advanced: boolean, setAdvanced: (v: boolean) => void): void {
   const def = assetDef(obj.kind);
   const info = app.fieldInfo(obj);
+  const cm = (m: number) => `${Math.round(m * 100)} cm`;
   root.append(el("div", { class: "subhead", text: `${def.displayName}` }));
 
-  // Field info — plain language first.
   const field = el("div", { class: "readout" }, [
     el("div", { text: info.tileRef }),
     el("div", { text: `尺寸：${info.sizeCm.w} × ${info.sizeCm.d} cm` }),
-    el("div", { text: `距最近牆：${(info.distToNearestWall * 100).toFixed(0)} cm` }),
+    el("div", { text: `距牆：左 ${cm(info.wall.west)} · 上 ${cm(info.wall.north)} · 右 ${cm(info.wall.east)} · 下 ${cm(info.wall.south)}` }),
+    ...(info.nearestSameKindGap !== null ? [el("div", { text: `最近同類間距：${cm(info.nearestSameKindGap)}` })] : []),
     el("div", { text: `所屬區域：${info.zoneName ?? "（無）"}` }),
   ]);
+  if (obj.kind === "door") {
+    field.append(el("div", { text: `牆面：${obj.wallAnchor ? edgeName(obj.wallAnchor.edge) : "未貼牆"} · 鉸鏈：${obj.hinge === "right" ? "右" : "左"} · ${obj.openInward === false ? "向外" : "向內"} · ${obj.openDeg ?? 90}°` }));
+  }
   root.append(field);
   root.append(button("鏡頭定位", () => { app.scene.focusOn(obj.x, obj.z); }, "chip chip--sm"));
 
-  // Presets.
   if (def.presets.length > 1) {
+    root.append(el("div", { class: "subhead", text: "常用尺寸" }));
     root.append(el("div", { class: "row wrap" },
       def.presets.map((pr) => button(pr.label, () => app.applyPresetToSelection(pr.id), obj.presetId === pr.id ? "chip chip--sm chip--primary" : "chip chip--sm"))));
   }
 
-  // Contextual actions.
   if (obj.kind === "door") {
     root.append(
       selectField("開門邊", [{ value: "left", label: "左鉸鏈" }, { value: "right", label: "右鉸鏈" }], obj.hinge ?? "left", (v) => app.setDoorParams({ hinge: v as "left" | "right" })),
@@ -75,7 +128,9 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
     root.append(button(obj.parentId ? "解除桌面關聯" : "（未在桌面上）", () => app.detachComputer(), "chip chip--sm"));
   }
 
-  // Advanced.
+  if (obj.surface !== "wall") root.append(rotationPanel(app, obj.rotationDeg));
+  root.append(nudgePanel(app));
+
   root.append(advancedToggle(advanced, setAdvanced));
   if (advanced) {
     root.append(el("div", { class: "grid2" }, [
@@ -98,15 +153,25 @@ function buildGroupInspector(root: HTMLElement, app: App, g: NonNullable<ReturnT
   root.append(el("div", { class: "readout" }, [
     el("div", { text: `共 ${fp.count} 個（${g.rows} 列 × ${g.cols} 行）` }),
     el("div", { text: `占用：${fp.totalWidth.toFixed(2)} × ${fp.totalDepth.toFixed(2)} m` }),
+    el("div", { text: `編號：${memberLabel(g, 0, 0)} … ${memberLabel(g, g.rows - 1, g.cols - 1)}` }),
   ]));
   root.append(el("div", { class: "grid2" }, [
     num("列數", g.rows, 1, (v) => app.updateSelectedGroup({ rows: Math.max(1, Math.round(v)) }), 1),
     num("行數", g.cols, 1, (v) => app.updateSelectedGroup({ cols: Math.max(1, Math.round(v)) }), 1),
-    num("墊寬 (cm)", Math.round(metersToCm(g.itemWidth)), 1, (v) => app.updateSelectedGroup({ itemWidth: v / 100 }), 10),
-    num("墊深 (cm)", Math.round(metersToCm(g.itemDepth)), 1, (v) => app.updateSelectedGroup({ itemDepth: v / 100 }), 10),
+    num("單件寬 (cm)", Math.round(metersToCm(g.itemWidth)), 1, (v) => app.updateSelectedGroup({ itemWidth: v / 100 }), 10),
+    num("單件深 (cm)", Math.round(metersToCm(g.itemDepth)), 1, (v) => app.updateSelectedGroup({ itemDepth: v / 100 }), 10),
     num("水平間距 (cm)", Math.round(metersToCm(g.gapX)), 1, (v) => app.updateSelectedGroup({ gapX: v / 100 }), 0),
     num("垂直間距 (cm)", Math.round(metersToCm(g.gapZ)), 1, (v) => app.updateSelectedGroup({ gapZ: v / 100 }), 0),
   ]));
+  root.append(nudgePanel(app));
+  root.append(el("div", { class: "subhead", text: "施工編號" }));
+  root.append(
+    textField("編號前綴", g.numberPrefix, (v) => app.updateSelectedGroup({ numberPrefix: v || "A" })),
+    el("div", { class: "grid2" }, [
+      selectField("順序", [{ value: "row", label: "先列後行" }, { value: "col", label: "先行後列" }], g.numberOrder, (v) => app.updateSelectedGroup({ numberOrder: v as NumberOrder })),
+      selectField("起點", [{ value: "nw", label: "左上" }, { value: "ne", label: "右上" }, { value: "sw", label: "左下" }, { value: "se", label: "右下" }], g.numberStart, (v) => app.updateSelectedGroup({ numberStart: v as NumberStart })),
+    ]),
+  );
   if (advanced) root.append(num("旋轉 (°)", g.rotationDeg, 5, (v) => app.updateSelectedGroup({ rotationDeg: v })));
   root.append(button("解除群組（改為個別物件）", () => app.ungroupSelected(), "btn btn--ghost"));
 }
@@ -120,6 +185,7 @@ function buildZoneInspector(root: HTMLElement, app: App, z: NonNullable<ReturnTy
       num("深 (m)", z.depth, 0.1, (v) => app.updateSelectedZone({ depth: v }), 0.2),
     ]),
   );
+  root.append(nudgePanel(app));
 }
 
 function buildRouteInspector(root: HTMLElement, app: App, r: NonNullable<ReturnType<App["getSelectedRoute"]>>): void {
@@ -129,6 +195,10 @@ function buildRouteInspector(root: HTMLElement, app: App, r: NonNullable<ReturnT
   color.addEventListener("input", () => app.updateRoute(r.id, { color: color.value }));
   root.append(el("div", { class: "row" }, [color, button(app.session.activeRouteId === r.id ? "繪製中…" : "繼續繪製", () => app.editRoute(r.id), "chip chip--sm"), button(r.visible ? "隱藏" : "顯示", () => app.updateRoute(r.id, { visible: !r.visible }), "chip chip--sm")]));
   root.append(el("div", { class: "hint", text: `${r.points.length} 個節點` }));
+}
+
+function edgeName(edge: string): string {
+  return ({ n: "教室北側", s: "教室南側", e: "教室東側", w: "教室西側" } as Record<string, string>)[edge] ?? edge;
 }
 
 function advancedToggle(advanced: boolean, setAdvanced: (v: boolean) => void): HTMLElement {
