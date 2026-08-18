@@ -1,16 +1,20 @@
 # Planform ISO — Field Precision, Mobile Usability & Validation Hardening
 
+> **重要：手機 UX 已由實機截圖證明存在結構性問題。手機相關實作必須同時遵守 [`MOBILE_FIRST_REWRITE_ADDENDUM.md`](./MOBILE_FIRST_REWRITE_ADDENDUM.md)。若本文件原本的「不推倒 Bottom Nav / Bottom Sheet」等描述與補充契約衝突，以 Mobile-first Addendum 為準。**
+
 ## 目的
 
-PR #5 已經完成素材語意模型、Placement Mode、Array Group、Validation Center、Mobile Bottom Sheet、施工圖輸出等核心架構。本階段**不要重做素材系統、不要再大改整體 UI 架構**，而是把產品推進到「真的站在教室現場也能快速、精準、可靠操作」的狀態。
+PR #5 已經完成素材語意模型、Placement Mode、Array Group、Validation Center、Mobile Bottom Sheet、施工圖輸出等核心架構。本階段不要重做素材 Registry 或 Desktop Workspace，但**允許且要求重構手機 App Shell、Topbar、Sheet、Inspector composition 與 gesture ownership**，把產品推進到「真的站在教室現場也能快速、精準、可靠操作」的狀態。
 
 核心目標：
 
 1. 現場量測與尺寸標註可真正使用
-2. 手機單手／雙手操作穩定、不誤觸
+2. 手機必須改成 Canvas-first、單手友善、不誤觸
 3. Validation 從碰撞檢查升級成實際場佈安全檢查
 4. 大量地墊／椅子時仍保持流暢
 5. 匯出施工圖更接近工作人員可以直接照圖執行
+
+完整手機重構規格：[`docs/MOBILE_FIRST_REWRITE_ADDENDUM.md`](./MOBILE_FIRST_REWRITE_ADDENDUM.md)
 
 ---
 
@@ -23,9 +27,11 @@ PR #5 已經完成素材語意模型、Placement Mode、Array Group、Validation
 - 物件到牆／物件到物件／走道寬度量測
 - 地磚格數與實際尺寸同步顯示
 - 真正可操作的 Calibration Wizard
+- **Mobile App Shell Rewrite：單列 Header、Canvas-first、可收合多段 Sheet、context toolbar**
 - 手機 gesture arbitration
 - 手機 placement ergonomics
 - 小物件選取改善
+- **Mobile Inspector 專用 composition，不得直接沿用 Desktop Inspector 長表單**
 - Validation 規則強化
 - Validation 效能最佳化
 - Construction Plan 分層／分頁輸出
@@ -44,8 +50,7 @@ PR #5 已經完成素材語意模型、Placement Mode、Array Group、Validation
 - 不新增多人協作
 - 不做 BIM / CAD 級牆體建模
 - 不重做 PR #5 的素材 Registry
-- 不重新設計整套 Desktop Workspace
-- 不把既有 Bottom Nav / Bottom Sheet 推倒重做
+- 不重新設計 Desktop Workspace 核心
 
 ---
 
@@ -198,76 +203,29 @@ Step 5：明確選擇
 
 ---
 
-# 4. Mobile Gesture Hardening
+# 4. Mobile-first Workspace Rewrite（P0）
 
-目前手機已有 Bottom Nav / Bottom Sheet；這次專注手感與避免誤觸。
+本章的詳細、具體、可驗收規格全部位於：
 
-## 4.1 Gesture arbitration
+[`docs/MOBILE_FIRST_REWRITE_ADDENDUM.md`](./MOBILE_FIRST_REWRITE_ADDENDUM.md)
 
-明確定義：
+以下只列最核心的不可退讓條件：
 
-- 單指點擊：選取
-- 單指拖曳選中物件：移動
-- 單指拖空白：若非 placement，依目前相機模式決定平移／旋轉
-- 雙指 pinch：縮放
-- 雙指 drag：平移
-- 雙指 gesture 期間不得移動 SceneObject
-
-需要建立 pointer state machine，不能只靠單一 pointerdown/move 判斷。
-
-## 4.2 Drag threshold
-
-手機 touch drag threshold 與 mouse 分開。
-
-避免手指點一下素材卻被判斷成拖曳。
-
-## 4.3 Ghost finger offset
-
-Placement Mode 在手機上 ghost 不應完全藏在手指正下方。
-
-提供合理 offset，讓使用者能看到：
-
-- ghost
-- snap 點
-- legality 狀態
-- 距離提示
-
-## 4.4 Small target picking
-
-門、開關、投影幕等薄型牆面物件，要有額外 pick proxy / hit area。
-
-視覺尺寸不變，但觸控命中區可放大。
-
-## 4.5 Context actions
-
-手機選取後 bottom contextual toolbar 優先：
-
-- 移動
-- 旋轉
-- 複製
-- 尺寸
-- 更多
-
-刪除放在 More / danger 區域，避免誤按。
-
-## 4.6 Undo ergonomics
-
-Undo 必須在手機容易取得。
-
-至少：
-
-- contextual action 後顯示短暫 Undo snackbar，或
-- 固定可見 Undo action
-
-不要只藏在 More。
-
-## 4.7 Sheet avoidance
-
-Bottom Sheet 打開時：
-
-- Canvas 可視範圍重新計算
-- focus / zoom 不要把目標移到 Sheet 後面
-- 點 Validation issue 定位時需避開 Sheet
+- 手機預設 Canvas-first；主要工作狀態 Canvas 必須佔大部分可視畫面
+- 頂部只能單列 Compact Header，不得常駐五個視角＋名稱＋置中＋Snap
+- Bottom Nav 再點 active tab 可收起 Sheet 回 Canvas
+- Sheet 必須至少支援 collapsed / half / full 三段高度
+- 點選物件後只出現 context bar，不得自動開巨大 Inspector
+- Properties 需使用 Mobile 專用 composition
+- 精準移動 D-pad 只在 mini-sheet 出現，不得長駐 Inspector
+- 素材庫以分類切換＋compact grid 呈現，不得是一條超長清單
+- 點素材後 Sheet 立即收起、進 Placement、Ghost 有 finger offset
+- 兩指縮放／平移期間 SceneObject 不得移動
+- 小型牆面素材需 pick proxy
+- Validation issue 定位後 Sheet 自動收合，目標不可被遮住
+- Measure 過程保持 Canvas 可見
+- 使用 dynamic viewport / visualViewport 正確處理 Android Chrome 地址列、鍵盤、safe-area
+- Desktop / 大型平板不要被這次手機重構破壞
 
 ---
 
@@ -295,7 +253,7 @@ Ghost placement 時可顯示：
 - 一格地磚
 - 半格地磚
 
-Desktop 可支援方向鍵；Mobile 可使用「精準移動」小面板。
+Desktop 可支援方向鍵；Mobile 必須使用 compact mini-sheet / D-pad，不得像目前長表單一樣常駐。
 
 ## 5.3 Rotation precision
 
@@ -423,8 +381,6 @@ Validation 不要自動亂改場佈。
 
 # 8. Validation Performance
 
-現有 O(n²) overlap 在大量地墊／椅子時需要改善。
-
 ## 8.1 Broad phase
 
 建立 spatial hash / uniform grid。
@@ -433,7 +389,7 @@ Validation 不要自動亂改場佈。
 
 ## 8.2 Exact segment vs OBB
 
-動線與家具碰撞不要再固定 12 點取樣。
+動線與家具碰撞不要再固定取樣。
 
 實作真正 segment-vs-rotated-rect / OBB intersection。
 
@@ -460,275 +416,88 @@ Validation 不要自動亂改場佈。
 
 在一般手機仍可正常拖曳與檢查。
 
-不要硬寫 FPS 保證數字，但需實測並回報。
-
 ---
 
 # 9. Construction Plan 2.0
 
-既有施工圖輸出保留，新增「用途導向輸出」。
+既有施工圖輸出繼續強化：
 
-## 9.1 Output presets
+- 完整場佈圖
+- 地墊／座位圖
+- 動線圖
+- 工作人員配置圖
+- A4 / A3
+- portrait / landscape
+- 主要尺寸標註
+- 地墊與座位編號
+- 素材數量清單
+- 圖例與比例尺
 
-提供：
-
-### 完整場佈圖
-- 教室 / 走廊
-- 地磚
-- 區域
-- 固定設施
-- 家具
-- 地墊
-- 主要尺寸
-
-### 地墊 / 座位圖
-- 地墊或椅子編號
-- 行列
-- 間距
-- 牆距
-- 投影幕方向
-
-### 動線圖
-- 淡化家具
-- 強調 Route
-- 顯示入口、報到、鞋子、背包等重要區域
-
-### 工作人員配置圖
-- 功能區域
-- 報到桌
-- 重要設備
-- 動線
-- 簡單圖例
-
-## 9.2 Page options
-
-- A4
-- A3
-- landscape
-- portrait
-
-若瀏覽器 PNG canvas 無法真正表示紙張 DPI，可用邏輯尺寸 / ratio 呈現，不要宣稱精確印刷 DPI。
-
-## 9.3 Dimension annotations
-
-匯出可選：
-
-- 教室總長寬
-- 主要走道寬度
-- 地墊群組占用尺寸
-- 報到桌到門距離
-
-不要把每個物件都標尺寸造成爆炸。
-
-## 9.4 Inventory summary
-
-匯出或旁邊提供素材數量：
-
-- 椅子：xx
-- 地墊：xx
-- 桌子：xx
-- 報到桌：xx
-- 電腦：xx
-
-ArrayGroup 必須正確計入 member 數量。
+輸出不得包含：selection outline、ghost、editor chrome。
 
 ---
 
-# 10. Field Info 2.0
+# 10. 相容性
 
-Inspector 目前已有地磚與距牆資訊，本階段改善可讀性。
+必須保留：
 
-例如：
+- JSON import / export
+- local-first autosave
+- named layouts
+- Undo / Redo
+- PWA / offline
+- views
+- tile snapping
+- zones
+- routes
+- placement
+- ArrayGroup
+- v1 / v2 migration
 
-## 地墊 A-04
-
-- 尺寸：60 × 180 cm
-- 第 1 排 / 第 4 張
-- 地磚：X7 / Z5
-- 左牆：60 cm
-- 前方間距：20 cm
-- 所屬：小組 1
-- 狀態：無衝突
-
-## 門
-
-- 寬：90 cm
-- 牆面：教室南側
-- 鉸鏈：左
-- 開向：向外
-- 開啟：90°
-- Door sweep：無阻擋
-
-Field Info 必須是人類可讀，不要只顯示 raw x/z。
+手機 UI state 可以是 session-only，不要污染 Project JSON。
 
 ---
 
-# 11. UI/UX 原則
+# 11. Testing / Acceptance
 
-這支 PR 不再重新設計三欄 Desktop Workspace。
+除了 core tests，必須做 mobile viewport / browser smoke。
 
-只做：
+至少驗收：
 
-- 減少操作摩擦
-- 增加 contextual controls
-- 手機手勢穩定
-- 精準工具按需顯示
-- Validation / Measurement 更好理解
+- 360×800
+- 390×844
+- 412×915
+- 480×960
+- 768×1024 portrait
+- 1024×768 landscape
 
-## Progressive disclosure
+手機完整流程：
 
-第一層只顯示常用設定。
-
-精準 X/Z/rotation、raw dimensions、advanced validation 放進「進階」。
-
-## Status feedback
-
-每次重要操作要有可理解的 feedback：
-
-- 已吸附牆面
-- 已放到報到桌
-- 超出區域 20cm
-- 走道剩餘 75cm
-- 已建立 30 張地墊
-
-避免只有顏色變化。
-
----
-
-# 12. State / Migration
-
-若新增：
-
-- measurementAnnotations
-- validationSettings
-- constructionExportSettings
-
-必須：
-
-- bump project version
-- migration v2 → 新版本
-- 舊資料缺欄位時補 defaults
-- JSON roundtrip
-- localStorage named layouts 可正常載入
-
-不得破壞 PR #3 / #5 產生的舊專案。
+1. 開站 Canvas 清楚可見
+2. 場地設定
+3. 開素材 Sheet
+4. 兩次 tap 內選地墊並回 Canvas
+5. Placement ghost 不被手遮住
+6. 放地墊
+7. 雙指縮放不誤拖
+8. 選物件只出現 context bar
+9. 開 Properties 修改尺寸
+10. 收合 Sheet 回 Canvas
+11. 精調 1cm / 5cm
+12. 建立 Array Group
+13. 畫動線
+14. Measure 走道
+15. Validation 定位問題且不被 Sheet 遮住
+16. Undo 容易取得
+17. 匯出施工圖
+18. Chrome 地址列 / orientation / Android back 行為正常
 
 ---
 
-# 13. Tests
+# Definition of Done
 
-至少補：
+真正驗收標準是：
 
-## Unit
+使用者站在真實教室，只拿手機，就能依地磚精準排場、量走道與牆距、避免手勢誤觸、發現擋門／窄走道／超界問題，最後匯出工作人員能直接照著排的配置圖；同時舊專案、JSON、local-first、Undo/Redo、PWA 不被破壞。
 
-- edge-to-edge distance
-- wall clearance footprint
-- aisle width
-- measurement annotation serialization
-- calibration compare/apply logic
-- spatial hash candidate set
-- segment-vs-rotated-rect
-- new validation rules
-- validation settings
-- array numbering
-- inventory count
-- migration
-
-## Integration / browser smoke
-
-至少驗證：
-
-1. 手機 viewport 開啟 App
-2. Bottom Sheet 選素材
-3. 放置地墊 / 椅子
-4. pinch zoom 不會移動物件
-5. 選小型開關仍容易點到
-6. 建立量測
-7. 固定尺寸線
-8. 修改 ArrayGroup
-9. Validation 找出窄走道
-10. 點 Issue 能 focus
-11. 匯出施工圖
-12. refresh 後資料仍存在
-
----
-
-# 14. Definition of Done
-
-完整驗收流程：
-
-1. 開啟既有 v2 專案，資料無損
-2. 建立 / 調整教室尺寸與地磚
-3. 手機使用雙指縮放與平移，不誤拖物件
-4. 新增門、報到桌、電腦、地墊、椅子
-5. 地墊 ArrayGroup 修改行列與間距
-6. 量測地墊到牆距離
-7. 量測地墊間距
-8. 量測主要走道寬度
-9. 將至少一條尺寸線保留在專案
-10. Calibration Wizard 可以比較實際距離與模型距離
-11. 設定最低走道門檻
-12. Validation 找出窄走道／擋門／超界／重疊等問題
-13. 點 Issue 自動選取並正確 focus，手機不被 Sheet 擋住
-14. 大量 100 地墊 + 100 椅子時仍能正常使用
-15. 匯出完整場佈圖
-16. 匯出地墊 / 座位圖
-17. 匯出動線圖
-18. 素材數量統計正確
-19. JSON export/import roundtrip 成功
-20. PWA build / offline 不被破壞
-21. lint / typecheck / tests / build 全部通過
-
----
-
-# 15. 實作順序建議
-
-優先依垂直切片完成，不要一次大改所有檔案：
-
-## Phase A — Measurement foundation
-
-- measurement model
-- overlay
-- edge distance
-- field info
-- tests
-
-## Phase B — Mobile gesture hardening
-
-- pointer state machine
-- pinch/pan
-- pick proxy
-- sheet avoidance
-- tests / manual browser validation
-
-## Phase C — Validation 2.0
-
-- settings
-- aisle / entrance / route rules
-- spatial hash
-- segment vs OBB
-
-## Phase D — Construction Plan 2.0
-
-- output presets
-- annotations
-- inventory
-
-## Phase E — Calibration & polish
-
-- wizard
-- persistence
-- migration
-- final mobile/desktop regression
-
----
-
-# 16. 最終原則
-
-這一階段不要用「新增更多功能」衡量成功。
-
-真正的成功標準是：
-
-> 使用者站在真實教室，只拿手機，就能精準量距離、依地磚排地墊、快速發現擋門或走道不足，最後把一張工作人員看得懂、可以直接照著排的圖交出去。
-
-若最後只是多幾個按鈕、更多設定或再做一次視覺重構，即不符合本 PR 目標。
+**若手機仍然像桌面版縮小、頂部工具列佔多排、Inspector 自動蓋半屏以上、素材庫必須長距離捲動、Canvas 在主要狀態只剩少量空間，即視為 PR 未完成。**
