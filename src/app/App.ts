@@ -72,6 +72,7 @@ import {
 import {
   heatmapAt,
   buildCongestionGrid,
+  syncScenarioToLayout,
   type SpatialIssue,
 } from "../core/spatialFlow";
 import {
@@ -878,7 +879,7 @@ export class App {
             participantCount: q.participants,
             arrivalWindowSeconds: q.arrivalWindowSeconds,
             arrivalProfile: q.arrivalProfile,
-            stations,
+            stations: syncScenarioToLayout(p, { stations }),
             profiles,
           };
         });
@@ -1518,7 +1519,18 @@ export class App {
     }
     this.tapClearStart = null;
     if (!drag) return;
-    if (drag.kind === "move" || drag.kind === "routeNode") this.store.commitTransient();
+    if (drag.kind === "move" || drag.kind === "routeNode") {
+      this.store.commitTransient();
+      // Keep bound service stations glued to moved desks/zones for the next sim.
+      if (drag.kind === "move" && this.state.scenarios.length) {
+        this.store.mutate((p) => {
+          p.scenarios = p.scenarios.map((s) => ({
+            ...s,
+            stations: syncScenarioToLayout(p, s),
+          }));
+        }, { history: false });
+      }
+    }
     this.render();
   }
 
