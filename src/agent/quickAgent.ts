@@ -14,6 +14,7 @@ import type {
   AgentResponse,
   AgentToolCall,
 } from "./types";
+import { recordRollbackReason } from "../core/diagnostics";
 
 export interface QuickAgentResult {
   response: AgentResponse;
@@ -141,6 +142,7 @@ export class QuickAgent {
   }
 
   rollback(): void {
+    recordRollbackReason("user-cancel");
     this.tx.rollback();
   }
 }

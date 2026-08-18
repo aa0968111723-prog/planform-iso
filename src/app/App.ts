@@ -75,6 +75,10 @@ import {
   type SpatialIssue,
 } from "../core/spatialFlow";
 import {
+  recordOptimization,
+  recordSimulationTiming,
+} from "../core/diagnostics";
+import {
   detectionsToObjects,
   type VenueCaptureSession,
 } from "../assets/venueCapture";
@@ -929,11 +933,13 @@ export class App {
 
   runEventSimulation(): SimulationResult {
     const scn = this.ensureEventScenario(false);
+    const t0 = performance.now();
     const result = runDiscreteEvent(scn, {
       sampleDt: 1,
       project: this.state,
       routes: this.state.routes,
     });
+    recordSimulationTiming(performance.now() - t0);
     this.session.simResult = result;
     this.session.simCompare = null;
     this.session.simSpatialIssues = result.spatialIssues;
@@ -1005,7 +1011,9 @@ export class App {
 
   runOptimizer(objective: OptimizationObjective = "fastest"): OptimizationReport {
     const scn = this.ensureEventScenario(false);
+    const t0 = performance.now();
     const report = optimizeEventFlow(scn, objective, this.state);
+    recordOptimization(report.ranked.length, performance.now() - t0);
     this.session.optReport = report;
     if (report.improved) {
       this.session.simResult = report.improved.result;

@@ -14,6 +14,11 @@ import { buildCustomAssetFlow } from "./customAssetFlow";
 import { buildVenueCaptureFlow } from "./venueCapture";
 import { refreshSimPanel } from "./simPanel";
 import { button, el, num, section, selectField, textField } from "./dom";
+import {
+  enableDiagnostics,
+  formatDiagnosticsText,
+  isDiagnosticsEnabled,
+} from "../core/diagnostics";
 
 const VIEWS: { id: ViewName; label: string }[] = [
   { id: "top", label: "俯視" }, { id: "iso", label: "等角(3D)" }, { id: "front", label: "正視" },
@@ -464,6 +469,32 @@ export class UI {
       ]),
     ], false);
 
+    const diagOn = isDiagnosticsEnabled();
+    const diagBody: HTMLElement[] = [
+      button(
+        diagOn ? "✓ 開發診斷開啟" : "開啟開發診斷",
+        () => {
+          enableDiagnostics(!isDiagnosticsEnabled());
+          this.update();
+        },
+        diagOn ? "chip chip--sm chip--primary" : "chip chip--sm",
+      ),
+      el("p", {
+        class: "hint",
+        text: "僅本機；一般使用者不需開啟。也可在網址加 ?diag=1。",
+      }),
+    ];
+    if (diagOn) {
+      diagBody.push(
+        el("pre", {
+          class: "readout",
+          style: "white-space:pre-wrap;font-size:11px",
+          text: formatDiagnosticsText(),
+        }),
+      );
+    }
+    const developer = section("Developer / Advanced", diagBody, false);
+
     return section("檢查中心", [
       el("div", { class: "row" }, [
         button("重新檢查", () => this.app.runValidation()),
@@ -471,6 +502,7 @@ export class UI {
       ]),
       list,
       settings,
+      developer,
     ]);
   }
 

@@ -23,6 +23,7 @@ import { issueCounts, validateProject } from "../core/validation";
 import { isAllowedTool } from "./tools";
 import type { AgentToolCall } from "./types";
 import type { AgentTransaction } from "./transaction";
+import { recordAgentTool } from "../core/diagnostics";
 
 export interface ExecutorContext {
   selectionIds: string[];
@@ -67,6 +68,20 @@ export class AgentExecutor {
       return { ok: false, tool: call.tool, error: "沒有進行中的 Preview" };
     }
 
+    const t0 = performance.now();
+    try {
+      const result = await this.runInner(call);
+      recordAgentTool(call.tool, result.ok, performance.now() - t0, result.error);
+      return result;
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      recordAgentTool(call.tool, false, performance.now() - t0, error);
+      return { ok: false, tool: call.tool, error };
+    }
+  }
+
+  private async runInner(call: AgentToolCall): Promise<ToolResult> {
+    const draft = this.tx.getDraft();
     try {
       switch (call.tool) {
         case "getProjectSummary":
