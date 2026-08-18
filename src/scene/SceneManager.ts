@@ -37,6 +37,7 @@ const SELECT = "#38bdf8";
 
 export interface GhostState {
   kind: ObjectKind;
+  assetId?: string;
   dims: { width: number; depth: number; height: number };
   x: number;
   z: number;

@@ -42,8 +42,11 @@ describe("project migration", () => {
     expect(p.version).toBe(PROJECT_VERSION);
     expect(p.objects).toHaveLength(2);
     expect(p.objects[0].surface).toBe("floor");
+    expect(p.objects[0].assetId).toBe("builtin:table");
+    expect(p.objects[1].assetId).toBe("builtin:chair");
     expect(Array.isArray(p.groups)).toBe(true);
     expect(p.groups).toHaveLength(0);
+    expect(Array.isArray(p.catalogExtras)).toBe(true);
   });
 
   it("drops unknown object kinds and keeps valid groups", () => {
