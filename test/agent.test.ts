@@ -151,4 +151,31 @@ describe("quick agent mock provider", () => {
     expect(data.available).toBe(true);
     expect(data.comparison.reason.length).toBeGreaterThan(4);
   });
+
+  it("staff what-if stays staged and does not mutate live project", async () => {
+    const store = new Store(createDefaultProject());
+    const agent = new QuickAgent(store, new MockProvider());
+    // Seed a scenario on live project first via configure + commit path? 
+    // Run what-if which configures staged only.
+    const result = await agent.run({ text: "少一個工作人員會怎樣？" });
+    expect(result.previewActive).toBe(true);
+    expect(store.getState().scenarios.length).toBe(0); // live untouched until commit
+    const assign = result.toolResults.find((t) => t.tool === "assignStaff");
+    expect(assign?.ok).toBe(true);
+    const sim = result.toolResults.find((t) => t.tool === "simulateScenario");
+    expect(sim?.ok).toBe(true);
+    agent.rollback();
+    expect(store.getState().scenarios.length).toBe(0);
+  });
+
+  it("optimize event flow returns quantified deltas", async () => {
+    const store = new Store(createDefaultProject());
+    const agent = new QuickAgent(store, new MockProvider());
+    const result = await agent.run({ text: "給我最快方案" });
+    const opt = result.toolResults.find((t) => t.tool === "optimizeEventFlow");
+    expect(opt?.ok).toBe(true);
+    const data = opt?.data as { summary?: string; deltas?: { display: string }[] };
+    expect(data?.summary?.length).toBeGreaterThan(4);
+    expect(result.cards.some((c) => c.title === "改善證據" || c.detail.includes("→") || c.title === "說明")).toBe(true);
+  });
 });

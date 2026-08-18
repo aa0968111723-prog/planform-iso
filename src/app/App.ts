@@ -57,6 +57,24 @@ import {
   type SimulationResult,
 } from "../core/eventFlow";
 import {
+  optimizeEventFlow,
+  whatIfFewerStaff,
+  type OptimizationObjective,
+  type OptimizationReport,
+} from "../core/eventOptimization";
+import {
+  applyLayoutCandidate,
+  compareLayoutCandidates,
+  normalizeWizardInput,
+  type LayoutCandidateResult,
+  type RegistrationWizardInput,
+} from "../core/registrationFlow";
+import {
+  heatmapAt,
+  buildCongestionGrid,
+  type SpatialIssue,
+} from "../core/spatialFlow";
+import {
   detectionsToObjects,
   type VenueCaptureSession,
 } from "../assets/venueCapture";
@@ -66,7 +84,7 @@ import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
-export type Workflow = "site" | "layout" | "route" | "check" | "export";
+export type Workflow = "site" | "layout" | "route" | "sim" | "check" | "export";
 
 const TABLE_KINDS: ReadonlySet<string> = new Set(["table", "regTable"]);
 const MEASURE_COLOR = "#facc15";
@@ -114,7 +132,17 @@ export interface Session {
     hasOnsitePayment: boolean;
     checkinStaff: number;
     paymentStaff: number;
+    arrivalProfile: EventScenario["arrivalProfile"];
+    showHeatmap: boolean;
+    showAdvanced: boolean;
   };
+  /** Wizard layout candidate comparison results. */
+  layoutCandidates: LayoutCandidateResult[] | null;
+  /** Last optimization report (for UI before/after). */
+  optReport: OptimizationReport | null;
+  /** Heatmap cells at current scrub time. */
+  heatmapCells: { x: number; z: number; count: number }[];
+  simSpatialIssues: SpatialIssue[];
 }
 
 interface DragState {
@@ -173,9 +201,16 @@ export class App {
       arrivalWindowSeconds: 1200,
       prepaidRatio: 2 / 3,
       hasOnsitePayment: true,
-      checkinStaff: 1,
+      checkinStaff: 2,
       paymentStaff: 1,
+      arrivalProfile: "uniform",
+      showHeatmap: false,
+      showAdvanced: false,
     },
+    layoutCandidates: null,
+    optReport: null,
+    heatmapCells: [],
+    simSpatialIssues: [],
   };
 
   readonly quickAgent: QuickAgent;
@@ -276,6 +311,7 @@ export class App {
       simPositions: this.session.simPositions,
       bottlenecks: this.session.bottlenecks,
       simQueues: this.session.simQueues,
+      heatmapCells: this.session.simQuick.showHeatmap ? this.session.heatmapCells : [],
       simStations: this.activeScenario()?.stations.map((s) => ({
         id: s.id,
         name: s.name,
@@ -837,6 +873,7 @@ export class App {
             ...s,
             participantCount: q.participants,
             arrivalWindowSeconds: q.arrivalWindowSeconds,
+            arrivalProfile: q.arrivalProfile,
             stations,
             profiles,
           };
@@ -852,6 +889,7 @@ export class App {
     scn = {
       ...scn,
       arrivalWindowSeconds: q.arrivalWindowSeconds,
+      arrivalProfile: q.arrivalProfile,
       stations: scn.stations.map((st) => {
         if (st.type === "checkin") {
           return { ...st, staffCount: q.checkinStaff, parallelServers: q.checkinStaff };
@@ -898,6 +936,8 @@ export class App {
     });
     this.session.simResult = result;
     this.session.simCompare = null;
+    this.session.simSpatialIssues = result.spatialIssues;
+    if (this.session.simQuick.showHeatmap) this.refreshHeatmap(0);
     this.notifyUi();
     return result;
   }
@@ -920,6 +960,209 @@ export class App {
     this.session.simResult = cmp.winner === "b" ? b : a;
     this.notifyUi();
     return cmp;
+  }
+
+  /** Run Registration Flow Wizard A/B/C(/D) comparison. */
+  runLayoutWizard(partial?: Partial<RegistrationWizardInput>): LayoutCandidateResult[] {
+    const q = this.session.simQuick;
+    const prepaid = Math.round(q.participants * q.prepaidRatio);
+    const input = normalizeWizardInput({
+      participantCount: q.participants,
+      arrivalWindowMinutes: Math.round(q.arrivalWindowSeconds / 60),
+      prepaidCount: prepaid,
+      onsitePaymentCount: q.hasOnsitePayment ? q.participants - prepaid : 0,
+      checkinStaff: q.checkinStaff,
+      paymentStaff: q.paymentStaff,
+      arrivalProfile: q.arrivalProfile,
+      ...partial,
+    });
+    const results = compareLayoutCandidates(this.state, input);
+    this.session.layoutCandidates = results;
+    if (results[0]) {
+      this.session.simResult = results[0].result;
+      this.session.simSpatialIssues = results[0].result.spatialIssues;
+    }
+    this.notifyUi();
+    return results;
+  }
+
+  applyWizardCandidate(candidateId: string): void {
+    const cand = this.session.layoutCandidates?.find((c) => c.id === candidateId);
+    if (!cand) return;
+    const next = applyLayoutCandidate(this.state, cand);
+    this.store.mutate((p) => {
+      p.objects = next.objects;
+      p.zones = next.zones;
+      p.routes = next.routes;
+      p.scenarios = next.scenarios;
+      p.activeScenarioId = next.activeScenarioId;
+    });
+    this.session.simResult = cand.result;
+    this.session.simSpatialIssues = cand.result.spatialIssues;
+    this.toast(`已套用方案：${cand.name}`, true);
+    this.notifyUi();
+  }
+
+  runOptimizer(objective: OptimizationObjective = "fastest"): OptimizationReport {
+    const scn = this.ensureEventScenario(false);
+    const report = optimizeEventFlow(scn, objective, this.state);
+    this.session.optReport = report;
+    if (report.improved) {
+      this.session.simResult = report.improved.result;
+      this.session.simSpatialIssues = report.improved.result.spatialIssues;
+    }
+    this.toast(report.summary);
+    this.notifyUi();
+    return report;
+  }
+
+  applyOptimizedCandidate(): void {
+    const report = this.session.optReport;
+    if (!report?.improved) return;
+    const scn = report.improved.candidate.scenario;
+    this.store.mutate((p) => {
+      // Move bound objects to match station positions
+      for (const st of scn.stations) {
+        if (!st.objectId) continue;
+        const obj = p.objects.find((o) => o.id === st.objectId);
+        if (obj) {
+          obj.x = st.x;
+          obj.z = st.z;
+        }
+      }
+      p.scenarios = [scn, ...p.scenarios.filter((s) => s.id !== scn.id)];
+      p.activeScenarioId = scn.id;
+    });
+    this.session.simResult = report.improved.result;
+    this.toast(`已套用改善方案：${report.improved.candidate.name}`, true);
+    this.notifyUi();
+  }
+
+  seekSimulation(t: number): void {
+    const result = this.session.simResult;
+    if (!result) return;
+    const clamped = Math.max(0, Math.min(result.finishTimeSeconds, t));
+    this.session.simPaused = true;
+    this.session.simPlaying = true;
+    this.session.simMode = "event-flow";
+    this.applyDesFrame(clamped, result);
+    this.notifyUi();
+  }
+
+  jumpToPeakCongestion(): void {
+    const result = this.session.simResult;
+    if (!result) return;
+    this.seekSimulation(result.peakCongestionTime);
+    const bn = result.stations.find((s) => s.stationId === result.bottleneckStationId);
+    if (bn) {
+      const st = this.activeScenario()?.stations.find((s) => s.id === bn.stationId);
+      if (st) {
+        this.setView("top");
+        this.scene.focusOn(st.x, st.z);
+      }
+    }
+    this.toast(`已跳到最壅塞時刻 ${Math.round(result.peakCongestionTime)}s`);
+  }
+
+  focusSpatialIssue(issue: SpatialIssue): void {
+    this.setView("top");
+    this.scene.focusOn(issue.x, issue.z);
+    if (typeof issue.atTime === "number" && this.session.simResult) {
+      this.seekSimulation(issue.atTime);
+    }
+    this.render();
+  }
+
+  setShowHeatmap(on: boolean): void {
+    this.session.simQuick.showHeatmap = on;
+    if (on && this.session.simResult) {
+      this.refreshHeatmap(this.session.simTime);
+    } else {
+      this.session.heatmapCells = [];
+    }
+    this.render();
+  }
+
+  private refreshHeatmap(t: number): void {
+    const result = this.session.simResult;
+    if (!result?.playback.length) {
+      this.session.heatmapCells = [];
+      return;
+    }
+    const grid = buildCongestionGrid(result.playback, 1);
+    this.session.heatmapCells = heatmapAt(grid, result.playback, t);
+  }
+
+  /** Staged what-if: fewer staff — does not mutate live project. */
+  previewFewerStaff(remove = 1): {
+    before: SimulationResult;
+    after: SimulationResult;
+    scenario: EventScenario;
+  } {
+    const scn = this.ensureEventScenario(false);
+    const before = runDiscreteEvent(scn, {
+      sampleDt: 2,
+      project: this.state,
+      routes: this.state.routes,
+    });
+    const reduced = whatIfFewerStaff(scn, remove);
+    const after = runDiscreteEvent(reduced, {
+      sampleDt: 2,
+      project: this.state,
+      routes: this.state.routes,
+    });
+    this.session.simResult = after;
+    this.session.optReport = {
+      objective: "least-staff",
+      baseline: {
+        candidate: { id: "baseline", name: "目前方案", scenario: scn },
+        result: before,
+        score: 0,
+        validationErrors: 0,
+        validationWarnings: 0,
+      },
+      improved: {
+        candidate: { id: "staff-minus", name: reduced.name, scenario: reduced },
+        result: after,
+        score: 0,
+        validationErrors: 0,
+        validationWarnings: 0,
+      },
+      ranked: [],
+      deltas: [
+        {
+          label: "平均等待",
+          before: before.avgWaitSeconds,
+          after: after.avgWaitSeconds,
+          unit: "seconds",
+          display: `${Math.round(before.avgWaitSeconds)}s → ${Math.round(after.avgWaitSeconds)}s`,
+        },
+        {
+          label: "最大排隊",
+          before: before.maxQueue,
+          after: after.maxQueue,
+          unit: "people",
+          display: `${before.maxQueue} → ${after.maxQueue}`,
+        },
+        {
+          label: "總完成",
+          before: before.finishTimeSeconds,
+          after: after.finishTimeSeconds,
+          unit: "seconds",
+          display: `${Math.round(before.finishTimeSeconds)}s → ${Math.round(after.finishTimeSeconds)}s`,
+        },
+        {
+          label: "工作人員",
+          before: before.staffUsed,
+          after: after.staffUsed,
+          unit: "staff",
+          display: `${before.staffUsed} → ${after.staffUsed}`,
+        },
+      ],
+      summary: `少 ${remove} 人預覽（尚未套用）：完成 ${Math.round(before.finishTimeSeconds)}s → ${Math.round(after.finishTimeSeconds)}s`,
+    };
+    this.notifyUi();
+    return { before, after, scenario: reduced };
   }
 
   startSimulation(params?: Partial<SimParams>): void {
@@ -1023,6 +1266,8 @@ export class App {
           count: frame.queues[s.stationId] ?? s.maxQueue,
         };
       });
+    this.session.simSpatialIssues = result.spatialIssues;
+    if (this.session.simQuick.showHeatmap) this.refreshHeatmap(frame.t);
     this.syncScene();
   }
 

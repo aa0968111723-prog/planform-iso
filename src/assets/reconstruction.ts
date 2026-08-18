@@ -145,6 +145,23 @@ export function replaceCatalogVisual(
   };
 }
 
+/**
+ * Production reconstruction provider contract.
+ * Img2ThreeJS / remote jobs implement this; MockReconstructionWorker is the
+ * offline fallback. Generated code is NEVER eval'd in the browser.
+ */
+export interface AssetReconstructionProvider {
+  readonly id: string;
+  enqueue(catalogId: string, sourceImageBlobId?: string): AssetReconstructionJob;
+  status(jobId: string): AssetReconstructionJob | undefined;
+  cancel?(jobId: string): void;
+  /** Run job to completion; on failure proxy remains usable. */
+  run(
+    jobId: string,
+    entry: AssetCatalogEntry,
+  ): Promise<{ entry: AssetCatalogEntry; ok: boolean; error?: string }>;
+}
+
 export class ReconstructionQueue {
   private jobs = new Map<string, AssetReconstructionJob>();
 

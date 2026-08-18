@@ -58,6 +58,30 @@ export interface VenueProvider {
   detect(imageName: string, dataUrl: string | null): Promise<VenueDetection[]>;
 }
 
+/** Canonical product name for the capture contract (alias of VenueProvider). */
+export type VenueCaptureProvider = VenueProvider;
+
+/**
+ * Optional remote vision adapter. Without a key / endpoint it fails clearly
+ * and callers should fall back to MockVenueProvider — never fake success.
+ */
+export class HttpVenueCaptureProvider implements VenueCaptureProvider {
+  readonly id = "http-venue";
+  constructor(
+    private endpoint: string,
+    private apiKey: string | null,
+  ) {}
+
+  async detect(imageName: string, dataUrl: string | null): Promise<VenueDetection[]> {
+    if (!this.apiKey || !this.endpoint) {
+      throw new Error("場地掃描 Vision API 未設定（需要 credential）。請改用本機偵測或手動場佈。");
+    }
+    void imageName;
+    void dataUrl;
+    throw new Error("遠端 Vision provider 尚未連線；請使用本機 Mock 偵測。");
+  }
+}
+
 /** Deterministic mock detections for offline / tests / no-vision environments. */
 export class MockVenueProvider implements VenueProvider {
   readonly id = "mock-venue";

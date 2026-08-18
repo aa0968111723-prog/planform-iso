@@ -10,6 +10,12 @@ import {
   replaceCatalogVisual,
 } from "../assets/reconstruction";
 import type { AssetCatalogEntry, SemanticAssetType, ServiceRole } from "../core/catalog";
+import { buildCheckinPaymentVariants } from "../core/eventFlow";
+import {
+  optimizeEventFlow,
+  whatIfFewerStaff,
+  type OptimizationObjective,
+} from "../core/eventOptimization";
 import { catalogFromProject } from "../core/migrate";
 import { buildSummaryLines } from "../core/summary";
 import { uid, ZONE_DEFAULTS, type Project, type SceneObject, type ZoneType } from "../core/model";
@@ -119,6 +125,210 @@ export class AgentExecutor {
             ok: true,
             tool: call.tool,
             data: eventFlowAdapter.compareScenarios(draft!, participants),
+          };
+        }
+        case "readScenario": {
+          const scn =
+            (draft!.activeScenarioId &&
+              draft!.scenarios.find((s) => s.id === draft!.activeScenarioId)) ||
+            draft!.scenarios[0] ||
+            eventFlowAdapter.ensureScenario(draft!);
+          return {
+            ok: true,
+            tool: call.tool,
+            data: {
+              id: scn.id,
+              name: scn.name,
+              participantCount: scn.participantCount,
+              stations: scn.stations.map((s) => ({
+                id: s.id,
+                name: s.name,
+                type: s.type,
+                staffCount: s.staffCount,
+                x: s.x,
+                z: s.z,
+              })),
+              profiles: scn.profiles,
+            },
+          };
+        }
+        case "readSimulationResult":
+        case "findBottlenecks": {
+          const participants = num(call.args?.participants, draft!.scenarios[0]?.participantCount ?? 60);
+          const summary = eventFlowAdapter.simulateScenario(draft!, participants);
+          return { ok: true, tool: call.tool, data: summary };
+        }
+        case "configureScenario": {
+          const participants = num(call.args?.participants, 60);
+          const prepaidRatio =
+            typeof call.args?.prepaidRatio === "number"
+              ? call.args.prepaidRatio
+              : typeof call.args?.prepaidCount === "number"
+                ? Number(call.args.prepaidCount) / Math.max(1, participants)
+                : 2 / 3;
+          const checkinStaff = num(call.args?.checkinStaff, 2);
+          const paymentStaff = num(call.args?.paymentStaff, 1);
+          const hasOnsite =
+            call.args?.hasOnsitePayment !== false &&
+            (typeof call.args?.onsitePaymentCount === "number"
+              ? Number(call.args.onsitePaymentCount) > 0
+              : prepaidRatio < 1);
+          this.tx.mutate((p) => {
+            let scn = eventFlowAdapter.ensureScenario(p, participants);
+            if (!p.scenarios.some((s) => s.id === scn.id)) {
+              p.scenarios = [...p.scenarios, scn];
+              p.activeScenarioId = scn.id;
+            }
+            scn = {
+              ...scn,
+              participantCount: participants,
+              arrivalWindowSeconds: num(call.args?.arrivalWindowSeconds, scn.arrivalWindowSeconds),
+              stations: scn.stations.map((st) => {
+                if (st.type === "checkin") {
+                  return { ...st, staffCount: checkinStaff, parallelServers: checkinStaff };
+                }
+                if (st.type === "payment") {
+                  const staff = hasOnsite ? paymentStaff : 0;
+                  return { ...st, staffCount: staff, parallelServers: staff };
+                }
+                return st;
+              }),
+            };
+            const prepaidBranch = scn.stations.filter((s) => s.type !== "payment").map((s) => s.id);
+            const fullBranch = scn.stations.map((s) => s.id);
+            scn.profiles = hasOnsite
+              ? [
+                  { id: "prepaid", ratio: prepaidRatio, branch: prepaidBranch },
+                  { id: "pay-on-site", ratio: 1 - prepaidRatio, branch: fullBranch },
+                ]
+              : [{ id: "prepaid", ratio: 1, branch: prepaidBranch }];
+            p.scenarios = p.scenarios.map((s) => (s.id === scn.id ? scn : s));
+            p.activeScenarioId = scn.id;
+          });
+          return {
+            ok: true,
+            tool: call.tool,
+            data: { configured: true, participants, prepaidRatio, checkinStaff, paymentStaff },
+          };
+        }
+        case "splitPaymentFlow": {
+          this.tx.mutate((p) => {
+            const scn = eventFlowAdapter.ensureScenario(p);
+            const { separated } = buildCheckinPaymentVariants(scn);
+            // Place payment desk offset if object exists
+            const pay = separated.stations.find((s) => s.type === "payment");
+            const ck = separated.stations.find((s) => s.type === "checkin");
+            if (pay && ck) {
+              const payObj = p.objects.find((o) => o.serviceRole === "payment");
+              const ckObj = p.objects.find((o) => o.serviceRole === "checkin" || o.kind === "regTable");
+              if (payObj) {
+                payObj.x = (ckObj?.x ?? ck.x) + 2.5;
+                payObj.z = ckObj?.z ?? ck.z;
+              } else if (ckObj) {
+                p.objects.push({
+                  ...ckObj,
+                  id: uid("obj"),
+                  x: ckObj.x + 2.5,
+                  serviceRole: "payment",
+                  assetId: "builtin:payment-desk",
+                });
+              }
+            }
+            p.scenarios = [separated, ...p.scenarios.filter((s) => s.id !== separated.id && s.id !== scn.id)];
+            p.activeScenarioId = separated.id;
+          });
+          return { ok: true, tool: call.tool, data: { split: true } };
+        }
+        case "assignStaff": {
+          const checkinStaff = typeof call.args?.checkinStaff === "number" ? call.args.checkinStaff : undefined;
+          const paymentStaff = typeof call.args?.paymentStaff === "number" ? call.args.paymentStaff : undefined;
+          const remove = num(call.args?.remove, 0);
+          this.tx.mutate((p) => {
+            let scn = eventFlowAdapter.ensureScenario(p);
+            if (remove > 0) {
+              scn = whatIfFewerStaff(scn, remove);
+            } else {
+              scn = {
+                ...scn,
+                stations: scn.stations.map((st) => {
+                  if (st.type === "checkin" && checkinStaff !== undefined) {
+                    return { ...st, staffCount: checkinStaff, parallelServers: checkinStaff };
+                  }
+                  if (st.type === "payment" && paymentStaff !== undefined) {
+                    return { ...st, staffCount: paymentStaff, parallelServers: paymentStaff };
+                  }
+                  return st;
+                }),
+              };
+            }
+            p.scenarios = p.scenarios.map((s) => (s.id === scn.id || s.id === p.activeScenarioId ? scn : s));
+            if (!p.scenarios.some((s) => s.id === scn.id)) p.scenarios = [scn, ...p.scenarios];
+            p.activeScenarioId = scn.id;
+          });
+          return { ok: true, tool: call.tool, data: { assigned: true, remove } };
+        }
+        case "generateLayoutCandidates":
+        case "optimizeEventFlow": {
+          const objective = str(call.args?.objective, "fastest") as OptimizationObjective;
+          const scn = eventFlowAdapter.ensureScenario(draft!);
+          const report = optimizeEventFlow(scn, objective, draft!);
+          if (report.improved) {
+            this.tx.mutate((p) => {
+              const next = report.improved!.candidate.scenario;
+              for (const st of next.stations) {
+                if (!st.objectId) continue;
+                const obj = p.objects.find((o) => o.id === st.objectId);
+                if (obj) {
+                  obj.x = st.x;
+                  obj.z = st.z;
+                }
+              }
+              p.scenarios = [next, ...p.scenarios.filter((s) => s.id !== next.id)];
+              p.activeScenarioId = next.id;
+            });
+          }
+          return {
+            ok: true,
+            tool: call.tool,
+            data: {
+              summary: report.summary,
+              deltas: report.deltas,
+              improved: report.improved?.candidate.name ?? null,
+              baseline: {
+                finish: report.baseline.result.finishTimeSeconds,
+                maxQueue: report.baseline.result.maxQueue,
+                avgWait: report.baseline.result.avgWaitSeconds,
+                staff: report.baseline.result.staffUsed,
+              },
+              after: report.improved
+                ? {
+                    finish: report.improved.result.finishTimeSeconds,
+                    maxQueue: report.improved.result.maxQueue,
+                    avgWait: report.improved.result.avgWaitSeconds,
+                    staff: report.improved.result.staffUsed,
+                  }
+                : null,
+            },
+          };
+        }
+        case "explainImprovement": {
+          const scn = eventFlowAdapter.ensureScenario(draft!);
+          const report = optimizeEventFlow(scn, "fastest", draft!);
+          return {
+            ok: true,
+            tool: call.tool,
+            data: { summary: report.summary, deltas: report.deltas },
+          };
+        }
+        case "focusIssue": {
+          return {
+            ok: true,
+            tool: call.tool,
+            data: {
+              note: "請在模擬面板點問題以聚焦；Agent 已標出瓶頸",
+              x: typeof call.args?.x === "number" ? call.args.x : undefined,
+              z: typeof call.args?.z === "number" ? call.args.z : undefined,
+            },
           };
         }
         case "createServiceStation": {

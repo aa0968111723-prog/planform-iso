@@ -165,8 +165,8 @@ function applyTemplateStations(scn: EventScenario, template: RegistrationTemplat
   if (!ent || !checkin) return scn;
 
   const keepTypes = new Set<ServiceStation["type"]>();
-  let prepaidBranch: string[] = [];
-  let onsiteBranch: string[] = [];
+  let prepaidBranch: string[];
+  let onsiteBranch: string[];
 
   switch (template) {
     case "checkin-only":

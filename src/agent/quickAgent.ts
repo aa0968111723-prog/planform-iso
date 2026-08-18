@@ -82,12 +82,50 @@ export class QuickAgent {
     const summary = (preview.data as AgentDiffSummary) ?? this.tx.summarize();
 
     const cards: AgentActionCard[] = [
-      { title: "AI 說明", detail: response.message },
+      { title: "說明", detail: response.message },
       ...summary.notes.map((n) => ({ title: "變更", detail: n })),
-      ...toolResults
-        .filter((r) => !r.ok)
-        .map((r) => ({ title: "工具失敗", detail: `${r.tool}: ${r.error}` })),
     ];
+
+    for (const r of toolResults) {
+      if (!r.ok) {
+        cards.push({ title: "工具失敗", detail: `${r.tool}: ${r.error}` });
+        continue;
+      }
+      const data = r.data as Record<string, unknown> | undefined;
+      if (!data) continue;
+      if (r.tool === "optimizeEventFlow" || r.tool === "explainImprovement") {
+        if (typeof data.summary === "string") {
+          cards.push({ title: "改善證據", detail: data.summary });
+        }
+        const deltas = data.deltas as { label: string; display: string }[] | undefined;
+        if (deltas?.length) {
+          for (const d of deltas.slice(0, 4)) {
+            cards.push({ title: d.label, detail: d.display });
+          }
+        }
+      }
+      if (r.tool === "simulateScenario" || r.tool === "findBottlenecks") {
+        const msg = (data as { message?: string }).message;
+        if (msg) cards.push({ title: "模擬", detail: msg });
+        const result = (data as { result?: { maxQueue?: number; avgWaitSeconds?: number; finishTimeSeconds?: number; bottleneckName?: string | null } }).result;
+        if (result) {
+          cards.push({
+            title: "指標",
+            detail: `最大排隊 ${result.maxQueue ?? "—"} · 平均等待 ${Math.round(result.avgWaitSeconds ?? 0)}s · 完成 ${Math.round(result.finishTimeSeconds ?? 0)}s${result.bottleneckName ? ` · 瓶頸 ${result.bottleneckName}` : ""}`,
+          });
+        }
+      }
+      if (r.tool === "compareScenarios") {
+        const message = (data as { message?: string }).message;
+        if (message) cards.push({ title: "方案比較", detail: message });
+      }
+      if (r.tool === "assignStaff" && (data as { remove?: number }).remove) {
+        cards.push({
+          title: "人力 what-if",
+          detail: `已在 Preview 中減少 ${(data as { remove: number }).remove} 人並重跑模擬（正式專案未改）。`,
+        });
+      }
+    }
 
     return {
       response,

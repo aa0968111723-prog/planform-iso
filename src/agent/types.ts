@@ -4,6 +4,7 @@
  */
 
 import type { SemanticAssetType, ServiceRole } from "../core/catalog";
+import type { OptimizationObjective as EventOptObjective } from "../core/eventOptimization";
 
 export type OptimizationObjective = "clear-doors" | "separate-checkin-payment" | "reduce-crowding";
 
@@ -18,6 +19,9 @@ export type AgentIntent =
   | { type: "place-assets"; assetId: string; count: number; target?: SpatialTarget }
   | { type: "separate-service-flow"; services: ("checkin" | "payment")[] }
   | { type: "simulate"; participants: number; scenarioId?: string }
+  | { type: "configure-registration"; participants: number; onsitePayment?: number; prepaid?: number; checkinStaff?: number; paymentStaff?: number }
+  | { type: "what-if-staff"; remove?: number }
+  | { type: "optimize-event"; objective?: EventOptObjective }
   | { type: "optimize-layout"; objectives: OptimizationObjective[] }
   | { type: "explain-bottleneck" }
   | { type: "prepare-team-view" }
@@ -32,6 +36,8 @@ export type AgentToolName =
   | "getRoutes"
   | "getValidationIssues"
   | "getSimulationSummary"
+  | "readScenario"
+  | "readSimulationResult"
   | "createAssetFromCatalog"
   | "createCustomAssetProxy"
   | "requestAssetReconstruction"
@@ -50,10 +56,18 @@ export type AgentToolName =
   | "updateRoute"
   | "createServiceStation"
   | "updateServiceStation"
+  | "configureScenario"
+  | "splitPaymentFlow"
+  | "assignStaff"
   | "validateLayout"
   | "measureGap"
   | "simulateScenario"
   | "compareScenarios"
+  | "findBottlenecks"
+  | "generateLayoutCandidates"
+  | "optimizeEventFlow"
+  | "explainImprovement"
+  | "focusIssue"
   | "previewAgentChanges"
   | "commitAgentChanges"
   | "rollbackAgentChanges";
@@ -84,6 +98,8 @@ export interface AgentDiffSummary {
   notes: string[];
   validationBefore?: { errors: number; warnings: number };
   validationAfter?: { errors: number; warnings: number };
+  simulationBefore?: { finish: number; maxQueue: number; avgWait: number; staff: number };
+  simulationAfter?: { finish: number; maxQueue: number; avgWait: number; staff: number };
 }
 
 export interface AgentActionCard {
@@ -91,4 +107,4 @@ export interface AgentActionCard {
   detail: string;
 }
 
-export type { SemanticAssetType, ServiceRole };
+export type { SemanticAssetType, ServiceRole, EventOptObjective };

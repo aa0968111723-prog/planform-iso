@@ -24,8 +24,8 @@ const SNAPS: { id: SnapMode; label: string }[] = [
   { id: "center", label: "中心" }, { id: "half", label: "半格" },
 ];
 const WORKFLOWS: { id: Workflow; label: string }[] = [
-  { id: "site", label: "場地" }, { id: "layout", label: "場佈" }, { id: "route", label: "動線" },
-  { id: "check", label: "檢查" }, { id: "export", label: "分享" },
+  { id: "site", label: "掃描" }, { id: "layout", label: "場佈" }, { id: "sim", label: "模擬" },
+  { id: "route", label: "動線" }, { id: "check", label: "檢查" }, { id: "export", label: "分享" },
 ];
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
@@ -133,18 +133,41 @@ export class UI {
   }
 
   private buildNav(): void {
-    const items: { w: Workflow; label: string; icon: string }[] = [
-      { w: "site", label: "場地", icon: "▦" }, { w: "layout", label: "場佈", icon: "▤" },
-      { w: "route", label: "動線", icon: "↝" }, { w: "check", label: "檢查", icon: "✓" },
-      { w: "export", label: "分享", icon: "↗" },
+    const items: { w: Workflow | "ai"; label: string; icon: string }[] = [
+      { w: "site", label: "掃描", icon: "📷" },
+      { w: "layout", label: "場佈", icon: "🪑" },
+      { w: "sim", label: "模擬", icon: "▶" },
+      { w: "ai", label: "AI", icon: "✦" },
     ];
     this.nav.append(...items.map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.w }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
+    // Secondary overflow accessed via long-press / desktop more — also keep check+export as chips in panels.
+    this.nav.append(
+      el("button", { type: "button", class: "navbtn navbtn--more", "data-nav": "more" }, [
+        el("span", { class: "navbtn__icon", text: "⋯" }),
+        el("span", { text: "更多" }),
+      ]),
+    );
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
       b.addEventListener("click", () => {
-        const w = b.dataset.nav as Workflow;
+        const w = b.dataset.nav;
+        if (w === "ai") {
+          this.agentSheet?.open();
+          return;
+        }
+        if (w === "more") {
+          // Cycle secondary: route → check → export
+          const order: Workflow[] = ["route", "check", "export"];
+          const cur = this.app.session.workflow;
+          const idx = order.indexOf(cur);
+          const next = order[(idx + 1) % order.length];
+          this.app.setWorkflow(next);
+          this.openSheet();
+          return;
+        }
+        if (w !== "site" && w !== "layout" && w !== "sim" && w !== "route" && w !== "check" && w !== "export") return;
         // Re-tapping the active tab collapses the sheet back to full Canvas.
         if (this.app.session.workflow === w && this.root.classList.contains("show-left")) {
           this.closeSheet();
@@ -252,6 +275,23 @@ export class UI {
       buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true }),
     );
     else if (wf === "route") this.left.append(this.routeSection());
+    else if (wf === "sim") {
+      refreshSimPanel(this.simPanelRoot, this.app);
+      this.left.append(
+        section("活動模擬", [
+          el("p", {
+            class: "hint",
+            text: "設定人數 → 比較方案 → ▶ 播放。可跳到最壅塞時刻。",
+          }),
+          this.simPanelRoot,
+        ]),
+        el("div", { class: "row wrap", style: "margin-top:8px" }, [
+          button("動線編輯", () => this.app.setWorkflow("route"), "chip chip--sm"),
+          button("檢查", () => this.app.setWorkflow("check"), "chip chip--sm"),
+          button("分享", () => this.app.setWorkflow("export"), "chip chip--sm"),
+        ]),
+      );
+    }
     else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());
   }
@@ -545,14 +585,14 @@ export class UI {
     if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow)));
 
-    if (this.lastWorkflow !== sess.workflow || sess.workflow === "check" || sess.workflow === "route" || sess.workflow === "site" || sess.workflow === "export") {
+    if (this.lastWorkflow !== sess.workflow || sess.workflow === "check" || sess.workflow === "route" || sess.workflow === "sim" || sess.workflow === "site" || sess.workflow === "export") {
       this.lastWorkflow = sess.workflow;
       this.rebuildLeft();
     }
 
     // Smart layout + simulation live boxes.
     this.updateSmartBox();
-    if (sess.workflow === "route") refreshSimPanel(this.simPanelRoot, this.app);
+    if (sess.workflow === "route" || sess.workflow === "sim") refreshSimPanel(this.simPanelRoot, this.app);
 
     // Team / partner view overlay.
     this.updateTeamView();

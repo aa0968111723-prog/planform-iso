@@ -284,3 +284,12 @@ export const eventFlowAdapter = {
     };
   },
 };
+
+// Re-export optimizer helpers for UI / agent convenience.
+export { optimizeEventFlow, whatIfFewerStaff } from "../core/eventOptimization";
+export {
+  compareLayoutCandidates,
+  buildScenarioFromWizard,
+  normalizeWizardInput,
+} from "../core/registrationFlow";
+

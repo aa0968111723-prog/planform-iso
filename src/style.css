@@ -308,6 +308,8 @@ html, body {
 /* --- sim panel ---------------------------------------------------------- */
 .sim-panel-host { display: flex; flex-direction: column; gap: 8px; }
 .sim-transport { margin: 6px 0; }
+.sim-timeline { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.sim-scrubber { width: 100%; accent-color: #38bdf8; }
 .sim-panel .readout { margin-top: 6px; }
 .chip--accent { border-color: #38bdf8; color: #bae6fd; }
 .agent-sheet {

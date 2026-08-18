@@ -68,6 +68,7 @@ interface SessionView {
   bottlenecks?: { x: number; z: number; count: number }[];
   simQueues?: Record<string, number>;
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
+  heatmapCells?: { x: number; z: number; count: number }[];
 }
 
 const SIMPLIFY_HIDE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["switch", "computer"]);
@@ -252,7 +253,7 @@ export class SceneManager {
     for (const o of project.objects) {
       seen.add(o.id);
       const catalogEntry = this.catalog.resolve(o.assetId, o.kind);
-      const quality = "standard";
+      const quality = simplify ? "plan" : this.pickQuality();
       const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
       let entry = this.objectNodes.get(o.id);
       if (!entry || entry.sig !== sig) {
@@ -264,6 +265,16 @@ export class SceneManager {
           o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined,
           quality,
         );
+        // Lightweight contact shadow (skipped in plan/simplify).
+        if (quality !== "plan" && !simplify && o.surface === "floor") {
+          const shadow = new Mesh(
+            new PlaneGeometry(o.width * 0.92, o.depth * 0.92),
+            new MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.14, depthWrite: false }),
+          );
+          shadow.rotation.x = -Math.PI / 2;
+          shadow.position.y = 0.01;
+          group.add(shadow);
+        }
         group.userData = { type: "object", id: o.id };
         group.traverse((m) => { if (m instanceof Mesh) m.userData = { type: "object", id: o.id }; });
         // Enlarged invisible pick proxy for thin wall assets (easier touch targets).
@@ -553,6 +564,23 @@ export class SceneManager {
     }
 
     // Simulation markers + bottleneck warnings + station queue badges.
+    if (session.heatmapCells?.length) {
+      for (const cell of session.heatmapCells) {
+        const intensity = Math.min(1, cell.count / 8);
+        const heat = new Mesh(
+          new PlaneGeometry(0.95, 0.95),
+          new MeshBasicMaterial({
+            color: intensity > 0.6 ? 0xef4444 : intensity > 0.35 ? 0xf59e0b : 0xfbbf24,
+            transparent: true,
+            opacity: 0.18 + intensity * 0.35,
+            depthWrite: false,
+          }),
+        );
+        heat.rotation.x = -Math.PI / 2;
+        heat.position.set(cell.x, 0.04, cell.z);
+        this.overlayGroup.add(heat);
+      }
+    }
     if (session.simStations?.length) {
       for (const st of session.simStations) {
         const q = st.queue;
@@ -669,6 +697,14 @@ export class SceneManager {
       if (hit.length) return { type: "zone", id: hit[0].object.userData.id };
     }
     return null;
+  }
+
+  /** Auto visual quality: plan on coarse/mobile-ish, else standard. */
+  private pickQuality(): "plan" | "standard" | "detail" {
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const narrow = typeof window !== "undefined" && window.innerWidth < 480;
+    if (narrow || dpr > 2.5) return "plan";
+    return "standard";
   }
 
   /** Pan the camera to look at a world point (used to focus a validation issue). */
