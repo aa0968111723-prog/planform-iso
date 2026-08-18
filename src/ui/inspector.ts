@@ -177,12 +177,13 @@ function buildGroupInspector(root: HTMLElement, app: App, g: NonNullable<ReturnT
 }
 
 function buildZoneInspector(root: HTMLElement, app: App, z: NonNullable<ReturnType<App["getSelectedZone"]>>): void {
-  root.append(el("div", { class: "subhead", text: `區域：${z.name}` }));
+  root.append(el("div", { class: "subhead", text: `${z.icon ?? ""} 區域：${z.name}` }));
   root.append(
     textField("名稱", z.name, (v) => app.updateSelectedZone({ name: v })),
     el("div", { class: "grid2" }, [
       num("寬 (m)", z.width, 0.1, (v) => app.updateSelectedZone({ width: v }), 0.2),
       num("深 (m)", z.depth, 0.1, (v) => app.updateSelectedZone({ depth: v }), 0.2),
+      num("容納人數 (0=不顯示)", z.capacity ?? 0, 1, (v) => app.updateZoneCapacity(v > 0 ? Math.round(v) : null), 0),
     ]),
   );
   root.append(nudgePanel(app));

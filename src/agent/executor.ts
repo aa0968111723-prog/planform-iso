@@ -91,11 +91,18 @@ export class AgentExecutor {
           return { ok: true, tool: call.tool, data: { issues, counts: issueCounts(issues) } };
         }
         case "getSimulationSummary":
-        case "simulateScenario":
+        case "simulateScenario": {
+          const participants = num(call.args?.participants, 60);
+          return {
+            ok: true,
+            tool: call.tool,
+            data: eventFlowAdapter.simulateScenario(draft!, participants),
+          };
+        }
         case "compareScenarios":
         case "createServiceStation":
         case "updateServiceStation":
-          return { ok: true, tool: call.tool, data: eventFlowAdapter.getSimulationSummary() };
+          return { ok: true, tool: call.tool, data: eventFlowAdapter.createServiceStation() };
 
         case "createCustomAssetProxy": {
           const semanticType = (str(call.args?.semanticType, "table") as SemanticAssetType) || "table";
@@ -187,6 +194,8 @@ export class AgentExecutor {
             width: d.width,
             depth: d.depth,
             color: d.color,
+            icon: d.icon,
+            capacity: null as number | null,
             locked: false,
             hidden: false,
           };
@@ -210,6 +219,7 @@ export class AgentExecutor {
             id: uid("route"),
             name: str(call.args?.name, "動線"),
             color: str(call.args?.color, "#38bdf8"),
+            type: "custom" as const,
             points: [
               { x: draft!.classroom.x + 0.5, z: draft!.classroom.z + draft!.classroom.width / 2 },
               { x: draft!.classroom.x + draft!.classroom.length - 0.5, z: draft!.classroom.z + draft!.classroom.width / 2 },

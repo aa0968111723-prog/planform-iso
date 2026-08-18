@@ -122,9 +122,9 @@ describe("validation 2.0", () => {
 
   it("flags a route crossing a shoe zone and route conflicts", () => {
     const p = createDefaultProject();
-    p.zones.push({ id: "z", type: "shoe", name: "鞋子區", x: 5, z: 4, width: 2, depth: 2, color: "#fff", locked: false, hidden: false });
-    p.routes.push({ id: "r1", name: "動線1", color: "#f00", points: [{ x: 5, z: 1 }, { x: 5, z: 7 }], visible: true });
-    p.routes.push({ id: "r2", name: "動線2", color: "#0f0", points: [{ x: 1, z: 4 }, { x: 9, z: 4 }], visible: true });
+    p.zones.push({ id: "z", type: "shoe", name: "鞋子區", x: 5, z: 4, width: 2, depth: 2, color: "#fff", locked: false, hidden: false, icon: "👟", capacity: null });
+    p.routes.push({ id: "r1", name: "動線1", color: "#f00", points: [{ x: 5, z: 1 }, { x: 5, z: 7 }], visible: true, type: "custom" });
+    p.routes.push({ id: "r2", name: "動線2", color: "#0f0", points: [{ x: 1, z: 4 }, { x: 9, z: 4 }], visible: true, type: "custom" });
     const issues = validateProject(p);
     expect(issues.some((i) => i.code === "shoe-zone-blocks-route")).toBe(true);
     expect(issues.some((i) => i.code === "primary-route-conflict")).toBe(true);

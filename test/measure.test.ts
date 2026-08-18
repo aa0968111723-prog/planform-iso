@@ -17,7 +17,7 @@ describe("measure", () => {
 describe("field info", () => {
   it("reports tile ref, wall distances and zone membership", () => {
     const p = createDefaultProject();
-    p.zones.push({ id: "z", type: "group", name: "小組區", x: 3, z: 3, width: 4, depth: 4, color: "#fff", locked: false, hidden: false });
+    p.zones.push({ id: "z", type: "group", name: "小組區", x: 3, z: 3, width: 4, depth: 4, color: "#fff", locked: false, hidden: false, icon: "👥", capacity: null });
     const o: SceneObject = migrateObject({ kind: "mat", x: 3, z: 3, rotationDeg: 0, width: 0.6, depth: 1.8, height: 0.04, locked: false, hidden: false });
     const info = objectFieldInfo(o, p);
     expect(info.tileRef).toContain("行");

@@ -126,12 +126,25 @@ describe("quick agent mock provider", () => {
     expect(r.error).toMatch(/允許清單/);
   });
 
-  it("simulate intent reports event-flow unavailable", async () => {
+  it("simulate intent uses route simulation adapter", async () => {
     const store = new Store(createDefaultProject());
+    store.mutate((p) => {
+      p.routes.push({
+        id: "r1",
+        name: "入場",
+        color: "#38bdf8",
+        type: "entry",
+        points: [
+          { x: 1, z: 1 },
+          { x: 8, z: 1 },
+        ],
+        visible: true,
+      });
+    });
     const agent = new QuickAgent(store, new MockProvider());
     const result = await agent.run({ text: "模擬 60 人進場" });
     const sim = result.toolResults.find((t) => t.tool === "simulateScenario");
     expect(sim?.ok).toBe(true);
-    expect((sim?.data as { available?: boolean })?.available).toBe(false);
+    expect((sim?.data as { available?: boolean })?.available).toBe(true);
   });
 });

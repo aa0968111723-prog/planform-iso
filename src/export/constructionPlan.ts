@@ -21,15 +21,50 @@ export type PlanPreset = "full" | "mats" | "route" | "staff";
 export type PageSize = "a4" | "a3";
 export type PageOrientation = "landscape" | "portrait";
 
+export type RoleFilter = "report" | "life" | "guide" | null;
+
 export interface PlanOptions {
   preset: PlanPreset;
   page: PageSize;
   orientation: PageOrientation;
   dims: boolean;
   inventory: boolean;
+  roleFilter: RoleFilter;
+  simplify: boolean;
 }
 
-const DEFAULT_OPTIONS: PlanOptions = { preset: "full", page: "a4", orientation: "landscape", dims: true, inventory: true };
+const DEFAULT_OPTIONS: PlanOptions = { preset: "full", page: "a4", orientation: "landscape", dims: true, inventory: true, roleFilter: null, simplify: false };
+
+/** Restrict a plan to what a given partner role needs (partner task map). */
+function applyRoleFilter(project: Project, role: RoleFilter, simplify: boolean): Project {
+  if (!role && !simplify) return project;
+  const zoneOk = (t: string): boolean => {
+    if (!role) return true;
+    if (role === "report") return t === "registration";
+    if (role === "life") return t === "life" || t === "meditation";
+    return t === "shoe" || t === "backpack" || t === "registration" || t === "group"; // guide
+  };
+  const routeOk = (t: string): boolean => {
+    if (!role) return true;
+    if (role === "report") return t === "entry" || t === "registration";
+    if (role === "life") return t === "staff" || t === "group";
+    return t === "entry" || t === "shoe" || t === "backpack" || t === "seating" || t === "group";
+  };
+  const objOk = (kind: string): boolean => {
+    if (simplify && (kind === "switch" || kind === "computer") && !role) return false;
+    if (!role) return true;
+    if (role === "report") return kind === "door" || kind === "regTable" || kind === "computer" || kind === "screen";
+    if (role === "life") return kind === "table" || kind === "chair";
+    return kind === "door" || kind === "screen"; // guide: entrances only
+  };
+  return {
+    ...project,
+    zones: project.zones.filter((z) => zoneOk(z.type)),
+    routes: project.routes.filter((r) => routeOk(r.type)),
+    objects: project.objects.filter((o) => objOk(o.kind)),
+    groups: role === "report" ? [] : project.groups, // report role has no mats
+  };
+}
 
 const PRESET_TITLE: Record<PlanPreset, string> = {
   full: "完整場佈圖", mats: "地墊 / 座位圖", route: "動線圖", staff: "工作人員配置圖",
@@ -45,6 +80,7 @@ function pageDims(page: PageSize, orientation: PageOrientation): { w: number; h:
 
 export function renderConstructionPlan(project: Project, options?: Partial<PlanOptions>): string {
   const opt = { ...DEFAULT_OPTIONS, ...options };
+  project = applyRoleFilter(project, opt.roleFilter, opt.simplify);
   const areas = [project.classroom, project.corridor];
   const minX = Math.min(...areas.map((a) => a.x));
   const minZ = Math.min(...areas.map((a) => a.z));

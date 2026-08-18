@@ -18,6 +18,8 @@ import {
   PlaneGeometry,
   Raycaster,
   Scene,
+  Sprite,
+  SpriteMaterial,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -60,7 +62,13 @@ interface SessionView {
   measure: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   calibrate: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   showLabels: boolean;
+  focusRouteId?: string | null;
+  simplify?: boolean;
+  simPositions?: { x: number; z: number; routeId: string }[];
+  bottlenecks?: { x: number; z: number; count: number }[];
 }
+
+const SIMPLIFY_HIDE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["switch", "computer"]);
 
 const LANDMARKS: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["door", "screen", "switch", "regTable", "computer"]);
 
@@ -167,29 +175,35 @@ export class SceneManager {
   sync(project: Project, session: SessionView): void {
     this.catalog = catalogFromProject(project);
     this.layersState = project.layers;
-    this.syncAreasAndTiles(project);
-    this.syncObjects(project, session.showLabels);
+    const simplify = session.simplify ?? false;
+    this.syncAreasAndTiles(project, simplify);
+    this.syncObjects(project, session.showLabels, simplify);
     this.syncArrays(project);
     this.syncZones(project);
-    this.syncRoutes(project);
+    this.syncRoutes(project, session.focusRouteId ?? null);
     this.syncGhost(session.ghost);
-    this.syncMeasurements(project);
-    this.syncOverlay(project, session.selection, session.measure, session.calibrate);
+    this.syncMeasurements(project, simplify);
+    this.syncOverlay(project, session);
   }
 
   private recenter(project: Project): void {
+    const b = this.combinedBounds(project);
+    this.target.set(b.cx, 0, b.cz);
+  }
+
+  private combinedBounds(project: Project): { cx: number; cz: number; w: number; h: number } {
     const { classroom, corridor } = project;
     const minX = Math.min(classroom.x, corridor.x);
     const minZ = Math.min(classroom.z, corridor.z);
     const maxX = Math.max(classroom.x + classroom.length, corridor.x + corridor.length);
     const maxZ = Math.max(classroom.z + classroom.width, corridor.z + corridor.width);
-    this.target.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+    return { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: maxX - minX, h: maxZ - minZ };
   }
 
-  private syncAreasAndTiles(project: Project): void {
+  private syncAreasAndTiles(project: Project, simplify: boolean): void {
     const { tile } = project;
     this.floorGroup.visible = this.layersState.areas;
-    this.tileGroup.visible = this.layersState.tiles && tile.visible;
+    this.tileGroup.visible = this.layersState.tiles && tile.visible && !simplify;
     const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile });
     if (sig === this.lastAreaSig) return;
     this.lastAreaSig = sig;
@@ -229,7 +243,7 @@ export class SceneManager {
     return grid;
   }
 
-  private syncObjects(project: Project, showLabels: boolean): void {
+  private syncObjects(project: Project, showLabels: boolean, simplify: boolean): void {
     this.objectGroup.visible = this.layersState.objects;
     const seen = new Set<string>();
     for (const o of project.objects) {
@@ -265,7 +279,7 @@ export class SceneManager {
       }
       entry.group.position.set(o.x, o.elevation, o.z);
       entry.group.rotation.y = o.rotationDeg * D2R;
-      entry.group.visible = !o.hidden;
+      entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind));
       if (entry.label) {
         entry.label.sprite.visible = showLabels && !o.hidden;
         if (showLabels) {
@@ -339,7 +353,8 @@ export class SceneManager {
       const edges = entry.group.getObjectByName("edges") as LineSegments;
       (fill.material as MeshStandardMaterial).color.set(zone.color);
       (edges.material as LineBasicMaterial).color.set(zone.color);
-      entry.label.set(zone.name, "#e2e8f0");
+      const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
+      entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), "#e2e8f0");
     }
     for (const [id, entry] of this.zoneNodes) {
       if (!seen.has(id)) { this.zoneGroup.remove(entry.group); entry.label.dispose(); this.zoneNodes.delete(id); }
@@ -371,56 +386,68 @@ export class SceneManager {
     return { group, label, sig };
   }
 
-  private syncRoutes(project: Project): void {
+  private syncRoutes(project: Project, focusRouteId: string | null): void {
     this.routeGroup.visible = this.layersState.routes;
     this.routeNodeMeshes = [];
     const seen = new Set<string>();
     for (const route of project.routes) {
       seen.add(route.id);
-      const sig = JSON.stringify(route.points) + route.color;
+      const dim = focusRouteId !== null && focusRouteId !== route.id;
+      const sig = JSON.stringify(route.points) + route.color + (dim ? "|dim" : "");
       let entry = this.routeNodes.get(route.id);
       if (!entry || entry.sig !== sig) {
-        if (entry) { this.routeGroup.remove(entry.group); entry.label.dispose(); }
-        entry = this.buildRoute(route, sig);
+        if (entry) { this.routeGroup.remove(entry.group); disposeObject(entry.group); entry.label.dispose(); }
+        entry = this.buildRoute(route, 0.06, dim, sig);
         this.routeGroup.add(entry.group);
         this.routeNodes.set(route.id, entry);
       }
       entry.group.visible = route.visible;
-      entry.label.set(route.name, route.color);
+      entry.label.set(route.name, dim ? "#64748b" : route.color);
       entry.group.traverse((o) => { if (o instanceof Mesh && o.userData.type === "routeNode") this.routeNodeMeshes.push(o); });
     }
     for (const [id, entry] of this.routeNodes) {
-      if (!seen.has(id)) { this.routeGroup.remove(entry.group); entry.label.dispose(); this.routeNodes.delete(id); }
+      if (!seen.has(id)) { this.routeGroup.remove(entry.group); disposeObject(entry.group); entry.label.dispose(); this.routeNodes.delete(id); }
     }
   }
 
-  private buildRoute(route: Route2, sig: string) {
+  private buildRoute(route: Route2, y: number, dim: boolean, sig: string) {
     const group = new Group();
-    const y = 0.05;
-    if (route.points.length >= 2) {
-      const pos: number[] = [];
-      for (let i = 0; i < route.points.length - 1; i++) {
-        pos.push(route.points[i].x, y, route.points[i].z, route.points[i + 1].x, y, route.points[i + 1].z);
-      }
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new Float32BufferAttribute(pos, 3));
-      group.add(new LineSegments(geo, new LineBasicMaterial({ color: route.color })));
-      for (let i = 0; i < route.points.length - 1; i++) {
-        const a = route.points[i]; const b = route.points[i + 1];
-        const arrow = new Mesh(new BoxGeometry(0.4, 0.03, 0.18), new MeshStandardMaterial({ color: route.color }));
-        arrow.position.set((a.x + b.x) / 2, y, (a.z + b.z) / 2);
-        arrow.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
-        group.add(arrow);
-      }
+    const color = dim ? "#475569" : route.color;
+    const opacity = dim ? 0.35 : 1;
+    // Thick ribbon: a flat box per segment (WebGL line width is unreliable).
+    for (let i = 0; i < route.points.length - 1; i++) {
+      const a = route.points[i], b = route.points[i + 1];
+      const len = Math.hypot(b.x - a.x, b.z - a.z);
+      if (len < 1e-4) continue;
+      const ribbon = new Mesh(new BoxGeometry(len, 0.02, dim ? 0.06 : 0.12), new MeshBasicMaterial({ color, transparent: true, opacity }));
+      ribbon.position.set((a.x + b.x) / 2, y, (a.z + b.z) / 2);
+      ribbon.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+      group.add(ribbon);
+      // Direction arrow at segment midpoint.
+      const arrow = new Mesh(new BoxGeometry(0.34, 0.02, 0.22), new MeshBasicMaterial({ color, transparent: true, opacity }));
+      arrow.position.set((a.x + b.x) / 2, y + 0.01, (a.z + b.z) / 2);
+      arrow.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+      group.add(arrow);
     }
+    // Step-number markers + start/end colours.
     route.points.forEach((p, index) => {
-      const node = new Mesh(new BoxGeometry(0.24, 0.24, 0.24), new MeshStandardMaterial({ color: route.color }));
+      const isStart = index === 0;
+      const isEnd = index === route.points.length - 1 && route.points.length > 1;
+      const c = dim ? "#475569" : isStart ? "#22c55e" : isEnd ? "#ef4444" : route.color;
+      const node = new Mesh(new BoxGeometry(0.3, 0.3, 0.3), new MeshBasicMaterial({ color: c, transparent: true, opacity }));
       node.position.set(p.x, y, p.z);
       node.userData = { type: "routeNode", id: route.id, index };
       group.add(node);
+      if (!dim) {
+        const numLabel = new TextLabel();
+        numLabel.set(String(index + 1), "#0b1120");
+        numLabel.sprite.scale.set(0.5, 0.5, 1);
+        numLabel.sprite.position.set(p.x, y + 0.5, p.z);
+        group.add(numLabel.sprite);
+      }
     });
     const label = new TextLabel();
-    if (route.points[0]) label.sprite.position.set(route.points[0].x, 0.7, route.points[0].z);
+    if (route.points[0]) label.sprite.position.set(route.points[0].x, 0.9, route.points[0].z);
     group.add(label.sprite);
     return { group, label, sig };
   }
@@ -463,7 +490,8 @@ export class SceneManager {
     return new LineSegments(geo, new LineBasicMaterial({ color }));
   }
 
-  private syncMeasurements(project: Project): void {
+  private syncMeasurements(project: Project, simplify: boolean): void {
+    this.measureGroup.visible = !simplify;
     const seen = new Set<string>();
     for (const m of project.measurements) {
       if (!m.visible) continue;
@@ -499,8 +527,44 @@ export class SceneManager {
     return { group, label, sig };
   }
 
-  private syncOverlay(project: Project, selection: Set<string>, measure: SessionView["measure"], calibrate: SessionView["calibrate"]): void {
+  private syncOverlay(project: Project, session: SessionView): void {
+    const { selection, measure, calibrate } = session;
     clearGroup(this.overlayGroup);
+
+    // Route focus: dark plane over the whole plan + a bright copy of the focused route on top.
+    if (session.focusRouteId) {
+      const focus = project.routes.find((r) => r.id === session.focusRouteId);
+      const b = this.combinedBounds(project);
+      const plane = new Mesh(
+        new PlaneGeometry(b.w + 4, b.h + 4),
+        new MeshBasicMaterial({ color: 0x0b1120, transparent: true, opacity: 0.62, depthWrite: false }),
+      );
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set(b.cx, 3, b.cz);
+      this.overlayGroup.add(plane);
+      if (focus) {
+        const vis = this.buildRoute({ id: focus.id, color: focus.color, points: focus.points }, 3.1, false, "");
+        this.overlayGroup.add(vis.group);
+        vis.label.set(focus.name, focus.color);
+      }
+    }
+
+    // Simulation markers + bottleneck warnings.
+    if (session.simPositions && session.simPositions.length) {
+      for (const p of session.simPositions) {
+        const dot = new Mesh(new BoxGeometry(0.28, 0.28, 0.28), new MeshBasicMaterial({ color: 0xfef08a }));
+        dot.position.set(p.x, 0.5, p.z);
+        this.overlayGroup.add(dot);
+      }
+    }
+    if (session.bottlenecks && session.bottlenecks.length) {
+      for (const bn of session.bottlenecks) {
+        const ring = new Mesh(new BoxGeometry(1.2, 0.05, 1.2), new MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.4, depthWrite: false }));
+        ring.position.set(bn.x, 0.6, bn.z);
+        this.overlayGroup.add(ring);
+      }
+    }
+
     for (const o of project.objects) {
       if (!selection.has(o.id)) continue;
       this.overlayGroup.add(this.footprintOutline(o.x, o.z, o.width, o.depth, o.rotationDeg));
@@ -648,6 +712,11 @@ function disposeObject(obj: Object3D): void {
   obj.traverse((o) => {
     if (o instanceof Mesh || o instanceof LineSegments || o instanceof InstancedMesh) {
       (o as Mesh).geometry?.dispose?.();
+    }
+    if (o instanceof Sprite) {
+      const m = o.material as SpriteMaterial;
+      m.map?.dispose?.();
+      m.dispose?.();
     }
   });
 }

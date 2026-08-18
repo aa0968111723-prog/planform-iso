@@ -3,7 +3,7 @@ import { CATALOG_CATEGORIES } from "../core/assets";
 import type { AssetCatalogEntry, CatalogCategory } from "../core/catalog";
 import { ZONE_DEFAULTS, type ZoneType } from "../core/model";
 import { metersToCm } from "../core/units";
-import { button, card, el, section } from "./dom";
+import { button, card, el } from "./dom";
 
 const PLACEMENT_LABEL: Record<string, string> = { floor: "地面", wall: "牆面", tabletop: "桌面" };
 
@@ -13,50 +13,59 @@ export interface LibraryOptions {
   arrays?: boolean;
 }
 
-/** Left "what do I want to place?" library: cards by category, with search. */
+/** Left "what do I want to place?" library: category tabs + compact cards. */
 export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   const cats = opts.categories ?? CATALOG_CATEGORIES.map((c) => c.id);
   const root = el("div", { class: "library" });
-  const search = el("input", { type: "search", placeholder: "搜尋素材…", class: "field__input" }) as HTMLInputElement;
-  root.append(el("label", { class: "field" }, [el("span", { class: "field__label", text: "素材庫" }), search]));
-
   const catalog = app.getCatalog();
+  const panels: { label: string; body: HTMLElement }[] = [];
+
   const recent = catalog.listRecent();
   if (recent.length) {
-    root.append(section("常用", [el("div", { class: "cardgrid" }, recent.map((e) => catalogCard(app, e)))]));
+    panels.push({
+      label: "常用",
+      body: el("div", { class: "cardgrid" }, recent.map((e) => catalogCard(app, e))),
+    });
   }
 
   if (opts.zones) {
-    root.append(section("功能區域", [
-      el("div", { class: "cardgrid" },
-        (Object.keys(ZONE_DEFAULTS) as ZoneType[]).map((z) => card("▨", ZONE_DEFAULTS[z].label, "區域", () => app.addZone(z)))),
-    ]));
+    panels.push({
+      label: "區域",
+      body: el("div", { class: "cardgrid" }, (Object.keys(ZONE_DEFAULTS) as ZoneType[]).map((z) =>
+        card(ZONE_DEFAULTS[z].icon, ZONE_DEFAULTS[z].label, "區域", () => app.addZone(z)))),
+    });
   }
 
   for (const c of CATALOG_CATEGORIES) {
     if (!cats.includes(c.id)) continue;
     const defs = catalog.list({ category: c.id });
     if (!defs.length) continue;
-    root.append(section(c.label, [el("div", { class: "cardgrid" }, defs.map((d) => catalogCard(app, d)))]));
+    panels.push({
+      label: c.label,
+      body: el("div", { class: "cardgrid" }, defs.map((d) => catalogCard(app, d))),
+    });
   }
 
   if (opts.arrays) {
-    root.append(section("排列（整組）", [
-      el("p", { class: "hint", text: "建立可整組調整行列與間距的陣列。" }),
-      el("div", { class: "cardgrid" }, [
+    panels.push({
+      label: "排列",
+      body: el("div", { class: "cardgrid" }, [
         card("🟪", "地墊陣列", "整組地墊", () => app.createArray("mat")),
         card("💺", "椅子陣列", "整組椅子", () => app.createArray("chair")),
       ]),
-    ]));
-  }
-
-  search.addEventListener("input", () => {
-    const q = search.value.trim().toLowerCase();
-    root.querySelectorAll<HTMLButtonElement>(".card").forEach((c) => {
-      const name = c.dataset.name ?? "";
-      c.style.display = q && !name.includes(q) ? "none" : "";
     });
-  });
+  }
+  if (panels.length === 0) return root;
+
+  const bodies = panels.map((p) => el("div", { class: "libpanel" }, [p.body]));
+  const tabs = el("div", { class: "libtabs" }, panels.map((p, i) =>
+    button(p.label, () => show(i), "chip chip--sm libtab")));
+  const show = (idx: number) => {
+    bodies.forEach((b, i) => (b.style.display = i === idx ? "" : "none"));
+    tabs.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(i === idx)));
+  };
+  root.append(el("div", { class: "subhead", text: "素材庫" }), tabs, ...bodies);
+  show(0);
   return root;
 }
 
