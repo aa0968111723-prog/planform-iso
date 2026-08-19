@@ -34,6 +34,7 @@ import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
+import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
 
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
@@ -81,7 +82,23 @@ export class SceneManager {
   private controls: OrbitControls;
   private raycaster = new Raycaster();
   private target = new Vector3();
-  private frustum = 9;
+  /**
+   * World metres per CSS pixel at zoom 1. Kept independent of any rect so that
+   * chrome appearing or disappearing re-anchors the camera without ever
+   * rescaling the plan under the user's hands.
+   */
+  private worldPerPx = 0.024;
+  /**
+   * The workspace viewport. `safe` excludes permanent chrome and drives the
+   * (deliberately asymmetric) projection; `focus` additionally excludes
+   * transient sheets and drives fit / focus targeting. Null until the UI has
+   * measured, in which case the whole canvas is assumed visible.
+   */
+  private viewport: { canvas: Rect; safe: Rect; focus: Rect } | null = null;
+  /** Bounds of the last automatic fit, replayed when the visible rect changes. */
+  private lastFitBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
+  /** Set once the user pans/zooms/orbits — after that we never re-fit for them. */
+  private userAdjustedCamera = false;
 
   private floorGroup = new Group();
   private tileGroup = new Group();
@@ -123,9 +140,11 @@ export class SceneManager {
     this.camera = new OrthographicCamera();
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
+    this.controls.addEventListener("start", () => { this.userAdjustedCamera = true; });
 
     installStudioLighting(this.scene);
 
+    this.worldPerPx = 18 / Math.max(canvas.clientHeight || window.innerHeight || 800, 1);
     this.setView("iso");
     this.resize();
     window.addEventListener("resize", () => this.resize());
@@ -135,9 +154,17 @@ export class SceneManager {
     });
   }
 
+  /** The projection surface — the workspace viewport measures against it. */
+  get domElement(): HTMLCanvasElement {
+    return this.canvas;
+  }
+
   // --- camera ------------------------------------------------------------
 
   setView(view: ViewName): void {
+    // Whatever sat at the centre of the *visible* canvas should still be there
+    // after the camera swings around; the framing offset differs per basis.
+    const anchor = this.getFocusAnchor();
     const d = 60;
     const t = this.target;
     switch (view) {
@@ -151,6 +178,7 @@ export class SceneManager {
     this.camera.lookAt(t);
     this.controls.target.copy(t);
     this.controls.update();
+    this.setFocusAnchor(anchor);
   }
 
   setControlsEnabled(enabled: boolean): void {
@@ -160,15 +188,120 @@ export class SceneManager {
   private resize(): void {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
-    const aspect = w / h || 1;
-    this.camera.left = -this.frustum * aspect;
-    this.camera.right = this.frustum * aspect;
-    this.camera.top = this.frustum;
-    this.camera.bottom = -this.frustum;
+    this.renderer.setSize(w, h, false);
+    this.applyProjection();
+  }
+
+  // --- workspace viewport (CanvasSafeRect) --------------------------------
+
+  /** Canvas size in CSS pixels, with a sane fallback before first layout. */
+  private canvasSize(): { w: number; h: number } {
+    return {
+      w: this.canvas.clientWidth || window.innerWidth || 1,
+      h: this.canvas.clientHeight || window.innerHeight || 1,
+    };
+  }
+
+  /** Safe / focus rects in canvas-local pixels, defaulting to the whole canvas. */
+  private rects(): { canvas: Rect; safe: Rect; focus: Rect } {
+    const { w, h } = this.canvasSize();
+    const full: Rect = { x: 0, y: 0, width: w, height: h };
+    const v = this.viewport;
+    if (!v) return { canvas: full, safe: full, focus: full };
+    const toLocal = (r: Rect): Rect => ({
+      x: r.x - v.canvas.x,
+      y: r.y - v.canvas.y,
+      width: r.width,
+      height: r.height,
+    });
+    return { canvas: full, safe: toLocal(v.safe), focus: toLocal(v.focus) };
+  }
+
+  /**
+   * Tell the scene which part of the canvas the user can actually see.
+   * The projection re-anchors on the safe rect, and the point that was at the
+   * centre of the visible area stays there, so a layout change never yanks the
+   * plan sideways.
+   */
+  setViewportRects(canvas: Rect, safe: Rect, focus: Rect): void {
+    const prev = this.viewport;
+    // A different *canvas* means the window itself changed (rotation, resize,
+    // breakpoint): re-fit while the camera is still ours. Chrome coming and
+    // going only re-anchors, so opening a sheet slides the plan up into the
+    // strip that is left instead of zooming it out.
+    const canvasResized =
+      !prev || Math.abs(prev.canvas.width - canvas.width) > 1 || Math.abs(prev.canvas.height - canvas.height) > 1;
+    const anchor = prev ? this.getFocusAnchor(this.rects().safe) : null;
+    this.viewport = { canvas, safe, focus };
+    this.applyProjection();
+    if (canvasResized && !this.userAdjustedCamera && this.lastFitBounds) {
+      this.fitBounds(this.lastFitBounds);
+      return;
+    }
+    if (anchor) this.setFocusAnchor(anchor, this.rects().safe);
+  }
+
+  /** Current visible-canvas rect in canvas-local pixels (debug / tests). */
+  getSafeRect(): Rect {
+    return this.rects().safe;
+  }
+
+  /**
+   * Build an orthographic frustum whose NDC origin sits at the centre of the
+   * *visible* rect rather than the centre of the canvas. Chrome therefore eats
+   * pixels without squashing what the user is looking at, and OrbitControls'
+   * zoom/pan keep working because they only read `right - left` /
+   * `top - bottom`.
+   */
+  private applyProjection(): void {
+    const { canvas, safe } = this.rects();
+    const worldPerPx = this.worldPerPx;
+    const cx = safe.x + safe.width / 2;
+    const cy = safe.y + safe.height / 2;
+    this.camera.left = -cx * worldPerPx;
+    this.camera.right = (canvas.width - cx) * worldPerPx;
+    this.camera.top = cy * worldPerPx;
+    this.camera.bottom = -(canvas.height - cy) * worldPerPx;
     this.camera.near = -200;
     this.camera.far = 500;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h, false);
+  }
+
+  /** Camera-space (x, y) of a normalised device coordinate, honouring zoom. */
+  private cameraSpaceForNdc(nx: number, ny: number): { x: number; y: number } {
+    const zoom = this.camera.zoom || 1;
+    const dx = (this.camera.right - this.camera.left) / (2 * zoom);
+    const dy = (this.camera.top - this.camera.bottom) / (2 * zoom);
+    const cx = (this.camera.right + this.camera.left) / 2;
+    const cy = (this.camera.top + this.camera.bottom) / 2;
+    return { x: cx + nx * dx, y: cy + ny * dy };
+  }
+
+  /** World-space offset from `controls.target` to the centre of the focus rect. */
+  private focusOffset(rect?: Rect): Vector3 {
+    const { canvas, focus } = this.rects();
+    const ndc = rectCenterNdc(rect ?? focus, canvas);
+    const cam = this.cameraSpaceForNdc(ndc.x, ndc.y);
+    this.camera.updateMatrixWorld();
+    const right = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+    const up = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+    return right.multiplyScalar(cam.x).add(up.multiplyScalar(cam.y));
+  }
+
+  /** World point currently displayed at the centre of the visible canvas. */
+  private getFocusAnchor(rect?: Rect): Vector3 {
+    return this.target.clone().add(this.focusOffset(rect));
+  }
+
+  /** Move the camera so `anchor` sits at the centre of the visible canvas. */
+  private setFocusAnchor(anchor: Vector3, rect?: Rect): void {
+    const next = anchor.clone().sub(this.focusOffset(rect));
+    const delta = next.clone().sub(this.target);
+    if (delta.lengthSq() < 1e-12) return;
+    this.target.copy(next);
+    this.controls.target.copy(next);
+    this.camera.position.add(delta);
+    this.controls.update();
   }
 
   // --- sync --------------------------------------------------------------
@@ -190,8 +323,7 @@ export class SceneManager {
   }
 
   private recenter(project: Project): void {
-    const b = this.combinedBounds(project);
-    this.target.set(b.cx, 0, b.cz);
+    this.fitBounds(planBounds(project));
   }
 
   private combinedBounds(project: Project): { cx: number; cz: number; w: number; h: number } {
@@ -634,9 +766,26 @@ export class SceneManager {
 
   // --- picking / projection ---------------------------------------------
 
+  /**
+   * Client point → NDC. The canvas element itself is the projection surface, so
+   * normalisation stays canvas-relative; the *visible* rect is applied through
+   * the asymmetric frustum instead, which keeps raycasts and screen projection
+   * exactly consistent with what is drawn.
+   */
   private ndc(clientX: number, clientY: number): Vector2 {
     const rect = this.canvas.getBoundingClientRect();
     return new Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+  }
+
+  /**
+   * Keep a client point inside the visible canvas. Used for the touch ghost
+   * offset so a placement preview lifted above the finger cannot slide under
+   * the header or behind a bottom sheet.
+   */
+  clampClientToVisible(clientX: number, clientY: number, pad = 8): { x: number; y: number } {
+    const v = this.viewport;
+    if (!v) return { x: clientX, y: clientY };
+    return clampPointToRect({ x: clientX, y: clientY }, v.focus, pad);
   }
 
   groundPoint(clientX: number, clientY: number): { x: number; z: number } | null {
@@ -671,20 +820,65 @@ export class SceneManager {
     return null;
   }
 
-  /** Pan the camera to look at a world point (used to focus a validation issue). */
+  /**
+   * Pan so a world point lands at the centre of the *visible* canvas — used by
+   * validation focus, simulation focus and "locate this object". On a compact
+   * workspace the canvas centre is behind the bottom sheet, so targeting the
+   * canvas would put the thing the user asked to see under the chrome.
+   */
   focusOn(x: number, z: number): void {
-    const offset = this.camera.position.clone().sub(this.controls.target);
-    this.target.set(x, 0, z);
-    this.controls.target.copy(this.target);
-    this.camera.position.copy(this.target.clone().add(offset));
-    this.controls.update();
+    this.setFocusAnchor(new Vector3(x, 0, z));
   }
 
-  /** Recenter the camera on the whole plan. */
+  /**
+   * Frame a world-space rectangle inside the visible canvas: pick the zoom from
+   * the focus rect's pixel size, then anchor the content centre on it.
+   */
+  fitBounds(
+    bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+    opts: { padding?: number; heightMeters?: number } = {},
+  ): void {
+    const { focus } = this.rects();
+    this.lastFitBounds = { ...bounds };
+    const padding = opts.padding ?? 0.9;
+    const height = Math.max(0, opts.heightMeters ?? 2.4);
+
+    this.camera.updateMatrixWorld();
+    const right = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+    const up = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+    const center = new Vector3(
+      (bounds.minX + bounds.maxX) / 2,
+      height / 2,
+      (bounds.minZ + bounds.maxZ) / 2,
+    );
+
+    // Measure the content's extent along the camera's own axes so an iso view
+    // (where the plan is rotated on screen) is framed as tightly as a top view.
+    let halfU = 0;
+    let halfV = 0;
+    for (const x of [bounds.minX, bounds.maxX]) {
+      for (const y of [0, height]) {
+        for (const z of [bounds.minZ, bounds.maxZ]) {
+          const d = new Vector3(x, y, z).sub(center);
+          halfU = Math.max(halfU, Math.abs(d.dot(right)));
+          halfV = Math.max(halfV, Math.abs(d.dot(up)));
+        }
+      }
+    }
+
+    const usableW = Math.max(1, focus.width * padding);
+    const usableH = Math.max(1, focus.height * padding);
+
+    this.camera.zoom = 1;
+    this.worldPerPx = Math.max((2 * halfU) / usableW, (2 * halfV) / usableH, 1e-4);
+    this.applyProjection();
+    this.setFocusAnchor(center.setY(0), focus);
+  }
+
+  /** Recenter + zoom the camera so the whole plan fills the visible canvas. */
   recenterView(project: Project): void {
-    this.recenter(project);
-    this.controls.target.copy(this.target);
-    this.controls.update();
+    this.userAdjustedCamera = false;
+    this.fitBounds(planBounds(project));
   }
 
   project(x: number, z: number): { x: number; y: number } {
@@ -702,6 +896,17 @@ export class SceneManager {
     this.setView(prev);
     return url;
   }
+}
+
+/** World-space bounds of the whole plan (classroom + corridor). */
+export function planBounds(project: Project): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  const { classroom, corridor } = project;
+  return {
+    minX: Math.min(classroom.x, corridor.x),
+    minZ: Math.min(classroom.z, corridor.z),
+    maxX: Math.max(classroom.x + classroom.length, corridor.x + corridor.length),
+    maxZ: Math.max(classroom.z + classroom.width, corridor.z + corridor.width),
+  };
 }
 
 interface Route2 { id: string; color: string; points: { x: number; z: number }[] }

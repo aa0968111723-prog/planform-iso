@@ -128,6 +128,15 @@ interface DragState {
   threshold: number;
 }
 
+function boundsOfPoints(points: { x: number; z: number }[]): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
 const DRAG_THRESHOLD = 4;
 const TOUCH_DRAG_THRESHOLD = 12;
 const TOUCH_GHOST_OFFSET_PX = 46;
@@ -720,7 +729,20 @@ export class App {
     this.render();
   }
   setSimplify(on: boolean): void { this.session.simplify = on; this.render(); }
-  setRouteFocus(id: string | null): void { this.session.focusRouteId = id; this.render(); }
+  setRouteFocus(id: string | null): void {
+    this.session.focusRouteId = id;
+    if (id) {
+      const r = this.state.routes.find((x) => x.id === id);
+      if (r && r.points.length >= 2) {
+        const b = boundsOfPoints(r.points);
+        this.scene.fitBounds({
+          minX: b.minX - 1, maxX: b.maxX + 1,
+          minZ: b.minZ - 1, maxZ: b.maxZ + 1,
+        }, { padding: 0.86 });
+      }
+    }
+    this.render();
+  }
   updateDescription(text: string): void { this.store.mutate((p) => (p.description = text), { history: false }); }
   updateZoneCapacity(capacity: number | null): void { this.updateSelectedZone({ capacity }); }
 
@@ -924,6 +946,7 @@ export class App {
     const result = this.runEventSimulation();
     this.stopSimLoopOnly();
     this.session.simMode = "event-flow";
+    this.focusSimulation();
     this.session.simPlaying = true;
     this.session.simPaused = false;
     this.session.simTime = 0;
@@ -947,6 +970,7 @@ export class App {
     this.stopSimLoopOnly();
     this.simState = initSimulation(routes, p);
     this.session.simMode = "route-walk";
+    this.focusSimulation();
     this.session.simPlaying = true;
     this.session.simPaused = false;
     this.session.simResult = null;
@@ -1076,6 +1100,52 @@ export class App {
     this.render();
   }
 
+  // --- camera focus ------------------------------------------------------
+
+  /** World centre of any selectable entity, or null when it no longer exists. */
+  entityCenter(id: string): { x: number; z: number } | null {
+    const o = this.state.objects.find((x) => x.id === id);
+    if (o) return { x: o.x, z: o.z };
+    const z = this.state.zones.find((x) => x.id === id);
+    if (z) return { x: z.x, z: z.z };
+    const g = this.state.groups.find((x) => x.id === id);
+    if (g) return groupCenter(g);
+    const r = this.state.routes.find((x) => x.id === id);
+    if (r && r.points.length) {
+      const b = boundsOfPoints(r.points);
+      return { x: (b.minX + b.maxX) / 2, z: (b.minZ + b.maxZ) / 2 };
+    }
+    return null;
+  }
+
+  /** Bring an entity to the centre of the visible canvas without changing zoom. */
+  focusObject(id: string): void {
+    const c = this.entityCenter(id);
+    if (c) this.scene.focusOn(c.x, c.z);
+  }
+
+  /**
+   * Frame whatever the simulation is about to animate inside the visible
+   * canvas: the scenario stations for event-flow playback, otherwise the
+   * simulated routes.
+   */
+  focusSimulation(): void {
+    const points: { x: number; z: number }[] = [];
+    const scn = this.activeScenario();
+    if (this.session.simMode !== "route-walk" && scn) {
+      for (const st of scn.stations) points.push({ x: st.x, z: st.z });
+    }
+    if (points.length < 2) {
+      for (const r of this.state.routes) if (r.visible) points.push(...r.points);
+    }
+    if (points.length < 2) { this.scene.recenterView(this.state); return; }
+    const b = boundsOfPoints(points);
+    this.scene.fitBounds({
+      minX: b.minX - 1.5, maxX: b.maxX + 1.5,
+      minZ: b.minZ - 1.5, maxZ: b.maxZ + 1.5,
+    }, { padding: 0.86 });
+  }
+
   // --- field info --------------------------------------------------------
 
   fieldInfo(obj: SceneObject): FieldInfo { return objectFieldInfo(obj, this.state); }
@@ -1192,9 +1262,14 @@ export class App {
     if (this.pointers.size >= 2) return; // camera gesture; never move objects
 
     if (this.session.mode === "place") {
-      // On touch, lift the ghost above the finger so it (and its snap/legality) stays visible.
+      // On touch, lift the ghost above the finger so it (and its snap/legality)
+      // stays visible — then clamp it into the visible canvas rect so the lift
+      // can never park the preview under the header or a bottom sheet.
       const gy = e.pointerType === "touch" ? e.clientY - TOUCH_GHOST_OFFSET_PX : e.clientY;
-      const ground = this.scene.groundPoint(e.clientX, gy);
+      const pt = e.pointerType === "touch"
+        ? this.scene.clampClientToVisible(e.clientX, gy)
+        : { x: e.clientX, y: gy };
+      const ground = this.scene.groundPoint(pt.x, pt.y);
       if (ground) this.updateGhostAt(ground.x, ground.z);
       return;
     }
