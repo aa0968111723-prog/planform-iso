@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { isOnScreen, openWorkspace, probe, type WorkspaceProbe } from "./helpers";
 
 /**
  * Responsive workspace smoke tests.
@@ -8,14 +9,6 @@ import { expect, test, type Page } from "@playwright/test";
  * rails" rule, the canvas-first coverage budget, and the full
  * select -> context bar -> properties -> collapse loop.
  */
-
-interface WorkspaceProbe {
-  mode: "phone" | "tablet" | "desktop";
-  canvas: { x: number; y: number; width: number; height: number };
-  safeRect: { x: number; y: number; width: number; height: number };
-  focusRect: { x: number; y: number; width: number; height: number };
-  coverage: number;
-}
 
 const VIEWPORTS: { name: string; width: number; height: number; mode: WorkspaceProbe["mode"] }[] = [
   { name: "phone-360x800", width: 360, height: 800, mode: "phone" },
@@ -29,59 +22,6 @@ const VIEWPORTS: { name: string; width: number; height: number; mode: WorkspaceP
   { name: "tablet-1180x820", width: 1180, height: 820, mode: "tablet" },
   { name: "desktop-1366x1024", width: 1366, height: 1024, mode: "desktop" },
 ];
-
-/** Load the app with the first-run overlay already dismissed. */
-async function openWorkspace(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    localStorage.setItem("planform-iso:quickstart", "1");
-    localStorage.removeItem("planform-iso:autosave");
-  });
-  await page.goto("/");
-  await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
-  await page.waitForFunction(() => !!document.getElementById("app")?.dataset.wsMode);
-  // Let the first ResizeObserver pass and the sheet transitions settle.
-  await page.waitForTimeout(200);
-  await settle(page);
-}
-
-/** Wait until no sheet is mid-transition, so measurements are stable. */
-async function settle(page: Page): Promise<void> {
-  await expect
-    .poll(async () => page.evaluate(() => {
-      const rects = [".left", ".right"].map((sel) => {
-        const n = document.querySelector(sel);
-        return n ? Math.round(n.getBoundingClientRect().top) : 0;
-      });
-      return rects.join(",");
-    }), { timeout: 5000, intervals: [100, 100, 100, 150, 200] })
-    .toBe(await page.evaluate(async () => {
-      await new Promise((r) => setTimeout(r, 350));
-      return [".left", ".right"].map((sel) => {
-        const n = document.querySelector(sel);
-        return n ? Math.round(n.getBoundingClientRect().top) : 0;
-      }).join(",");
-    }));
-}
-
-async function probe(page: Page): Promise<WorkspaceProbe> {
-  return page.evaluate(() => {
-    const w = (window as unknown as { planform: { workspace: () => WorkspaceProbe } }).planform;
-    return JSON.parse(JSON.stringify(w.workspace()));
-  });
-}
-
-/** Visible on screen (not translated off the fold, not display:none). */
-async function isOnScreen(page: Page, selector: string): Promise<boolean> {
-  return page.evaluate((sel) => {
-    const node = document.querySelector(sel);
-    if (!node) return false;
-    const style = getComputedStyle(node);
-    if (style.display === "none" || style.visibility === "hidden") return false;
-    const r = node.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return false;
-    return r.top < window.innerHeight - 1 && r.bottom > 1 && r.left < window.innerWidth - 1 && r.right > 1;
-  }, selector);
-}
 
 for (const vp of VIEWPORTS) {
   test.describe(vp.name, () => {

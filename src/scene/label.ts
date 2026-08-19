@@ -9,17 +9,26 @@ import {
  * A billboarded text label rendered from a 2D canvas. Kept small and cached
  * so labels are not rebuilt every frame.
  */
+export interface TextLabelOptions {
+  /** Texture width in px — raise it for large partner-mode labels. */
+  width?: number;
+  height?: number;
+  fontSize?: number;
+}
+
 export class TextLabel {
   readonly sprite: Sprite;
   private text = "";
   private color = "#e2e8f0";
   private texture: CanvasTexture;
   private canvas: HTMLCanvasElement;
+  private fontSize: number;
 
-  constructor() {
+  constructor(opts: TextLabelOptions = {}) {
     this.canvas = document.createElement("canvas");
-    this.canvas.width = 256;
-    this.canvas.height = 64;
+    this.canvas.width = opts.width ?? 256;
+    this.canvas.height = opts.height ?? 64;
+    this.fontSize = opts.fontSize ?? 30;
     this.texture = new CanvasTexture(this.canvas);
     this.texture.minFilter = LinearFilter;
     const material = new SpriteMaterial({
@@ -41,9 +50,9 @@ export class TextLabel {
     if (!ctx) return;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.fillStyle = "rgba(15,23,42,0.72)";
-    roundRect(ctx, 2, 2, this.canvas.width - 4, this.canvas.height - 4, 12);
+    roundRect(ctx, 2, 2, this.canvas.width - 4, this.canvas.height - 4, this.canvas.height / 5);
     ctx.fill();
-    ctx.font = "600 30px system-ui, 'Noto Sans TC', sans-serif";
+    ctx.font = `700 ${this.fontSize}px system-ui, 'Noto Sans TC', sans-serif`;
     ctx.fillStyle = color;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
