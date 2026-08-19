@@ -5,3 +5,5 @@ dev-dist/
 .DS_Store
 .vite/
 docs/FIELD_PRECISION_MOBILE_VALIDATION_PLAN.md
+test-results/
+playwright-report/

@@ -5,6 +5,7 @@ import { calibrationCompare } from "../core/measure";
 import { buildSummaryLines } from "../core/summary";
 import { ROUTE_PRESETS } from "../core/routes";
 import { issueCounts, type Severity } from "../core/validation";
+import { dockingPolicy, type WorkspaceMode } from "../core/viewport";
 import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanPreset } from "../export/constructionPlan";
 import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
 import { buildInspector } from "./inspector";
@@ -13,6 +14,9 @@ import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentS
 import { buildCustomAssetFlow } from "./customAssetFlow";
 import { buildVenueCaptureFlow } from "./venueCapture";
 import { refreshSimPanel } from "./simPanel";
+import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
+import { renderContextBar } from "./contextBar";
+import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
@@ -23,12 +27,16 @@ const SNAPS: { id: SnapMode; label: string }[] = [
   { id: "off", label: "自由" }, { id: "intersection", label: "交點" }, { id: "edge", label: "邊線" },
   { id: "center", label: "中心" }, { id: "half", label: "半格" },
 ];
-const WORKFLOWS: { id: Workflow; label: string }[] = [
-  { id: "site", label: "場地" }, { id: "layout", label: "場佈" }, { id: "route", label: "動線" },
-  { id: "check", label: "檢查" }, { id: "export", label: "分享" },
+const WORKFLOWS: { id: Workflow; label: string; icon: string }[] = [
+  { id: "site", label: "場地", icon: "▦" }, { id: "layout", label: "場佈", icon: "▤" },
+  { id: "route", label: "動線", icon: "↝" }, { id: "check", label: "檢查", icon: "✓" },
+  { id: "export", label: "分享", icon: "↗" },
 ];
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
+
+/** Which sheet, if any, currently covers part of the canvas on a compact layout. */
+type SheetKind = "none" | "workflow" | "inspector";
 
 export class UI {
   private topbar = el("header", { class: "topbar" });
@@ -42,20 +50,48 @@ export class UI {
   private teambar = el("div", { class: "teambar" });
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
-  private mobilePropsOpen = false;
   private lastWorkflow: Workflow | null = null;
+  private lastMode: Mode | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true, simplify: false };
-  private agentSheet: QuickAgentSheetHandles | null = null;
+  private agentSheet: QuickAgentSheetHandles;
+  private menu: MenuSheetHandles = buildMenuSheet();
   private smartBox = el("div", { class: "list" });
   private simPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
+  private sheet: SheetKind = "none";
   private sheetDetent: "collapsed" | "half" | "full" = "half";
   private sheetHistoryPushed = false;
+  private viewport: WorkspaceViewport;
+  private mode: WorkspaceMode = "desktop";
+  private builtHeaderMode: WorkspaceMode | null = null;
+
   constructor(private app: App, private root: HTMLElement) {
-    root.append(this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar, this.box, this.toast, this.teambar, this.ctxbar);
-    this.buildTopbar();
+    root.append(
+      this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
+      this.box, this.toast, this.teambar, this.ctxbar, this.menu.root,
+    );
+    this.agentSheet = buildQuickAgentSheet(app);
+    root.append(this.agentSheet.root);
+
+    this.viewport = new WorkspaceViewport(root, app.scene.domElement);
+    this.viewport.registerChrome({
+      header: [this.topbar, this.teambar],
+      nav: this.nav,
+      left: this.left,
+      right: this.right,
+      bars: [this.ctxbar, this.placebar, this.measurebar, this.agentSheet.root],
+    });
+    this.viewport.start();
+    this.viewport.subscribe((state) => {
+      this.mode = state.mode;
+      // Everything that frames the world uses the measured visible rect, so the
+      // camera never assumes the whole window is canvas.
+      this.app.scene.setViewportRects(state.canvas, state.safeRect, state.focusRect);
+      this.onModeMaybeChanged();
+    });
+
     this.buildNav();
     this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
@@ -64,11 +100,32 @@ export class UI {
     this.app.onChange(() => this.update());
     this.bindKeys();
     this.bindSheetGestures();
-    this.agentSheet = buildQuickAgentSheet(app);
-    root.append(this.agentSheet.root);
-    this.applySheetDetent();
+    this.applySheetState();
     this.update();
     this.buildQuickStart();
+  }
+
+  /** Measured workspace state — used by browser smoke tests and diagnostics. */
+  get workspace(): WorkspaceViewportState {
+    return this.viewport.current;
+  }
+
+  // --- workspace mode -----------------------------------------------------
+
+  private onModeMaybeChanged(): void {
+    if (this.builtHeaderMode === this.mode) return;
+    this.builtHeaderMode = this.mode;
+    this.buildTopbar();
+    // Desktop docks both rails; compact layouts must never leave a sheet open
+    // across a breakpoint change or the canvas comes back half-covered.
+    if (this.mode === "desktop") this.setSheet("none");
+    this.menu.close();
+    this.update();
+    this.viewport.schedule();
+  }
+
+  private get compact(): boolean {
+    return this.mode !== "desktop";
   }
 
   private buildQuickStart(): void {
@@ -80,21 +137,17 @@ export class UI {
       "③ 動線：選類型畫人流，可「聚焦」或「▶ 模擬動線」",
       "④ 分享：匯出場佈總覽 / 動線圖 / 夥伴任務圖，或按「檢視給團隊」",
     ];
-    const dismiss = () => { try { localStorage.setItem(KEY, "1"); } catch { /* ignore */ } overlay.remove(); };
+    const dismiss = () => { try { localStorage.setItem(KEY, "1"); } catch { /* ignore */ } overlay.remove(); this.viewport.schedule(); };
     const overlay = el("div", { class: "quickstart" }, [
       el("div", { class: "quickstart__card" }, [
         el("div", { class: "quickstart__title", text: "平面場 ISO — 三步驟快速上手" }),
         el("div", { class: "quickstart__steps" }, steps.map((s) => el("div", { text: s }))),
-        el("p", { class: "hint", text: "手機：下方分頁切換場地 / 場佈 / 動線 / 分享；再點同一分頁可收回、露出畫布。" }),
+        el("p", { class: "hint", text: "手機 / 平板：下方分頁切換場地 / 場佈 / 動線 / 分享；再點同一分頁可收回、露出畫布。" }),
         button("開始使用", dismiss),
       ]),
     ]);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) dismiss(); });
     this.root.append(overlay);
-  }
-
-  private isMobile(): boolean {
-    return window.matchMedia("(max-width: 820px)").matches;
   }
 
   private showToast(msg: string, undo = false): void {
@@ -106,7 +159,35 @@ export class UI {
     this.toastTimer = window.setTimeout(() => { this.toast.style.display = "none"; }, 4000);
   }
 
+  // --- header -------------------------------------------------------------
+
   private buildTopbar(): void {
+    this.topbar.innerHTML = "";
+    this.snapSel = null;
+    this.topbar.classList.toggle("topbar--compact", this.compact);
+    if (this.compact) this.buildCompactTopbar();
+    else this.buildDesktopTopbar();
+  }
+
+  /**
+   * Tablet / phone header: exactly one row, exactly six slots —
+   * project name / undo / redo / compact view / AI / more.
+   * Workflows live in the bottom nav; everything else lives behind More.
+   */
+  private buildCompactTopbar(): void {
+    const title = el("div", { class: "topbar__title topbar__title--compact" });
+    const history = el("div", { class: "group" }, [
+      button("↶", () => this.app.undo(), "chip chip--sm"),
+      button("↷", () => this.app.redo(), "chip chip--sm"),
+    ]);
+    const viewBtn = button("視角", () => this.openViewMenu(), "chip chip--sm topbar__view");
+    const ai = button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent");
+    const more = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
+    more.setAttribute("aria-label", "更多設定");
+    this.topbar.append(title, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
+  }
+
+  private buildDesktopTopbar(): void {
     const history = el("div", { class: "group" }, [
       button("↶", () => this.app.undo(), "chip"), button("↷", () => this.app.redo(), "chip"),
     ]);
@@ -114,75 +195,131 @@ export class UI {
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
     const flows = el("div", { class: "group group--flows", "data-group": "flows" },
       WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
-    const snapSel = el("select", { class: "field__input field__input--inline desktop-only", title: "吸附模式" }) as HTMLSelectElement;
+    const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
     for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
     snapSel.value = this.app.session.snap;
     snapSel.addEventListener("change", () => this.app.setSnap(snapSel.value as SnapMode));
     this.snapSel = snapSel;
     const more = el("div", { class: "group", "data-group": "view2" }, [
       button("名稱", () => this.app.setShowLabels(!this.app.session.showLabels), "chip chip--sm"),
-      button("置中", () => this.app.recenterView(), "chip chip--sm desktop-only"),
+      button("置中", () => this.app.recenterView(), "chip chip--sm"),
       snapSel,
-      button("✦ AI", () => this.agentSheet?.open(), "chip chip--sm chip--accent"),
+      button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent"),
     ]);
-    const viewToggle = button("視角", () => {
-      this.app.setView(this.app.store.getState().view === "top" ? "iso" : "top");
-    }, "chip mobile-only");
     const team = button("檢視給團隊", () => this.app.setTeamView(true), "chip chip--primary");
-    this.topbar.append(el("div", { class: "topbar__title", text: "平面場 ISO" }), history, flows, views, more, viewToggle, team);
+    this.topbar.append(
+      el("div", { class: "topbar__title", text: "平面場 ISO" }),
+      history, flows, views, more, el("div", { class: "topbar__spacer" }), team,
+    );
   }
 
-  private buildNav(): void {
-    const items: { w: Workflow; label: string; icon: string }[] = [
-      { w: "site", label: "場地", icon: "▦" }, { w: "layout", label: "場佈", icon: "▤" },
-      { w: "route", label: "動線", icon: "↝" }, { w: "check", label: "檢查", icon: "✓" },
-      { w: "export", label: "分享", icon: "↗" },
+  private openViewMenu(): void {
+    const cur = this.app.store.getState().view;
+    this.menu.open("視角", [{
+      items: VIEWS.map((v) => ({
+        label: v.label,
+        active: cur === v.id,
+        onSelect: () => { this.app.setView(v.id); },
+      })),
+    }]);
+  }
+
+  private openMoreMenu(): void {
+    const sess = this.app.session;
+    const groups: MenuGroup[] = [
+      {
+        title: "畫布",
+        items: [
+          { label: "顯示名稱", active: sess.showLabels, onSelect: () => { this.app.setShowLabels(!sess.showLabels); return true; } },
+          { label: "置中 / 重新框選", onSelect: () => this.app.recenterView() },
+          { label: "簡化顯示", active: sess.simplify, onSelect: () => { this.app.setSimplify(!sess.simplify); return true; } },
+          { label: "顯示 / 隱藏格線", onSelect: () => this.app.updateTile({ visible: !this.app.store.getState().tile.visible }) },
+        ],
+      },
+      {
+        title: "吸附",
+        items: SNAPS.map((sn) => ({
+          label: sn.label,
+          active: sess.snap === sn.id,
+          onSelect: () => { this.app.setSnap(sn.id); return true; },
+        })),
+      },
+      {
+        title: "工具",
+        items: [
+          { label: "現場量測", onSelect: () => this.app.startMeasure(sess.measureType) },
+          { label: "現場校正", onSelect: () => { this.app.setWorkflow("site"); this.app.startCalibration(); this.setSheet("workflow"); } },
+          { label: "檢視給團隊", onSelect: () => this.app.setTeamView(true) },
+        ],
+      },
+      {
+        title: "活動",
+        items: [
+          { label: "重新命名活動", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
+        ],
+      },
     ];
-    this.nav.append(...items.map((it) =>
-      el("button", { type: "button", class: "navbtn", "data-nav": it.w }, [
+    this.menu.open("更多", groups);
+  }
+
+  private promptRename(): void {
+    const cur = this.app.store.getState().name;
+    const next = window.prompt("活動名稱", cur);
+    if (next !== null) this.app.store.mutate((p) => (p.name = next.trim() || cur), { history: false });
+  }
+
+  // --- bottom navigation --------------------------------------------------
+
+  private buildNav(): void {
+    this.nav.append(...WORKFLOWS.map((it) =>
+      el("button", { type: "button", class: "navbtn", "data-nav": it.id }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
       b.addEventListener("click", () => {
         const w = b.dataset.nav as Workflow;
-        // Re-tapping the active tab collapses the sheet back to full Canvas.
-        if (this.app.session.workflow === w && this.root.classList.contains("show-left")) {
-          this.closeSheet();
+        // While the inspector is up, a workflow tap collapses back to full canvas.
+        if (this.sheet === "inspector") {
+          this.app.setWorkflow(w);
+          this.setSheet("none");
+          return;
+        }
+        // Re-tapping the active tab collapses the sheet back to full canvas.
+        if (this.app.session.workflow === w && this.sheet === "workflow") {
+          this.setSheet("none");
           return;
         }
         this.app.setWorkflow(w);
-        this.openSheet();
+        this.setSheet("workflow");
       }));
   }
 
-  private sheetHandle(): HTMLElement {
-    return el("div", { class: "sheet-handle", title: "拖曳收合面板" });
+  // --- sheets -------------------------------------------------------------
+
+  private setSheet(kind: SheetKind): void {
+    if (this.sheet === kind) { this.applySheetState(); return; }
+    this.sheet = kind;
+    if (kind !== "none") this.sheetDetent = "half";
+    this.applySheetState();
+    this.syncSheetHistory();
+    this.viewport.schedule();
   }
 
-  private applySheetDetent(): void {
-    for (const elNode of [this.left, this.right]) {
-      elNode.classList.remove("sheet--collapsed", "sheet--half", "sheet--full");
-      elNode.classList.add(`sheet--${this.sheetDetent}`);
+  private applySheetState(): void {
+    this.root.dataset.sheet = this.compact ? this.sheet : "none";
+    for (const node of [this.left, this.right]) {
+      node.classList.remove("sheet--collapsed", "sheet--half", "sheet--full");
+      node.classList.add(`sheet--${this.sheetDetent}`);
     }
   }
 
-  private openSheet(): void {
-    this.root.classList.add("show-left");
-    this.sheetDetent = "half";
-    this.applySheetDetent();
-    if (!this.sheetHistoryPushed && typeof history !== "undefined") {
-      try {
-        history.pushState({ planformSheet: true }, "");
-        this.sheetHistoryPushed = true;
-      } catch { /* ignore */ }
-    }
-  }
-
-  private closeSheet(): void {
-    this.root.classList.remove("show-left");
-    this.root.classList.remove("show-inspector");
-    this.mobilePropsOpen = false;
-    if (this.sheetHistoryPushed && typeof history !== "undefined") {
+  /** Android back should dismiss the sheet before it leaves the app. */
+  private syncSheetHistory(): void {
+    if (typeof history === "undefined") return;
+    const wantEntry = this.compact && this.sheet !== "none";
+    if (wantEntry && !this.sheetHistoryPushed) {
+      try { history.pushState({ planformSheet: true }, ""); this.sheetHistoryPushed = true; } catch { /* ignore */ }
+    } else if (!wantEntry && this.sheetHistoryPushed) {
       this.sheetHistoryPushed = false;
       try {
         if ((history.state as { planformSheet?: boolean } | null)?.planformSheet) history.back();
@@ -190,13 +327,23 @@ export class UI {
     }
   }
 
+  private sheetHandle(label: string): HTMLElement {
+    const handle = el("div", { class: "sheet-handle", title: "向下拖曳收合面板" }, [
+      el("span", { class: "sheet-handle__grip" }),
+      el("span", { class: "sheet-handle__label", text: label }),
+    ]);
+    return handle;
+  }
+
   private bindSheetGestures(): void {
     if (typeof window === "undefined") return;
     window.addEventListener("popstate", () => {
-      if (this.root.classList.contains("show-left") || this.root.classList.contains("show-inspector")) {
-        this.root.classList.remove("show-left", "show-inspector");
-        this.mobilePropsOpen = false;
+      if (this.sheet !== "none") {
+        this.sheet = "none";
         this.sheetHistoryPushed = false;
+        this.applySheetState();
+        this.update();
+        this.viewport.schedule();
       }
     });
 
@@ -212,51 +359,65 @@ export class UI {
     const onMove = (e: PointerEvent) => {
       if (!dragging) return;
       const dy = e.clientY - startY;
-      if (dy > 48) {
+      if (dy > 40) {
         if (this.sheetDetent === "full") this.sheetDetent = "half";
         else if (this.sheetDetent === "half") this.sheetDetent = "collapsed";
-        else this.closeSheet();
-        this.applySheetDetent();
+        else { this.setSheet("none"); dragging = false; this.update(); return; }
+        this.applySheetState();
+        this.viewport.schedule();
         dragging = false;
-      } else if (dy < -48) {
-        if (this.sheetDetent === "collapsed") this.sheetDetent = "half";
-        else this.sheetDetent = "full";
-        this.applySheetDetent();
+      } else if (dy < -40) {
+        this.sheetDetent = this.sheetDetent === "collapsed" ? "half" : "full";
+        this.applySheetState();
+        this.viewport.schedule();
         dragging = false;
       }
     };
     const onEnd = () => { dragging = false; };
-    this.left.addEventListener("pointerdown", onStart);
-    this.left.addEventListener("pointermove", onMove);
-    this.left.addEventListener("pointerup", onEnd);
-    this.right.addEventListener("pointerdown", onStart);
-    this.right.addEventListener("pointermove", onMove);
-    this.right.addEventListener("pointerup", onEnd);
+    for (const node of [this.left, this.right]) {
+      node.addEventListener("pointerdown", onStart);
+      node.addEventListener("pointermove", onMove);
+      node.addEventListener("pointerup", onEnd);
+      node.addEventListener("pointercancel", onEnd);
+    }
   }
 
   // --- left panel (workflow-driven) --------------------------------------
 
   private rebuildLeft(): void {
     this.left.innerHTML = "";
-    this.left.append(this.sheetHandle());
     const wf = this.app.session.workflow;
-    if (wf === "site") this.left.append(
-      this.areaSection(), this.tileSection(), this.calibrationSection(),
-      buildVenueCaptureFlow(this.app),
-      el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
-      buildLibrary(this.app, { categories: ["fixture"] }),
-    );
+    const label = WORKFLOWS.find((w) => w.id === wf)?.label ?? "";
+    if (this.compact) this.left.append(this.sheetHandle(label));
+    const onPick = () => { if (this.compact) this.setSheet("none"); };
+    if (wf === "site") this.left.append(...this.siteSections(onPick));
     else if (wf === "layout") this.left.append(
       this.smartLayoutSection(),
       buildCustomAssetFlow(this.app),
-      buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true }),
+      buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true, onPick }),
     );
     else if (wf === "route") this.left.append(this.routeSection());
     else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());
   }
 
-  private areaSection(): HTMLElement {
+  /**
+   * 場地 first level is deliberately four things — 教室尺寸 / 地磚 / 現場校正 /
+   * 固定設施. Engineering parameters (X, Z, tile origin, tile rotation) are
+   * real but rarely touched, so they sit in 進階設定 instead of being the first
+   * thing a phone or tablet user meets.
+   */
+  private siteSections(onPick: () => void): HTMLElement[] {
+    return [
+      this.roomSizeSection(),
+      this.tileSection(),
+      this.calibrationSection(),
+      this.fixtureSection(onPick),
+      this.siteAdvancedSection(),
+    ];
+  }
+
+  private roomSizeSection(): HTMLElement {
     const s = this.app.store.getState();
     const body: HTMLElement[] = [];
     for (const id of ["classroom", "corridor"] as const) {
@@ -264,11 +425,9 @@ export class UI {
       body.push(el("div", { class: "subhead", text: a.name }), el("div", { class: "grid2" }, [
         num("長 (m)", a.length, 0.1, (v) => this.app.updateArea(id, { length: v }), 0.5),
         num("寬 (m)", a.width, 0.1, (v) => this.app.updateArea(id, { width: v }), 0.5),
-        num("X (m)", a.x, 0.1, (v) => this.app.updateArea(id, { x: v })),
-        num("Z (m)", a.z, 0.1, (v) => this.app.updateArea(id, { z: v })),
       ]));
     }
-    return section("教室 / 走廊", body);
+    return section("教室尺寸", body);
   }
 
   private tileSection(): HTMLElement {
@@ -277,14 +436,40 @@ export class UI {
       el("div", { class: "grid2" }, [
         num("寬 (cm)", metersToCm(t.width), 1, (v) => this.app.updateTile({ width: v / 100 }), 1),
         num("深 (cm)", metersToCm(t.depth), 1, (v) => this.app.updateTile({ depth: v / 100 }), 1),
-        num("原點 X (m)", t.originX, 0.05, (v) => this.app.updateTile({ originX: v })),
-        num("原點 Z (m)", t.originZ, 0.05, (v) => this.app.updateTile({ originZ: v })),
-        num("旋轉 (°)", t.rotationDeg, 1, (v) => this.app.updateTile({ rotationDeg: v })),
       ]),
       el("div", { class: "row wrap" }, [30, 40, 60].map((cm) =>
         button(`${cm}×${cm}`, () => this.app.updateTile({ width: cm / 100, depth: cm / 100 }), "chip chip--sm"))),
       button("顯示 / 隱藏格線", () => this.app.updateTile({ visible: !this.app.store.getState().tile.visible }), "btn btn--ghost"),
     ]);
+  }
+
+  private fixtureSection(onPick: () => void): HTMLElement {
+    return section("固定設施", [
+      el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
+      buildLibrary(this.app, { categories: ["fixture"], onPick }),
+    ]);
+  }
+
+  private siteAdvancedSection(): HTMLElement {
+    const s = this.app.store.getState();
+    const t = s.tile;
+    const body: HTMLElement[] = [
+      el("p", { class: "hint", text: "座標與地磚原點只有在對齊實際建物時才需要調整。" }),
+    ];
+    for (const id of ["classroom", "corridor"] as const) {
+      const a = s[id];
+      body.push(el("div", { class: "subhead", text: `${a.name}位置` }), el("div", { class: "grid2" }, [
+        num("X (m)", a.x, 0.1, (v) => this.app.updateArea(id, { x: v })),
+        num("Z (m)", a.z, 0.1, (v) => this.app.updateArea(id, { z: v })),
+      ]));
+    }
+    body.push(el("div", { class: "subhead", text: "地磚原點" }), el("div", { class: "grid2" }, [
+      num("原點 X (m)", t.originX, 0.05, (v) => this.app.updateTile({ originX: v })),
+      num("原點 Z (m)", t.originZ, 0.05, (v) => this.app.updateTile({ originZ: v })),
+      num("旋轉 (°)", t.rotationDeg, 1, (v) => this.app.updateTile({ rotationDeg: v })),
+    ]));
+    body.push(buildVenueCaptureFlow(this.app));
+    return section("進階設定", body, false);
   }
 
   private calibrationSection(): HTMLElement {
@@ -310,8 +495,8 @@ export class UI {
     const body: HTMLElement[] = [
       el("p", { class: "hint", text: "① 在畫布點兩個已知距離的端點 ② 輸入實際長度 ③ 選擇套用方式。" }),
       this.app.session.mode === "calibrate"
-        ? button("重新選點（校正中…）", () => this.app.startCalibration(), "btn btn--primary")
-        : button("在畫布選兩點", () => this.app.startCalibration()),
+        ? button("重新選點（校正中…）", () => this.startCalibrationFromSheet(), "btn btn--primary")
+        : button("在畫布選兩點", () => this.startCalibrationFromSheet()),
     ];
     body.push(
       el("label", { class: "field" }, [el("span", { class: "field__label", text: "實際長度 (cm)" }), actual]),
@@ -322,7 +507,13 @@ export class UI {
         button("套用到教室長", () => this.applyCalib("classroom-length", actual), "btn btn--ghost"),
       ]),
     );
-    return section("現場校正精靈", body);
+    return section("現場校正", body);
+  }
+
+  /** Picking calibration points needs the canvas, so the sheet gets out of the way. */
+  private startCalibrationFromSheet(): void {
+    this.app.startCalibration();
+    if (this.compact) this.setSheet("none");
   }
 
   private applyCalib(action: "record" | "tile" | "classroom-length", input: HTMLInputElement): void {
@@ -355,7 +546,7 @@ export class UI {
           el("span", { class: "card__title", text: `${c.label}（${c.count} 張）` }),
           el("span", { class: "card__sub", text: `${c.footprint.width.toFixed(1)} × ${c.footprint.depth.toFixed(1)} m${warn}` }),
         ]),
-        button("套用", () => this.app.applyMatCandidate(c.id), "chip chip--sm chip--primary"),
+        button("套用", () => { this.app.applyMatCandidate(c.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm chip--primary"),
       ]));
     }
   }
@@ -367,15 +558,15 @@ export class UI {
       const focused = this.app.session.focusRouteId === r.id;
       list.append(el("div", { class: "list__row" }, [
         el("span", { text: `${r.name}（${r.points.length} 點）` }),
-        button(this.app.session.activeRouteId === r.id ? "繪製中" : "編輯", () => this.app.editRoute(r.id), "chip chip--sm"),
-        button(focused ? "取消聚焦" : "聚焦", () => this.app.setRouteFocus(focused ? null : r.id), focused ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(this.app.session.activeRouteId === r.id ? "繪製中" : "編輯", () => { this.app.editRoute(r.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+        button(focused ? "取消聚焦" : "聚焦", () => { this.app.setRouteFocus(focused ? null : r.id); if (this.compact) this.setSheet("none"); }, focused ? "chip chip--sm chip--primary" : "chip chip--sm"),
         button("刪除", () => { this.app.setSelection([r.id]); this.app.deleteSelection(); }, "chip chip--sm chip--danger"),
       ]));
     }
     if (!s.routes.length) list.append(el("span", { class: "hint", text: "尚無動線。選一個類型開始畫。" }));
 
     const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
-      button(`${p.icon} ${p.label.replace("動線", "")}`, () => this.app.newRoutePreset(p.type as RouteType), "chip chip--sm")));
+      button(`${p.icon} ${p.label.replace("動線", "")}`, () => { this.app.newRoutePreset(p.type as RouteType); if (this.compact) this.setSheet("none"); }, "chip chip--sm")));
 
     refreshSimPanel(this.simPanelRoot, this.app);
 
@@ -403,10 +594,10 @@ export class UI {
         ]),
       ]) as HTMLButtonElement;
       row.addEventListener("click", () => {
+        // Collapse first so the focus target is framed against the *uncovered*
+        // canvas rect, not the strip left above an open sheet.
+        if (this.compact) this.setSheet("none");
         this.app.focusIssue(iss);
-        this.closeSheet();
-        this.sheetDetent = "collapsed";
-        this.applySheetDetent();
       });
       list.append(row);
     }
@@ -496,7 +687,7 @@ export class UI {
         { value: "free-distance", label: "任意距離" }, { value: "object-gap", label: "物件間距" },
         { value: "wall-clearance", label: "到牆距離" }, { value: "aisle-width", label: "走道寬度" },
       ], this.app.session.measureType, (v) => this.app.setMeasureType(v as MeasurementType)),
-      button("開始量測（端點自動吸附）", () => this.app.startMeasure(this.app.session.measureType)),
+      button("開始量測（端點自動吸附）", () => { this.app.startMeasure(this.app.session.measureType); if (this.compact) this.setSheet("none"); }),
       this.measurementsList(),
     ]);
 
@@ -539,13 +730,28 @@ export class UI {
   private update(): void {
     const sess = this.app.session;
     const s = this.app.store.getState();
-    setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-    setPressed(this.topbar, "flows", (b) => WORKFLOWS[b].id === sess.workflow);
-    setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
-    if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
-    this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow)));
 
-    if (this.lastWorkflow !== sess.workflow || sess.workflow === "check" || sess.workflow === "route" || sess.workflow === "site" || sess.workflow === "export") {
+    if (this.compact) {
+      const title = this.topbar.querySelector(".topbar__title--compact");
+      if (title) title.textContent = s.name || "平面場 ISO";
+    } else {
+      setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
+      setPressed(this.topbar, "flows", (b) => WORKFLOWS[b].id === sess.workflow);
+      setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
+      if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
+    }
+    const viewLabel = VIEWS.find((v) => v.id === s.view)?.label ?? "視角";
+    const viewBtn = this.topbar.querySelector(".topbar__view");
+    if (viewBtn) viewBtn.textContent = viewLabel;
+
+    this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
+      b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow && this.sheet === "workflow")));
+
+    // Picking an asset drops straight into placement — get the sheet out of the way.
+    if (this.compact && sess.mode === "place" && this.lastMode !== "place") this.setSheet("none");
+    this.lastMode = sess.mode;
+
+    if (this.shouldRebuildLeft(sess.workflow)) {
       this.lastWorkflow = sess.workflow;
       this.rebuildLeft();
     }
@@ -557,34 +763,44 @@ export class UI {
     // Team / partner view overlay.
     this.updateTeamView();
 
-    // Inspector vs mobile context bar.
+    // Inspector: docked rail on desktop, opt-in sheet everywhere else.
     const hasSel = sess.selection.size > 0;
-    if (!hasSel) this.mobilePropsOpen = false;
-    const mobile = this.isMobile();
+    if (!hasSel && this.sheet === "inspector") this.setSheet("none");
     this.right.innerHTML = "";
-    if (hasSel && mobile && this.mobilePropsOpen) {
-      this.right.append(button("收起屬性", () => { this.mobilePropsOpen = false; this.update(); }, "btn btn--ghost"));
-    }
+    if (this.compact && this.sheet === "inspector") this.right.append(this.sheetHandle("屬性"));
     this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
-    const showInspector = hasSel && (!mobile || this.mobilePropsOpen) && !sess.teamView;
-    this.root.classList.toggle("show-inspector", showInspector);
-    this.updateContextBar(hasSel && mobile && !this.mobilePropsOpen && !sess.teamView);
+    const dockedInspector = !this.compact && hasSel && !sess.teamView && dockingPolicy(this.mode).autoOpenInspector;
+    this.root.classList.toggle("show-inspector", dockedInspector);
+
+    // Compact selection never auto-opens the inspector; it gets a context bar.
+    // While placing or measuring, the mode's own bar owns that slot instead.
+    const showCtx = this.compact && hasSel && this.sheet !== "inspector"
+      && !sess.teamView && sess.mode === "select";
+    this.ctxbar.style.display = showCtx ? "flex" : "none";
+    if (showCtx) renderContextBar(this.ctxbar, this.app, { onOpenProperties: () => { this.setSheet("inspector"); this.update(); } });
+
+    this.applySheetState();
 
     // Placement + measure bars.
     this.placebar.style.display = sess.mode === "place" ? "flex" : "none";
     this.updateMeasureBar();
+    this.viewport.schedule();
   }
 
-  private updateContextBar(show: boolean): void {
-    this.ctxbar.style.display = show ? "flex" : "none";
-    if (!show) return;
-    this.ctxbar.innerHTML = "";
-    this.ctxbar.append(
-      button("旋轉", () => this.app.rotateSelection(15), "chip"),
-      button("複製", () => this.app.duplicateSelection(), "chip"),
-      button("精調", () => { this.mobilePropsOpen = true; this.update(); }, "chip"),
-      button("屬性", () => { this.mobilePropsOpen = true; this.update(); }, "chip chip--primary"),
-    );
+  /**
+   * Rebuild the workflow panel when it can actually have changed — but never
+   * while the user is typing into it, which on a tablet means losing the
+   * keyboard and the caret mid-number.
+   */
+  private shouldRebuildLeft(wf: Workflow): boolean {
+    if (this.lastWorkflow !== wf) return true;
+    if (wf === "layout") return false;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && this.left.contains(active)) {
+      const tag = active.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
+    }
+    return true;
   }
 
   private updateTeamView(): void {
@@ -657,7 +873,13 @@ export class UI {
       const k = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); this.app.undo(); }
       else if ((e.ctrlKey || e.metaKey) && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); this.app.redo(); }
-      else if (e.key === "Escape") { this.app.cancelPlacement(); if (this.app.session.mode === "measure") this.app.stopMeasure(); if (this.app.session.mode === "calibrate") this.app.cancelCalibration(); }
+      else if (e.key === "Escape") {
+        if (this.menu.isOpen()) { this.menu.close(); return; }
+        if (this.compact && this.sheet !== "none") { this.setSheet("none"); this.update(); return; }
+        this.app.cancelPlacement();
+        if (this.app.session.mode === "measure") this.app.stopMeasure();
+        if (this.app.session.mode === "calibrate") this.app.cancelCalibration();
+      }
       else if (e.key === "Delete" || e.key === "Backspace") this.app.deleteSelection();
       else if (k === "r") { if (this.app.session.mode === "place") this.app.rotateGhost(); else this.app.rotateSelection(15); }
       else if (k === "d") this.app.duplicateSelection();
@@ -674,6 +896,8 @@ export class UI {
     });
   }
 }
+
+type Mode = App["session"]["mode"];
 
 function setPressed(root: HTMLElement, group: string, pred: (i: number) => boolean): void {
   const c = root.querySelector(`[data-group="${group}"]`);

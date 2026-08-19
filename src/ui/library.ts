@@ -11,6 +11,11 @@ export interface LibraryOptions {
   categories?: CatalogCategory[];
   zones?: boolean;
   arrays?: boolean;
+  /**
+   * Fired after a card starts a placement / creates an entity. Compact layouts
+   * use it to collapse the sheet so the user lands straight on the canvas.
+   */
+  onPick?: () => void;
 }
 
 /** Left "what do I want to place?" library: category tabs + compact cards. */
@@ -19,12 +24,13 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   const root = el("div", { class: "library" });
   const catalog = app.getCatalog();
   const panels: { label: string; body: HTMLElement }[] = [];
+  const pick = (run: () => void) => () => { run(); opts.onPick?.(); };
 
   const recent = catalog.listRecent();
   if (recent.length) {
     panels.push({
       label: "常用",
-      body: el("div", { class: "cardgrid" }, recent.map((e) => catalogCard(app, e))),
+      body: el("div", { class: "cardgrid" }, recent.map((e) => catalogCard(app, e, opts))),
     });
   }
 
@@ -32,7 +38,7 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     panels.push({
       label: "區域",
       body: el("div", { class: "cardgrid" }, (Object.keys(ZONE_DEFAULTS) as ZoneType[]).map((z) =>
-        card(ZONE_DEFAULTS[z].icon, ZONE_DEFAULTS[z].label, "區域", () => app.addZone(z)))),
+        card(ZONE_DEFAULTS[z].icon, ZONE_DEFAULTS[z].label, "區域", pick(() => app.addZone(z))))),
     });
   }
 
@@ -42,7 +48,7 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     if (!defs.length) continue;
     panels.push({
       label: c.label,
-      body: el("div", { class: "cardgrid" }, defs.map((d) => catalogCard(app, d))),
+      body: el("div", { class: "cardgrid" }, defs.map((d) => catalogCard(app, d, opts))),
     });
   }
 
@@ -50,13 +56,15 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     panels.push({
       label: "排列",
       body: el("div", { class: "cardgrid" }, [
-        card("🟪", "地墊陣列", "整組地墊", () => app.createArray("mat")),
-        card("💺", "椅子陣列", "整組椅子", () => app.createArray("chair")),
+        card("🟪", "地墊陣列", "整組地墊", pick(() => app.createArray("mat"))),
+        card("💺", "椅子陣列", "整組椅子", pick(() => app.createArray("chair"))),
       ]),
     });
   }
   if (panels.length === 0) return root;
 
+  // One scrolling panel per category keeps the sheet a fixed, predictable
+  // height instead of growing into an endless catalogue page.
   const bodies = panels.map((p) => el("div", { class: "libpanel" }, [p.body]));
   const tabs = el("div", { class: "libtabs" }, panels.map((p, i) =>
     button(p.label, () => show(i), "chip chip--sm libtab")));
@@ -69,7 +77,7 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   return root;
 }
 
-function catalogCard(app: App, d: AssetCatalogEntry): HTMLButtonElement {
+function catalogCard(app: App, d: AssetCatalogEntry, opts: LibraryOptions = {}): HTMLButtonElement {
   const w = Math.round(metersToCm(d.dimensions.width));
   const dep = Math.round(metersToCm(d.dimensions.depth));
   const role = d.serviceRole && d.serviceRole !== "none" ? ` · ${d.serviceRole}` : "";
@@ -77,7 +85,7 @@ function catalogCard(app: App, d: AssetCatalogEntry): HTMLButtonElement {
     d.icon,
     d.name,
     `${w}×${dep}cm · ${PLACEMENT_LABEL[d.placementType] ?? ""}${role}`,
-    () => app.beginPlacementByAssetId(d.id),
+    () => { app.beginPlacementByAssetId(d.id); opts.onPick?.(); },
   );
   c.dataset.name = d.name.toLowerCase();
   return c;

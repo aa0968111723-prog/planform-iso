@@ -13,13 +13,15 @@ if (!(canvas instanceof HTMLCanvasElement) || !root) {
 const restored = Store.loadAutosave();
 const store = new Store(restored ?? createDefaultProject());
 const app = new App(canvas, store);
-new UI(app, root);
+const ui = new UI(app, root);
 
 // Dev-only handle for automated/browser testing (not bundled in production).
 if (import.meta.env.DEV) {
   (window as unknown as { planform?: unknown }).planform = {
     app,
+    ui,
     store,
+    workspace: () => ui.workspace,
     catalog: () => app.getCatalog(),
     agent: app.quickAgent,
   };
