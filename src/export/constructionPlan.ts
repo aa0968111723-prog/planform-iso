@@ -464,10 +464,11 @@ function drawZones(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emphasiz
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
     ctx.fillStyle = TEXT;
-    ctx.font = font("700 34px");
+    // 34px is the PHONE floor — on A4/A3 it blew labels up to 講師… ellipses.
+    ctx.font = font(activePageSize === "phone" ? "700 34px" : "700 22px");
     const label = `${z.icon ? `${z.icon} ` : ""}${z.name}`;
-    const labelW = Math.min(Math.max(180, w - 12), Math.max(180, t.s * 4.5));
-    const lineH = activePageSize === "phone" ? 42 : 30;
+    const labelW = Math.min(Math.max(w - 12, activePageSize === "phone" ? 300 : 240), Math.max(240, t.s * 6));
+    const lineH = activePageSize === "phone" ? 42 : 26;
     let labelY = y + (emphasize ? lineH : lineH - 4);
     const labelH = lineH;
     while (placed.some((r) => x + 6 < r.x + r.w && x + 6 + labelW > r.x && labelY - labelH < r.y + r.h && labelY > r.y)) {
@@ -593,20 +594,26 @@ function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][numb
     ctx.fillText("一人約 1 格寬 × 1.5 格深", x, y + h + 28);
   }
 
-  const label = `${g.name || "巧拼區塊"} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`;
-  ctx.font = font("700 22px");
+  // Two lines (name / spec) so a narrow block never ellipsizes the piece count.
+  const nameLine = g.name || "巧拼區塊";
+  const specLine = `${g.cols}×${g.rows} · ${g.rows * g.cols} 片`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const labelX = x + w / 2, labelY = y + h / 2;
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 7;
   ctx.lineJoin = "round";
-  ctx.strokeText(fitText(ctx, label, Math.max(160, w - 16)), labelX, labelY);
+  const maxW = Math.max(160, w - 16);
+  ctx.font = font("700 22px");
+  ctx.strokeText(fitText(ctx, nameLine, maxW), labelX, labelY - 14);
   ctx.fillStyle = TEXT;
-  ctx.fillText(fitText(ctx, label, Math.max(160, w - 16)), labelX, labelY);
+  ctx.fillText(fitText(ctx, nameLine, maxW), labelX, labelY - 14);
+  ctx.font = font("600 18px");
+  ctx.strokeText(fitText(ctx, specLine, maxW), labelX, labelY + 13);
+  ctx.fillText(fitText(ctx, specLine, maxW), labelX, labelY + 13);
   if (seatMap) {
     ctx.font = font("600 16px");
-    ctx.fillText(`${groupFootprint(g).totalWidth.toFixed(1)} × ${groupFootprint(g).totalDepth.toFixed(1)} m`, labelX, labelY + 30);
+    ctx.fillText(`${groupFootprint(g).totalWidth.toFixed(1)} × ${groupFootprint(g).totalDepth.toFixed(1)} m`, labelX, labelY + 38);
   }
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
