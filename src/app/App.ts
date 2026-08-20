@@ -1208,14 +1208,26 @@ export class App {
   }
 
   startEventPlayback(): void {
+    // ▶ 模擬 shows the numbers immediately; the animated walk-through is the
+    // separate opt-in ▶ 播放走位 (replaySimulation).
     const result = this.runEventSimulation();
-    this.playEventResult(result);
+    this.stopSimLoopOnly();
+    this.session.simMode = "event-flow";
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simTime = result.finishTimeSeconds;
+    this.session.simPositions = [];
+    this.session.bottlenecks = [];
+    this.notifyUi();
   }
 
   /** Replay the already computed frames without running the engine again. */
   replaySimulation(): void {
-    if (!this.session.simResult) return;
-    this.playEventResult(this.session.simResult);
+    const result = this.session.simResult;
+    if (!result) return;
+    // Whole-event replay in about 45 s of wall time regardless of length.
+    this.session.simSpeed = Math.max(1, result.finishTimeSeconds / 45);
+    this.playEventResult(result);
   }
 
   private playEventResult(result: SimulationResult): void {
@@ -1262,7 +1274,9 @@ export class App {
   }
 
   setSimSpeed(speed: number): void {
-    this.session.simSpeed = Math.max(0.5, Math.min(10, speed));
+    // Replays compress an hour-long event into tens of seconds, so the cap is
+    // generous; the floor still guards against a frozen-looking playback.
+    this.session.simSpeed = Math.max(0.5, Math.min(600, speed));
     this.notifyUi();
   }
 
@@ -1330,12 +1344,17 @@ export class App {
       const result = this.session.simResult;
       const nextT = this.session.simTime + dt;
       if (nextT >= result.finishTimeSeconds) {
-        // Loop
-        this.session.simTime = 0;
-        this.applyDesFrame(0, result);
-      } else {
-        this.applyDesFrame(nextT, result);
+        // Replay finished — hand the screen back to the results readout.
+        this.stopSimLoopOnly();
+        this.session.simPlaying = false;
+        this.session.simPaused = false;
+        this.session.simTime = result.finishTimeSeconds;
+        this.session.simPositions = [];
+        this.session.bottlenecks = [];
+        this.notifyUi();
+        return;
       }
+      this.applyDesFrame(nextT, result);
       this.simRaf = requestAnimationFrame(() => this.simLoop());
       return;
     }

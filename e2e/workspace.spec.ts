@@ -95,9 +95,9 @@ for (const vp of VIEWPORTS) {
 
       if (vp.mode === "desktop") {
         expect(header.compact).toBe(false);
-        // Desktop keeps the full five-view + five-workflow header.
+        // Desktop keeps the five views and the four-step primary flow.
         expect(header.viewChips).toBe(5);
-        expect(header.flowChips).toBe(5);
+        expect(header.flowChips).toBe(4);
       } else {
         expect(header.compact).toBe(true);
         expect(header.wrapped).toBe(false);

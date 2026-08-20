@@ -77,13 +77,11 @@ function render(app: App): HTMLElement {
       : button("▶ 模擬", () => app.startSimulation(), "btn btn--primary"),
     button("重開", () => app.restartSimulation(), "chip chip--sm"),
     button("停止", () => app.stopSimulation(), "chip chip--sm"),
-    ...([1, 2, 5] as const).map((s) =>
-      button(
-        `${s}×`,
-        () => app.setSimSpeed(s),
-        app.session.simSpeed === s ? "chip chip--sm chip--primary" : "chip chip--sm",
-      ),
-    ),
+    ...([["慢", 90], ["正常", 45], ["快", 20]] as [string, number][]).map(([label, secs]) => {
+      const target = Math.max(1, (app.session.simResult?.finishTimeSeconds ?? 600) / secs);
+      const active = Math.abs(app.session.simSpeed - target) < 0.01;
+      return button(label, () => app.setSimSpeed(target), active ? "chip chip--sm chip--primary" : "chip chip--sm");
+    }),
   ]);
 
   const body: HTMLElement[] = [setup, transport];
