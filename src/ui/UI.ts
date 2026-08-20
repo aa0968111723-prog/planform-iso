@@ -798,7 +798,7 @@ export class UI {
     };
     const planSection = section("場刊圖（傳給夥伴）", [
       el("p", { class: "hint", text: "乾淨、看得懂的圖，手機會直接開分享（LINE），電腦則下載。" }),
-      el("div", { class: "row wrap" }, [
+      el("div", { class: "export-grid" }, [
         button("場佈總覽圖", () => share("full", null, "場佈總覽")),
         button("3D 場佈圖", () => {
           const dataUrl = this.app.scene.renderToDataURL(state(), "iso");
@@ -806,22 +806,18 @@ export class UI {
             if (how !== "cancelled") this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
           });
         }),
-      ]),
-      el("div", { class: "row wrap" }, [
         button("動線圖", () => share("route", null, "動線圖"), "btn btn--ghost"),
         button("地墊 / 座位圖", () => share("mats", null, "地墊座位圖"), "btn btn--ghost"),
-      ]),
-      el("div", { class: "row wrap" }, [
         button("工作分區圖", () => share("zones", null, "工作分區圖"), "btn btn--ghost"),
         button("物資清單圖", () => share("inventory", null, "物資清單", { orientation: "portrait" }), "btn btn--ghost"),
         button("夥伴觀看圖", () => share("partner", null, "夥伴觀看圖", { simplify: true, dims: false }), "btn btn--ghost"),
       ]),
       el("div", { class: "subhead", text: "各組任務圖（只顯示該組需要的）" }),
       el("div", { class: "row wrap" }, [
-        button("報到組", () => share("staff", "checkin", "報到組"), "chip chip--sm"),
-        button("收費組", () => share("staff", "payment", "收費組"), "chip chip--sm"),
-        button("引導組", () => share("staff", "guide", "引導組"), "chip chip--sm"),
-        button("生活組", () => share("staff", "life", "生活組"), "chip chip--sm"),
+        button("報到組", () => share("staff", "checkin", "報到組", { titleSuffix: "報到組" }), "chip chip--sm"),
+        button("收費組", () => share("staff", "payment", "收費組", { titleSuffix: "收費組" }), "chip chip--sm"),
+        button("引導組", () => share("staff", "guide", "引導組", { titleSuffix: "引導組" }), "chip chip--sm"),
+        button("生活組", () => share("staff", "life", "生活組", { titleSuffix: "生活組" }), "chip chip--sm"),
       ]),
       el("div", { class: "row wrap" }, [
         button(o.dims ? "✓ 顯示尺寸" : "顯示尺寸", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),

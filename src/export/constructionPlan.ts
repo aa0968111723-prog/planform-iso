@@ -9,7 +9,7 @@
 import { assetDef } from "../core/assets";
 import { catalogFromProject } from "../core/migrate";
 import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
-import { calibrationComplete, venueNeedsCalibration, type ObjectKind, type Project, type SceneObject } from "../core/model";
+import { calibrationComplete, venueNeedsCalibration, type Project, type SceneObject } from "../core/model";
 import { groupMembers, memberLabel } from "../core/arrays";
 
 import { doorSweep, facingVec, rectCorners } from "../core/placement";
@@ -138,35 +138,70 @@ export function inventoryLines(project: Project): InventoryLine[] {
   return [...byName.values()].sort((a, b) => b.count - a.count);
 }
 
+interface Bounds { minX: number; minZ: number; maxX: number; maxZ: number }
+
+function contentBounds(project: Project): Bounds {
+  const bounds: Bounds = {
+    minX: Math.min(project.classroom.x, project.corridor.x),
+    minZ: Math.min(project.classroom.z, project.corridor.z),
+    maxX: Math.max(project.classroom.x + project.classroom.length, project.corridor.x + project.corridor.length),
+    maxZ: Math.max(project.classroom.z + project.classroom.width, project.corridor.z + project.corridor.width),
+  };
+  const include = (x: number, z: number) => {
+    bounds.minX = Math.min(bounds.minX, x); bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.minZ = Math.min(bounds.minZ, z); bounds.maxZ = Math.max(bounds.maxZ, z);
+  };
+  for (const o of project.objects) {
+    if (o.hidden) continue;
+    for (const corner of rectCorners(o.x, o.z, o.width, o.depth, o.rotationDeg)) include(corner.x, corner.z);
+  }
+  for (const g of project.groups) {
+    if (g.hidden) continue;
+    for (const m of groupMembers(g)) {
+      for (const corner of rectCorners(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg)) include(corner.x, corner.z);
+    }
+  }
+  for (const z of project.zones) {
+    if (z.hidden) continue;
+    include(z.x - z.width / 2, z.z - z.depth / 2);
+    include(z.x + z.width / 2, z.z + z.depth / 2);
+  }
+  for (const r of project.routes) {
+    if (!r.visible) continue;
+    for (const point of r.points) include(point.x, point.z);
+  }
+  return bounds;
+}
+
 export function renderConstructionPlan(project: Project, options?: Partial<PlanOptions>): string {
   const opt = { ...DEFAULT_OPTIONS, ...options };
   if (opt.preset === "inventory") return renderInventorySheet(project, opt);
   project = applyRoleFilter(project, opt.roleFilter, opt.simplify);
-  const areas = [project.classroom, project.corridor];
-  const minX = Math.min(...areas.map((a) => a.x));
-  const minZ = Math.min(...areas.map((a) => a.z));
-  const maxX = Math.max(...areas.map((a) => a.x + a.length));
-  const maxZ = Math.max(...areas.map((a) => a.z + a.width));
+  const bounds = contentBounds(project);
+  const minX = bounds.minX;
+  const minZ = bounds.minZ;
+  const maxX = bounds.maxX;
+  const maxZ = bounds.maxZ;
   const worldW = maxX - minX;
   const worldH = maxZ - minZ;
 
   const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
   const pad = 56;
   const notes = opt.extraNotes?.slice(0, 6) ?? [];
-  const headerH = 78 + (notes.length ? notes.length * 17 + 8 : 0);
+  const headerH = 86 + (notes.length ? notes.length * 21 + 8 : 0);
 
   // Size the footer from real content so the legend never collides with the
   // scale bar or runs off the page.
   const legendEntries = legendEntriesFor(project);
-  const legendColW = 190;
+  const legendColW = 260;
   const legendPerRow = Math.max(1, Math.floor((cw / 2 - 48) / legendColW));
   const legendRows = Math.ceil(legendEntries.length / legendPerRow) || 1;
   const invLines = opt.inventory ? inventoryLines(project) : [];
-  const invColW = 170;
+  const invColW = 220;
   const invPerRow = Math.max(1, Math.floor((cw / 2 - 80) / invColW));
   const invRows = Math.ceil(invLines.length / invPerRow) || 1;
   const footerRows = Math.max(legendRows, invRows);
-  const footerH = 26 + 22 + footerRows * 22 + 40;
+  const footerH = 30 + 26 + footerRows * 30 + 48;
 
   const regionW = cw - pad * 2;
   const regionH = ch - headerH - footerH;
@@ -188,6 +223,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   ctx.fillRect(0, 0, cw, ch);
 
   const emphasizeRoutes = opt.preset === "route" || opt.preset === "partner";
+  const showRouteBadges = emphasizeRoutes || opt.preset === "staff";
   const emphasizeZones = opt.preset === "zones" || opt.preset === "partner";
   const showTilesFaint = opt.preset !== "full";
   const fadeFurniture = opt.preset === "route" || opt.preset === "staff" || opt.preset === "zones";
@@ -205,15 +241,24 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
     }
     drawGroups(ctx, project, t, opt.preset === "mats" || opt.preset === "full");
   } else {
-    // Route preset: only doors/screens for orientation, faint furniture.
+    // Route preset: keep the path readable while retaining the physical
+    // landmarks that explain where a route actually ends.
     for (const o of project.objects) {
       if (o.hidden) continue;
       if (o.kind === "door" || o.kind === "screen") drawObject(ctx, o, t, opt.preset, project);
     }
+    withAlpha(ctx, 0.28, () => {
+      drawGroups(ctx, project, t, false);
+      const catalog = catalogFromProject(project);
+      for (const o of project.objects) {
+        if (o.hidden || o.kind === "door" || o.kind === "screen") continue;
+        if (catalog.resolve(o.assetId, o.kind).blocksFlow) drawObject(ctx, o, t, opt.preset, project);
+      }
+    });
   }
 
   withAlpha(ctx, emphasizeRoutes ? 1 : opt.preset === "mats" ? 0.5 : 0.85, () =>
-    drawRoutes(ctx, project, t, emphasizeRoutes));
+    drawRoutes(ctx, project, t, showRouteBadges));
 
   if (opt.dims) drawDimensions(ctx, project, t);
   const subtitle = opt.titleSuffix
@@ -222,11 +267,11 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   drawHeader(ctx, project, cw, subtitle);
   if (notes.length) {
     ctx.fillStyle = "#334155";
-    ctx.font = font("13px");
-    let ny = 82;
+    ctx.font = font("16px");
+    let ny = 88;
     for (const line of notes) {
       ctx.fillText(line, 24, ny);
-      ny += 17;
+      ny += 21;
     }
   }
   const footerY = ch - footerH + 26;
@@ -265,7 +310,10 @@ function renderInventorySheet(project: Project, opt: PlanOptions): string {
     ctx.fillStyle = "#64748b";
     ctx.fillText("目前沒有任何物資 — 回到「場佈」放入桌椅、地墊或報到桌。", 32, y);
   }
-  for (const line of lines) {
+  let omitted = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (y > ch - 60) { omitted = lines.length - i; break; }
     ctx.fillStyle = TEXT;
     ctx.fillText(`${line.icon} ${line.name}`, 32, y);
     ctx.textAlign = "right";
@@ -277,7 +325,11 @@ function renderInventorySheet(project: Project, opt: PlanOptions): string {
     ctx.lineTo(cw / 2 - 60, y + 8);
     ctx.stroke();
     y += 30;
-    if (y > ch - 60) break;
+  }
+  if (omitted) {
+    ctx.fillStyle = "#b45309";
+    ctx.font = font("700 16px");
+    ctx.fillText(`還有 ${omitted} 項未列出`, 32, Math.min(y, ch - 34));
   }
 
   if (zoneLines.length) {
@@ -305,7 +357,7 @@ function drawCalibrationFooter(ctx: CanvasRenderingContext2D, project: Project, 
   const text = calibrationFooterText(project);
   if (!text) return;
   ctx.fillStyle = "#b45309";
-  ctx.font = font("700 13px");
+  ctx.font = font("700 16px");
   ctx.textAlign = "right";
   ctx.fillText(text, width - 24, height - 10);
   ctx.textAlign = "left";
@@ -313,19 +365,21 @@ function drawCalibrationFooter(ctx: CanvasRenderingContext2D, project: Project, 
 
 /** Bare-bones top view used as a locator thumbnail (no header/footer). */
 function renderMiniPlan(project: Project, w: number, h: number): HTMLCanvasElement {
+  const scale = 2;
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = w * scale;
+  canvas.height = h * scale;
   const ctx = canvas.getContext("2d")!;
+  ctx.scale(scale, scale);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = "#cbd5e1";
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-  const areas = [project.classroom, project.corridor];
-  const minX = Math.min(...areas.map((a) => a.x));
-  const minZ = Math.min(...areas.map((a) => a.z));
-  const maxX = Math.max(...areas.map((a) => a.x + a.length));
-  const maxZ = Math.max(...areas.map((a) => a.z + a.width));
+  const bounds = contentBounds(project);
+  const minX = bounds.minX;
+  const minZ = bounds.minZ;
+  const maxX = bounds.maxX;
+  const maxZ = bounds.maxZ;
   const s = Math.min((w - 24) / (maxX - minX), (h - 24) / (maxZ - minZ));
   const t: Xform = { s, X: (wx) => 12 + (wx - minX) * s, Y: (wz) => 12 + (wz - minZ) * s };
   drawFloors(ctx, project, t);
@@ -353,8 +407,8 @@ function drawFloors(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {
     ctx.fillRect(x, y, w, h);
     ctx.strokeRect(x, y, w, h);
     ctx.fillStyle = "#64748b";
-    ctx.font = font("600 15px");
-    ctx.fillText(a.name, x + 8, y + 20);
+    ctx.font = font("600 20px");
+    ctx.fillText(fitText(ctx, a.name, Math.max(120, w - 16)), x + 8, y + 24);
   }
 }
 
@@ -383,7 +437,7 @@ function drawZones(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emphasiz
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
     ctx.fillStyle = TEXT;
-    ctx.font = font(emphasize ? "700 16px" : "600 14px");
+    ctx.font = font("700 20px");
     const label = `${z.icon ? `${z.icon} ` : ""}${z.name}`;
     ctx.fillText(label, x + 6, y + (emphasize ? 22 : 18));
   }
@@ -410,24 +464,24 @@ function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: b
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(px, py, 10, 0, Math.PI * 2);
+        ctx.arc(px, py, 16, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = "#ffffff";
-        ctx.font = font("700 11px");
+        ctx.font = font("700 18px");
         ctx.textAlign = "center";
         ctx.fillText(isStart ? "起" : isEnd ? "終" : String(i + 1), px, py + 4);
         ctx.textAlign = "left";
       }
     }
     ctx.fillStyle = TEXT;
-    ctx.font = font("600 13px");
-    ctx.fillText(r.name, t.X(r.points[0].x) + 12, t.Y(r.points[0].z) - 10);
+    ctx.font = font("600 18px");
+    ctx.fillText(fitText(ctx, r.name, Math.max(180, t.s * 5)), t.X(r.points[0].x) + 20, t.Y(r.points[0].z) - 18);
   }
 }
 
 function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, preset: PlanPreset, project: Project): void {
-  if (o.kind === "door") { drawDoor(ctx, o, t); return; }
+  if (o.kind === "door") { drawDoor(ctx, o, t, project); return; }
   if (o.kind === "screen") { drawScreen(ctx, o, t); return; }
   if (o.kind === "switch") { drawSwitch(ctx, o, t); return; }
   if (o.kind === "computer") { drawComputer(ctx, o, t); return; }
@@ -437,7 +491,7 @@ function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, pre
   const spec = planSymbolForObject(o, entry);
   const wPx = o.width * t.s;
   const dPx = o.depth * t.s;
-  drawPlanSymbolOverlay(ctx, t.X(o.x), t.Y(o.z), wPx, dPx, o.rotationDeg, spec);
+  drawPlanSymbolOverlay(ctx, t.X(o.x), t.Y(o.z), wPx, dPx, o.rotationDeg, spec, "paper");
 
   // Keep chair facing tick in mats/full when symbol didn't already (belt-and-suspenders).
   if (o.kind === "chair" && preset !== "route" && !spec.showFacing) {
@@ -450,12 +504,52 @@ function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, pre
 function drawGroups(ctx: CanvasRenderingContext2D, p: Project, t: Xform, numbered: boolean): void {
   for (const g of p.groups) {
     if (g.hidden) continue;
+    if (isFieldMatGroup(g)) {
+      drawFieldGroup(ctx, g, t);
+      continue;
+    }
     const dense = g.rows * g.cols > 60; // hide labels when too dense to read
     for (const m of groupMembers(g)) {
       drawRectAt(ctx, m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg, t, assetDef(g.sourceKind).color,
         numbered && !dense ? memberLabel(g, m.row, m.col) : undefined);
     }
   }
+}
+
+function isFieldMatGroup(g: Project["groups"][number]): boolean {
+  return g.sourceKind === "mat" && Math.abs(g.itemWidth - 0.6) < 1e-6 && Math.abs(g.itemDepth - 0.6) < 1e-6;
+}
+
+function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][number], t: Xform): void {
+  const points = groupMembers(g).flatMap((m) => rectCorners(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
+  if (!points.length) return;
+  const minX = Math.min(...points.map((p) => p.x));
+  const maxX = Math.max(...points.map((p) => p.x));
+  const minZ = Math.min(...points.map((p) => p.z));
+  const maxZ = Math.max(...points.map((p) => p.z));
+  const x = t.X(minX), y = t.Y(minZ), w = (maxX - minX) * t.s, h = (maxZ - minZ) * t.s;
+  const color = assetDef(g.sourceKind).color;
+  ctx.fillStyle = hexA(color, 0.12);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([10, 6]);
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
+  ctx.setLineDash([]);
+
+  const label = `${g.name || "巧拼區塊"} · ${g.cols}×${g.rows}・${g.rows * g.cols} 片`;
+  ctx.font = font("700 20px");
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const labelX = x + w / 2, labelY = y + h / 2;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 7;
+  ctx.lineJoin = "round";
+  ctx.strokeText(fitText(ctx, label, Math.max(160, w - 16)), labelX, labelY);
+  ctx.fillStyle = TEXT;
+  ctx.fillText(fitText(ctx, label, Math.max(160, w - 16)), labelX, labelY);
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
 }
 
 function drawRectAt(ctx: CanvasRenderingContext2D, cx: number, cz: number, w: number, d: number, rot: number, t: Xform, color: string, label?: string): void {
@@ -471,14 +565,14 @@ function drawRectAt(ctx: CanvasRenderingContext2D, cx: number, cz: number, w: nu
   ctx.stroke();
   if (label) {
     ctx.fillStyle = TEXT;
-    ctx.font = font("600 10px");
+    ctx.font = font("600 14px");
     ctx.textAlign = "center";
     ctx.fillText(label, t.X(cx), t.Y(cz) + 3.5);
     ctx.textAlign = "left";
   }
 }
 
-function drawDoor(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): void {
+function drawDoor(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, project: Project): void {
   const sweep = doorSweep(o);
   const tangent = { x: facingVec(o.rotationDeg).z, z: -facingVec(o.rotationDeg).x };
   const a = { x: o.x - tangent.x * o.width / 2, z: o.z - tangent.z * o.width / 2 };
@@ -490,6 +584,35 @@ function drawDoor(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): void
   ctx.beginPath(); ctx.moveTo(t.X(sweep.hingeX), t.Y(sweep.hingeZ)); ctx.lineTo(t.X(sweep.hingeX + Math.cos(endAng) * sweep.radius), t.Y(sweep.hingeZ + Math.sin(endAng) * sweep.radius)); ctx.stroke();
   ctx.strokeStyle = "#94a3b8";
   ctx.beginPath(); ctx.arc(t.X(sweep.hingeX), t.Y(sweep.hingeZ), sweep.radius * t.s, Math.min(sweep.startAngle, endAng), Math.max(sweep.startAngle, endAng)); ctx.stroke();
+  const entry = project.routes.find((r) => r.visible && r.type === "entry" && r.points.length > 0);
+  if (entry) {
+    const start = entry.points[0];
+    const nearest = project.objects
+      .filter((candidate) => !candidate.hidden && candidate.kind === "door")
+      .reduce<{ object: SceneObject; distance: number } | null>((best, candidate) => {
+        const distance = Math.hypot(candidate.x - start.x, candidate.z - start.z);
+        return !best || distance < best.distance ? { object: candidate, distance } : best;
+      }, null);
+    if (nearest?.object.id === o.id) drawEntryPill(ctx, t.X(o.x) + 14, t.Y(o.z) - 18);
+  }
+}
+
+function drawEntryPill(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.font = font("700 16px");
+  const label = "入口";
+  const width = ctx.measureText(label).width + 18;
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#334155";
+  ctx.lineWidth = 2;
+  roundedRectPath(ctx, x, y - 16, width, 28, 14);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = TEXT;
+  ctx.textAlign = "center";
+  ctx.fillText(label, x + width / 2, y + 5);
+  ctx.textAlign = "left";
+  ctx.restore();
 }
 
 function drawScreen(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): void {
@@ -551,10 +674,10 @@ function drawHeader(ctx: CanvasRenderingContext2D, p: Project, width: number, su
   ctx.font = font("700 26px");
   ctx.fillText(p.name || "場佈平面圖", 24, 40);
   ctx.fillStyle = "#64748b";
-  ctx.font = font("400 14px");
+  ctx.font = font("400 18px");
   const today = new Date();
   const dateStr = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
-  ctx.fillText(`${subtitle} · ${dateStr}`, 24, 62);
+  ctx.fillText(fitText(ctx, `${subtitle} · ${dateStr}`, Math.max(260, width - 330)), 24, 66);
   ctx.textAlign = "right";
   ctx.fillText(`地磚 ${Math.round(p.tile.width * 100)}×${Math.round(p.tile.depth * 100)} cm`, width - 24, 62);
   ctx.textAlign = "left";
@@ -564,11 +687,25 @@ interface LegendEntry { color: string; label: string }
 
 function legendEntriesFor(p: Project): LegendEntry[] {
   const entries: LegendEntry[] = [];
-  const kinds = new Set<ObjectKind>(p.objects.filter((o) => !o.hidden).map((o) => o.kind));
-  for (const g of p.groups) if (!g.hidden) kinds.add(g.sourceKind);
-  for (const k of kinds) entries.push({ color: assetDef(k).color, label: assetDef(k).displayName });
-  for (const z of p.zones) if (!z.hidden) entries.push({ color: z.color, label: z.name });
-  for (const r of p.routes) if (r.visible) entries.push({ color: r.color, label: `動線：${r.name}` });
+  const catalog = catalogFromProject(p);
+  const seen = new Set<string>();
+  const add = (key: string, color: string, label: string) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({ color, label });
+  };
+  for (const o of p.objects) {
+    if (o.hidden) continue;
+    const entry = catalog.resolve(o.assetId, o.kind);
+    add(`asset:${entry.id}`, entry.color, entry.name);
+  }
+  for (const g of p.groups) {
+    if (g.hidden) continue;
+    const entry = catalog.resolve(undefined, g.sourceKind);
+    add(`asset:${entry.id}`, entry.color, entry.name);
+  }
+  for (const z of p.zones) if (!z.hidden) add(`zone:${z.color}:${z.name}`, z.color, z.name);
+  for (const r of p.routes) if (r.visible) add(`route:${r.name}`, r.color, `動線：${r.name}`);
   return entries;
 }
 
@@ -579,15 +716,15 @@ function drawLegend(
   perRow: number,
   colW: number,
 ): void {
-  ctx.fillStyle = "#0f172a"; ctx.font = font("700 15px");
+  ctx.fillStyle = "#0f172a"; ctx.font = font("700 18px");
   ctx.fillText("圖例", 24, y);
-  ctx.font = font("400 13px");
-  let x = 24, row = y + 22;
+  ctx.font = font("400 16px");
+  let x = 24, row = y + 26;
   entries.forEach((e, i) => {
-    if (i > 0 && i % perRow === 0) { row += 22; x = 24; }
+    if (i > 0 && i % perRow === 0) { row += 30; x = 24; }
     ctx.fillStyle = e.color; ctx.fillRect(x, row - 12, 15, 15);
     ctx.strokeStyle = "#94a3b8"; ctx.strokeRect(x, row - 12, 15, 15);
-    ctx.fillStyle = "#0f172a"; ctx.fillText(e.label, x + 20, row);
+    ctx.fillStyle = "#0f172a"; ctx.fillText(fitText(ctx, e.label, colW - 20), x + 20, row);
     x += colW;
   });
 }
@@ -601,16 +738,16 @@ function drawInventory(
   colW: number,
 ): void {
   const x = width / 2 + 20;
-  ctx.fillStyle = "#0f172a"; ctx.font = font("700 15px");
+  ctx.fillStyle = "#0f172a"; ctx.font = font("700 18px");
   ctx.fillText("物資數量", x, y);
-  ctx.font = font("400 13px");
-  let row = y + 22, col = 0;
+  ctx.font = font("400 16px");
+  let row = y + 26, col = 0;
   for (const e of lines) {
     const cx = x + col * colW;
     ctx.fillStyle = "#0f172a";
-    ctx.fillText(`${e.name}：${e.count}`, cx, row);
+    ctx.fillText(fitText(ctx, `${e.name}：${e.count}`, colW - 8), cx, row);
     col += 1;
-    if (col >= perRow) { col = 0; row += 22; }
+    if (col >= perRow) { col = 0; row += 30; }
   }
 }
 
@@ -620,7 +757,7 @@ function drawScaleBar(ctx: CanvasRenderingContext2D, t: Xform, y: number, pad: n
   ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
   tick(ctx, x, y, false); tick(ctx, x + len, y, false);
-  ctx.fillStyle = "#0f172a"; ctx.font = font("600 13px"); ctx.textAlign = "center";
+  ctx.fillStyle = "#0f172a"; ctx.font = font("600 16px"); ctx.textAlign = "center";
   ctx.fillText("1 m", x + len / 2, y - 8); ctx.textAlign = "left";
 }
 
@@ -633,6 +770,25 @@ function arrowHead(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: nu
   ctx.lineTo(mx + Math.cos(ang + 2.5) * 8, my + Math.sin(ang + 2.5) * 8);
   ctx.lineTo(mx + Math.cos(ang - 2.5) * 8, my + Math.sin(ang - 2.5) * 8);
   ctx.closePath(); ctx.fill();
+}
+
+function fitText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number): string {
+  if (ctx.measureText(value).width <= maxWidth) return value;
+  const suffix = "…";
+  let text = value;
+  while (text.length > 1 && ctx.measureText(`${text}${suffix}`).width > maxWidth) text = text.slice(0, -1);
+  return `${text}${suffix}`;
+}
+
+function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
 }
 
 function hexA(hex: string, a: number): string {

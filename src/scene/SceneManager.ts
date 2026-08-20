@@ -1050,17 +1050,115 @@ export class SceneManager {
    * the exported PNG.
    */
   renderToDataURL(project: Project, view: ViewName): string {
-    const prev = project.view;
     const editorLayers = [this.ghostGroup, this.overlayGroup, this.measureGroup];
     const prevVisible = editorLayers.map((g) => g.visible);
+    const savedPosition = this.camera.position.clone();
+    const savedQuaternion = this.camera.quaternion.clone();
+    const savedUp = this.camera.up.clone();
+    const savedZoom = this.camera.zoom;
+    const savedTarget = this.target.clone();
+    const savedControlTarget = this.controls.target.clone();
+    const savedRotate = this.controls.enableRotate;
+    const savedWorldPerPx = this.worldPerPx;
+    const savedPixelRatio = Math.min(window.devicePixelRatio, 2);
+    const savedBackground = this.scene.background;
     for (const g of editorLayers) g.visible = false;
-    this.setView(view);
-    this.renderer.render(this.scene, this.camera);
-    const url = this.renderer.domElement.toDataURL("image/png");
-    editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
-    this.setView(prev);
-    this.renderer.render(this.scene, this.camera);
-    return url;
+    try {
+      const shotW = 2560;
+      const shotH = 1600;
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(shotW, shotH, false);
+      this.setView(view);
+      this.fitExportBounds(planBounds(project), shotW, shotH);
+      this.scene.background = new Color(0x0b1120);
+      this.renderer.render(this.scene, this.camera);
+      return this.cropExportBackground(this.renderer.domElement, 0x0b1120);
+    } finally {
+      editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
+      this.scene.background = savedBackground;
+      this.renderer.setPixelRatio(savedPixelRatio);
+      this.renderer.setSize(this.canvas.clientWidth || window.innerWidth, this.canvas.clientHeight || window.innerHeight, false);
+      this.camera.position.copy(savedPosition);
+      this.camera.quaternion.copy(savedQuaternion);
+      this.camera.up.copy(savedUp);
+      this.camera.zoom = savedZoom;
+      this.target.copy(savedTarget);
+      this.controls.target.copy(savedControlTarget);
+      this.controls.enableRotate = savedRotate;
+      this.worldPerPx = savedWorldPerPx;
+      this.applyProjection();
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /** Fit a snapshot independently of the editor viewport and user's zoom. */
+  private fitExportBounds(
+    bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+    width: number,
+    height: number,
+  ): void {
+    const contentHeight = 3.8;
+    const center = new Vector3((bounds.minX + bounds.maxX) / 2, contentHeight * 0.38, (bounds.minZ + bounds.maxZ) / 2);
+    const offset = this.camera.position.clone().sub(this.target);
+    this.target.copy(center);
+    this.controls.target.copy(center);
+    this.camera.position.copy(center).add(offset);
+    this.camera.lookAt(center);
+    this.camera.zoom = 1;
+    this.camera.updateMatrixWorld();
+    const right = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+    const up = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+    let halfU = 0;
+    let halfV = 0;
+    for (const x of [bounds.minX, bounds.maxX]) {
+      for (const y of [0, contentHeight]) {
+        for (const z of [bounds.minZ, bounds.maxZ]) {
+          const d = new Vector3(x, y, z).sub(center);
+          halfU = Math.max(halfU, Math.abs(d.dot(right)));
+          halfV = Math.max(halfV, Math.abs(d.dot(up)));
+        }
+      }
+    }
+    this.worldPerPx = Math.max((2 * halfU) / (width * 0.88), (2 * halfV) / (height * 0.88), 1e-4);
+    this.camera.left = (-width / 2) * this.worldPerPx;
+    this.camera.right = (width / 2) * this.worldPerPx;
+    this.camera.top = (height / 2) * this.worldPerPx;
+    this.camera.bottom = (-height / 2) * this.worldPerPx;
+    this.camera.near = -200;
+    this.camera.far = 500;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /** Remove the solid scene background around the fitted plan. */
+  private cropExportBackground(source: HTMLCanvasElement, background: number): string {
+    const raster = document.createElement("canvas");
+    raster.width = source.width;
+    raster.height = source.height;
+    const ctx = raster.getContext("2d");
+    if (!ctx) return source.toDataURL("image/png");
+    ctx.drawImage(source, 0, 0);
+    const image = ctx.getImageData(0, 0, source.width, source.height);
+    const br = (background >> 16) & 255;
+    const bg = (background >> 8) & 255;
+    const bb = background & 255;
+    let minX = source.width, minY = source.height, maxX = -1, maxY = -1;
+    for (let y = 0; y < source.height; y++) {
+      for (let x = 0; x < source.width; x++) {
+        const i = (y * source.width + x) * 4;
+        if (Math.abs(image.data[i] - br) + Math.abs(image.data[i + 1] - bg) + Math.abs(image.data[i + 2] - bb) > 12) {
+          minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    if (maxX < 0) return source.toDataURL("image/png");
+    const margin = 24;
+    minX = Math.max(0, minX - margin); minY = Math.max(0, minY - margin);
+    maxX = Math.min(source.width - 1, maxX + margin); maxY = Math.min(source.height - 1, maxY + margin);
+    const cropped = document.createElement("canvas");
+    cropped.width = maxX - minX + 1;
+    cropped.height = maxY - minY + 1;
+    cropped.getContext("2d")!.putImageData(image, -minX, -minY);
+    return cropped.toDataURL("image/png");
   }
 }
 

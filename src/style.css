@@ -208,6 +208,8 @@ html, body {
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .row { display: flex; gap: 6px; align-items: center; }
 .row.wrap { flex-wrap: wrap; }
+.export-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.export-grid .btn { width: auto; min-width: 0; padding: 8px 5px; font-size: 12px; line-height: 1.25; }
 .toolrow { display: flex; gap: 5px; flex-wrap: wrap; }
 .hint { margin: 0; font-size: 11px; color: var(--text-dim); line-height: 1.5; }
 .color { width: 40px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
