@@ -33,7 +33,7 @@ async function main() {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator(".quickstart__card button", { hasText: "E310 演講範例（60 人）" }).click();
   await page.waitForTimeout(500);
-  await page.locator('.navbtn[data-nav="export"]').click();
+  await page.locator(".topbar .chip", { hasText: "分享" }).first().click();
   await page.waitForTimeout(350);
 
   const outputs = [];
