@@ -32,6 +32,8 @@ export interface PlanSymbolSpec {
   icon?: string;
 }
 
+export type PlanSymbolTheme = "paper" | "dark";
+
 export function planSymbolForEntry(entry: AssetCatalogEntry): PlanSymbolSpec {
   if (entry.id === "builtin:stage-platform") {
     return { kind: "stage-platform", label: "講台", fill: entry.color, showFacing: false, icon: "講台" };
@@ -121,15 +123,19 @@ export function drawPlanSymbolOverlay(
   dPx: number,
   rotationDeg: number,
   spec: PlanSymbolSpec,
+  theme: PlanSymbolTheme = "dark",
 ): void {
+  const paper = theme === "paper";
+  const outline = paper ? "#334155" : "#cbd5e1";
+  const labelColor = paper ? "#0f172a" : "#f8fafc";
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate((-rotationDeg * Math.PI) / 180);
 
   if (spec.kind === "chair") {
     // Seat rectangle + back bar on -Z (top of local after rotate convention: -depth/2)
-    ctx.fillStyle = hexA(spec.fill, 0.55);
-    ctx.strokeStyle = "#cbd5e1";
+    ctx.fillStyle = hexA(spec.fill, paper ? 0.8 : 0.55);
+    ctx.strokeStyle = outline;
     ctx.lineWidth = 1.4;
     roundRect(ctx, -wPx / 2, -dPx / 2, wPx, dPx, 3);
     ctx.fill();
@@ -137,14 +143,14 @@ export function drawPlanSymbolOverlay(
     ctx.fillStyle = hexA(spec.fill, 0.9);
     ctx.fillRect(-wPx / 2, -dPx / 2, wPx, Math.max(3, dPx * 0.18));
     // facing tick toward +Z (bottom in canvas Y-down after our rotate? we use -rot so +Z is +y in plan Y-down maps to +z world)
-    ctx.strokeStyle = "#e2e8f0";
+    ctx.strokeStyle = paper ? "#334155" : "#e2e8f0";
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(0, dPx * 0.45);
     ctx.stroke();
   } else if (spec.kind === "signage") {
-    ctx.fillStyle = hexA(spec.fill, 0.7);
-    ctx.strokeStyle = "#94a3b8";
+    ctx.fillStyle = hexA(spec.fill, paper ? 0.8 : 0.7);
+    ctx.strokeStyle = paper ? "#334155" : "#94a3b8";
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(0, -dPx / 2);
@@ -154,15 +160,15 @@ export function drawPlanSymbolOverlay(
     ctx.fill();
     ctx.stroke();
   } else if (spec.kind === "queue-barrier") {
-    ctx.strokeStyle = spec.fill;
+    ctx.strokeStyle = paper ? "#334155" : spec.fill;
     ctx.lineWidth = Math.max(3, dPx);
     ctx.beginPath();
     ctx.moveTo(-wPx / 2, 0);
     ctx.lineTo(wPx / 2, 0);
     ctx.stroke();
   } else if (spec.kind === "stage-platform") {
-    ctx.fillStyle = hexA(spec.fill, 0.72);
-    ctx.strokeStyle = "#1f2937";
+    ctx.fillStyle = hexA(spec.fill, paper ? 0.8 : 0.72);
+    ctx.strokeStyle = paper ? "#334155" : "#1f2937";
     ctx.lineWidth = 2;
     ctx.fillRect(-wPx / 2, -dPx / 2, wPx, dPx);
     ctx.strokeRect(-wPx / 2, -dPx / 2, wPx, dPx);
@@ -172,7 +178,7 @@ export function drawPlanSymbolOverlay(
       ctx.beginPath(); ctx.moveTo(x, dPx / 2); ctx.lineTo(x + dPx, -dPx / 2); ctx.stroke();
     }
   } else if (spec.kind === "lectern") {
-    ctx.fillStyle = hexA(spec.fill, 0.68);
+    ctx.fillStyle = hexA(spec.fill, paper ? 0.8 : 0.68);
     ctx.strokeStyle = "#713f12";
     ctx.lineWidth = 1.5;
     roundRect(ctx, -wPx / 2, -dPx / 2, wPx, dPx, 2);
@@ -181,8 +187,8 @@ export function drawPlanSymbolOverlay(
     ctx.strokeStyle = "#f8fafc";
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, dPx * 0.4); ctx.stroke();
   } else if (spec.kind === "storage") {
-    ctx.fillStyle = hexA(spec.fill, 0.5);
-    ctx.strokeStyle = "#cbd5e1";
+    ctx.fillStyle = hexA(spec.fill, paper ? 0.8 : 0.5);
+    ctx.strokeStyle = outline;
     roundRect(ctx, -wPx / 2, -dPx / 2, wPx, dPx, 2);
     ctx.fill();
     ctx.stroke();
@@ -198,14 +204,14 @@ export function drawPlanSymbolOverlay(
     ctx.lineTo(wPx / 2, 0);
     ctx.stroke();
   } else {
-    ctx.fillStyle = hexA(spec.fill, 0.5);
-    ctx.strokeStyle = "#cbd5e1";
+    ctx.fillStyle = hexA(spec.fill, paper ? 0.8 : 0.5);
+    ctx.strokeStyle = outline;
     ctx.lineWidth = 1.5;
     roundRect(ctx, -wPx / 2, -dPx / 2, wPx, dPx, 2);
     ctx.fill();
     ctx.stroke();
     if (spec.showFacing) {
-      ctx.strokeStyle = "#e2e8f0";
+      ctx.strokeStyle = paper ? "#334155" : "#e2e8f0";
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(0, dPx * 0.45);
@@ -219,10 +225,18 @@ export function drawPlanSymbolOverlay(
     // Counter-rotate so the label stays upright no matter how the object faces
     // (a 180° desk otherwise prints its name upside down on the export).
     ctx.rotate((rotationDeg * Math.PI) / 180);
-    ctx.fillStyle = "#f8fafc";
-    ctx.font = `600 ${Math.max(9, Math.min(14, wPx * 0.28))}px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
+    ctx.fillStyle = labelColor;
+    const minLabelPx = paper ? 14 : 9;
+    const maxLabelPx = paper ? 18 : 14;
+    ctx.font = `600 ${Math.max(minLabelPx, Math.min(maxLabelPx, wPx * 0.28))}px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    if (paper) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 4;
+      ctx.lineJoin = "round";
+      ctx.strokeText(text, 0, 0);
+    }
     ctx.fillText(text, 0, 0);
     ctx.restore();
   }

@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist", "dev-dist", "node_modules", "_grok_round*", "_lead", "_smoke", "test-results"],
+    ignores: ["dist", "dev-dist", "node_modules", "_grok_round*", "_lead", "_lead_wpc", "_smoke", "test-results"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
