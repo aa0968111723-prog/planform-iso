@@ -82,7 +82,13 @@ export function agentPositions(state: SimState, routes: Route[]): { x: number; z
   return out;
 }
 
-export interface Bottleneck { x: number; z: number; count: number }
+export interface Bottleneck {
+  x: number;
+  z: number;
+  count: number;
+  name?: string;
+  kind?: "door" | "corridor" | "route";
+}
 
 /** Grid-bucket agent positions; buckets with >= threshold are bottlenecks. */
 export function detectBottlenecks(

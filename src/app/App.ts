@@ -2,6 +2,7 @@ import {
   uid,
   ZONE_DEFAULTS,
   type ArrayGroup,
+  type ArrivalProfile,
   type EventScenario,
   type MeasurementAnnotation,
   type MeasurementType,
@@ -17,7 +18,7 @@ import {
 } from "../core/model";
 import { assetDef } from "../core/assets";
 import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
-import { catalogFromProject, createDefaultScenario } from "../core/migrate";
+import { catalogFromProject, createDefaultScenario, resolveScenarioBindings } from "../core/migrate";
 import { applySnap, type SnapMode } from "../core/units";
 import {
   findParentTable,
@@ -69,11 +70,12 @@ import {
 } from "../core/simulation";
 import {
   buildCheckinPaymentVariants,
-  compareScenarioResults,
+  compareScenarioVariants,
   frameAt,
   runDiscreteEvent,
+  runScenarioMedian,
   type PlaybackAgent,
-  type ScenarioCompareResult,
+  type ScenarioVariantCompareResult,
   type SimulationResult,
 } from "../core/eventFlow";
 import {
@@ -129,12 +131,13 @@ export interface Session {
   simTime: number;
   simResult: SimulationResult | null;
   simQueues: Record<string, number>;
-  simCompare: ScenarioCompareResult | null;
+  simCompare: ScenarioVariantCompareResult | null;
   simQuick: {
     participants: number;
     arrivalWindowSeconds: number;
     prepaidRatio: number;
     hasOnsitePayment: boolean;
+    arrivalProfile: ArrivalProfile;
     checkinStaff: number;
     paymentStaff: number;
   };
@@ -232,6 +235,7 @@ export class App {
       arrivalWindowSeconds: 1200,
       prepaidRatio: 2 / 3,
       hasOnsitePayment: true,
+      arrivalProfile: "uniform",
       checkinStaff: 1,
       paymentStaff: 1,
     },
@@ -904,9 +908,10 @@ export class App {
       project.scenarios?.[0] ||
       null;
     const q = this.session.simQuick;
-    const scenario: EventScenario = existing
-      ? { ...existing, participantCount: q.participants, arrivalWindowSeconds: q.arrivalWindowSeconds }
+    const baseScenario: EventScenario = existing
+      ? { ...existing, participantCount: q.participants, arrivalWindowSeconds: q.arrivalWindowSeconds, arrivalProfile: q.arrivalProfile }
       : createDefaultScenario(project, { participantCount: q.participants });
+    const scenario = resolveScenarioBindings(project, baseScenario);
     return runDiscreteEvent(scenario, { sampleDt: 2 });
   }
 
@@ -1097,13 +1102,14 @@ export class App {
                 { id: "pay-on-site" as const, ratio: onsite, branch: fullBranch },
               ]
             : [{ id: "prepaid" as const, ratio: 1, branch: prepaidBranch }];
-          return {
+          return resolveScenarioBindings(p, {
             ...s,
             participantCount: q.participants,
             arrivalWindowSeconds: q.arrivalWindowSeconds,
+            arrivalProfile: q.arrivalProfile,
             stations,
             profiles,
-          };
+          });
         });
       });
       return this.activeScenario()!;
@@ -1113,9 +1119,10 @@ export class App {
       participantCount: q.participants,
       name: "進場流程",
     });
-    scn = {
+    scn = resolveScenarioBindings(this.state, {
       ...scn,
       arrivalWindowSeconds: q.arrivalWindowSeconds,
+      arrivalProfile: q.arrivalProfile,
       stations: scn.stations.map((st) => {
         if (st.type === "checkin") {
           return { ...st, staffCount: q.checkinStaff, parallelServers: q.checkinStaff };
@@ -1129,7 +1136,7 @@ export class App {
         }
         return st;
       }),
-    };
+    });
     const prepaid = Math.max(0, Math.min(1, q.prepaidRatio));
     const paymentId = scn.stations.find((s) => s.type === "payment")?.id;
     const prepaidBranch = scn.stations.filter((s) => s.type !== "payment").map((s) => s.id);
@@ -1162,14 +1169,14 @@ export class App {
     return result;
   }
 
-  compareCheckinPayment(): ScenarioCompareResult {
+  compareCheckinPayment(): ScenarioVariantCompareResult {
     const scn = this.ensureEventScenario(false);
-    const { combined, separated } = buildCheckinPaymentVariants(scn);
-    const a = runDiscreteEvent(combined, { sampleDt: 2 });
-    const b = runDiscreteEvent(separated, { sampleDt: 2 });
-    const cmp = compareScenarioResults(a, b);
+    const { combined, separated, corridor } = buildCheckinPaymentVariants(scn);
+    const a = runScenarioMedian(combined, { sampleDt: 2 });
+    const b = runScenarioMedian(separated, { sampleDt: 2 });
+    const c = runScenarioMedian(corridor ?? separated, { sampleDt: 2 });
+    const cmp = compareScenarioVariants(a, b, c);
     this.session.simCompare = cmp;
-    this.session.simResult = cmp.winner === "b" ? b : a;
     this.notifyUi();
     return cmp;
   }
@@ -1276,7 +1283,14 @@ export class App {
           z: st?.z ?? 0,
           count: frame.queues[s.stationId] ?? s.maxQueue,
         };
-      });
+      })
+      .concat(result.spatialBottlenecks.map((bottleneck) => ({
+        x: bottleneck.x,
+        z: bottleneck.z,
+        count: bottleneck.count,
+        name: bottleneck.name,
+        kind: bottleneck.kind,
+      })));
     this.syncScene();
   }
 

@@ -122,19 +122,17 @@ export interface PlainMetrics {
 }
 
 export function plainMetrics(result: SimulationResult): PlainMetrics {
-  let maxQueue = 0;
-  let where = "";
+  let maxQueue = result.maxQueue;
+  let where = result.maxQueueWhere ?? "";
   let worstWait = 0;
-  let waitSum = 0;
   for (const s of result.stations) {
-    if (s.maxQueue > maxQueue) { maxQueue = s.maxQueue; where = s.name; }
+    if (s.maxQueue > maxQueue || (!where && s.maxQueue === maxQueue)) { maxQueue = s.maxQueue; where = s.name; }
     worstWait = Math.max(worstWait, s.avgWaitSeconds);
-    waitSum += s.avgWaitSeconds;
   }
   return {
     maxQueue,
     maxQueueWhere: where || "現場",
-    avgWaitSeconds: result.stations.length ? waitSum / result.stations.length : 0,
+    avgWaitSeconds: result.avgWaitSeconds,
     worstWaitSeconds: worstWait,
     finishSeconds: result.finishTimeSeconds,
   };

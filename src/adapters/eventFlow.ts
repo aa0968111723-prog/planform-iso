@@ -8,12 +8,13 @@
 
 import {
   buildCheckinPaymentVariants,
-  compareScenarioResults,
+  compareScenarioVariants,
   runDiscreteEvent,
-  type ScenarioCompareResult,
+  runScenarioMedian,
+  type ScenarioVariantCompareResult,
   type SimulationResult,
 } from "../core/eventFlow";
-import { createDefaultScenario } from "../core/migrate";
+import { createDefaultScenario, resolveScenarioBindings } from "../core/migrate";
 import type {
   EventScenario,
   Project,
@@ -134,7 +135,7 @@ export const eventFlowAdapter = {
   },
 
   simulateScenario(project: Project, participants: number): SimulationSummary {
-    const scn = ensureScenario(project, participants);
+    const scn = resolveScenarioBindings(project, ensureScenario(project, participants));
     if (!scn.stations.length) {
       return routeWalkSummary(project, participants);
     }
@@ -257,14 +258,15 @@ export const eventFlowAdapter = {
     participants?: number,
   ): {
     available: true;
-    comparison: ScenarioCompareResult;
+    comparison: ScenarioVariantCompareResult;
     message: string;
   } {
-    const base = ensureScenario(project, participants);
-    const { combined, separated } = buildCheckinPaymentVariants(base);
-    const a = runDiscreteEvent(combined, { sampleDt: 2 });
-    const b = runDiscreteEvent(separated, { sampleDt: 2 });
-    const comparison = compareScenarioResults(a, b);
+    const base = resolveScenarioBindings(project, ensureScenario(project, participants));
+    const { combined, separated, corridor } = buildCheckinPaymentVariants(base);
+    const a = runScenarioMedian(combined, { sampleDt: 2 });
+    const b = runScenarioMedian(separated, { sampleDt: 2 });
+    const c = runScenarioMedian(corridor ?? separated, { sampleDt: 2 });
+    const comparison = compareScenarioVariants(a, b, c);
     return {
       available: true,
       comparison,

@@ -234,6 +234,8 @@ export interface ServiceStation {
   staffCount: number;
   parallelServers: number;
   meanServiceSeconds: number;
+  /** Optional branch-specific duration, used by a shared desk variant. */
+  profileServiceSeconds?: Partial<Record<ParticipantProfileId, number>>;
   serviceVariance?: number;
   queueCapacity: number;
   /** Spatial position in meters (derived from zone/object when bound). */
@@ -253,6 +255,23 @@ export interface ParticipantProfile {
 
 export type ArrivalProfile = "uniform" | "front-loaded";
 
+export interface SimulationDoor {
+  id: string;
+  x: number;
+  z: number;
+  width: number;
+  /** 1 is unobstructed; lower values represent a narrower or blocked passage. */
+  throughput: number;
+  blocked: boolean;
+}
+
+export interface SimulationSpatial {
+  routes: Route[];
+  corridor: AreaConfig;
+  classroom: AreaConfig;
+  doors: SimulationDoor[];
+}
+
 export interface EventScenario {
   id: string;
   name: string;
@@ -263,6 +282,7 @@ export interface EventScenario {
   stations: ServiceStation[];
   seed: number;
   settings: { speedMetersPerSecond: number };
+  spatial?: SimulationSpatial;
 }
 
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
