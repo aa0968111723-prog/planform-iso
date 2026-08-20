@@ -378,7 +378,7 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
   if (paymentObj) project.objects.push(tabletopObject("builtin:payment-box", paymentObj));
   const stations: ServiceStation[] = [
     entrance, guide, queue,
-    station("checkin", "報到", checkinObj?.x ?? checkinZone.x, checkinObj?.z ?? checkinZone.z, { objectId: checkinObj?.id, zoneId: checkinZone.id }),
+    station("checkin", "報到", checkinObj?.x ?? checkinZone.x, checkinObj?.z ?? checkinZone.z, { objectId: checkinObj?.id, zoneId: checkinZone.id, staffCount: 2, parallelServers: 2 }),
     station("payment", "現場收費", paymentObj?.x ?? paymentZone.x, paymentObj?.z ?? paymentZone.z, { objectId: paymentObj?.id, zoneId: paymentZone.id }),
     station("shoe", "鞋子", shoeZone.x, shoeZone.z, { zoneId: shoeZone.id }),
     station("backpack", "後牆長桌", backpackZone.x, backpackZone.z, { zoneId: backpackZone.id }),
