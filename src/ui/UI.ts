@@ -112,7 +112,8 @@ export class UI {
         this.showToast("點畫面新增動線節點，畫完按「完成繪製」");
       },
       openCheck: () => {
-        this.app.setWorkflow("check");
+        // 檢查 now lives at the top of 分享 (pre-export checklist).
+        this.app.setWorkflow("export");
         this.setSheet("workflow");
       },
       sharePartnerImage: () => {

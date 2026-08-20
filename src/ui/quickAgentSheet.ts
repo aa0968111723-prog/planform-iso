@@ -54,19 +54,20 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
   const cards = el("div", { class: "agent-sheet__cards" });
   const previewBar = el("div", { class: "agent-preview-bar", style: "display:none" });
 
-  const jump = (fn?: () => void) => () => {
+  // Shortcut chips keep the canonical 幫我◯◯ names (spec §6); honesty about
+  // "this just takes you there" lives in the follow-up toast, not a renamed
+  // label. 幫我排場佈 runs the real quick-start-equivalent preview.
+  const jump = (fn?: () => void, note?: string) => () => {
     close();
     fn?.();
+    if (note) app.notifyToast?.(note);
   };
 
   const actions = el("div", { class: "agent-sheet__actions" }, [
-    button("🪑 幫我排場佈", () => {
-      input.value = "這裡放兩個報到桌";
-      void run();
-    }, "chip"),
-    button("🟪 幫我排地墊", jump(hooks.openMatArranger), "chip"),
+    button("🪑 幫我排場佈", () => void previewQuickStart(), "chip"),
+    button("🟪 幫我排地墊", jump(hooks.openMatArranger, "已打開排地墊：選人數就出 A/B/C 方案"), "chip"),
     button("🚶 幫我畫動線", jump(hooks.startEntryRoute), "chip"),
-    button("🔍 幫我檢查", jump(hooks.openCheck), "chip"),
+    button("🔍 幫我檢查", jump(hooks.openCheck, "檢查結果在「分享」頁最上面"), "chip"),
     button("✨ 幫我改善", () => {
       input.value = "幫我改善，入口旁邊留 1 公尺不要擋門";
       void run();
@@ -76,15 +77,6 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
 
   const runBtn = button("執行", () => void run(), "btn chip--primary");
   const closeBtn = button("關閉", () => close(), "chip");
-
-  const shortcuts = [...actions.querySelectorAll<HTMLButtonElement>("button")];
-  if (shortcuts[0]) {
-    shortcuts[0].style.display = "none";
-    actions.prepend(button("打開場佈預覽", previewQuickStart, "chip"));
-  }
-  if (shortcuts[1]) shortcuts[1].textContent = "打開排地墊";
-  if (shortcuts[2]) shortcuts[2].textContent = "打開動線";
-  if (shortcuts[3]) shortcuts[3].textContent = "打開檢查";
 
   previewBar.append(
     el("div", { class: "agent-sheet__preview-label", text: "預覽就緒 — 看畫布上的結果" }),

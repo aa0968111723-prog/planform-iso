@@ -61,8 +61,9 @@ for (const vp of VIEWPORTS) {
         expect(leftVisible).toBe(false);
         expect(rightVisible).toBe(false);
         expect(navVisible).toBe(true);
-        // All five workflows live in the bottom navigation.
-        await expect(page.locator(".bottomnav .navbtn")).toHaveCount(5);
+        // The four primary workflows live in the bottom navigation
+        // (檢查 folds into 分享 as the pre-export checklist).
+        await expect(page.locator(".bottomnav .navbtn")).toHaveCount(4);
       }
     });
 

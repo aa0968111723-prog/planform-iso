@@ -45,8 +45,12 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") store.flushAutosave();
 });
 
-// Browser-test handle is opt-in even in a production bundle.
-const e2eEnabled = new URLSearchParams(location.search).has("e2e") || import.meta.env.VITE_E2E === "true";
+// Browser-test handle: always on in dev (dev builds never ship, and the
+// whole e2e suite depends on it), opt-in via ?e2e on a production bundle.
+const e2eEnabled =
+  import.meta.env.DEV ||
+  new URLSearchParams(location.search).has("e2e") ||
+  import.meta.env.VITE_E2E === "true";
 if (e2eEnabled) {
   (window as unknown as { planform?: unknown }).planform = {
     app,
