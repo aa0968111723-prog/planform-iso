@@ -10,20 +10,24 @@ import { assetDef } from "../core/assets";
 import { catalogFromProject } from "../core/migrate";
 import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
 import { calibrationComplete, venueNeedsCalibration, type Project, type SceneObject } from "../core/model";
-import { groupMembers, memberLabel } from "../core/arrays";
+import { groupFootprint, groupMembers, memberLabel } from "../core/arrays";
 
 import { doorSweep, facingVec, rectCorners } from "../core/placement";
 
 const NEUTRAL_STROKE = "#334155";
 const TEXT = "#0f172a";
+let activePageSize: PageSize = "a4";
 
 /** Every canvas text call goes through this so CJK never falls back to tofu. */
 function font(spec: string): string {
-  return `${spec} system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
+  const adjusted = activePageSize === "phone"
+    ? spec.replace(/(\d+(?:\.\d+)?)px/g, (_, value: string) => `${Math.max(28, Number(value))}px`)
+    : spec;
+  return `${adjusted} system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
 }
 
 export type PlanPreset = "full" | "mats" | "route" | "zones" | "staff" | "partner" | "inventory";
-export type PageSize = "a4" | "a3";
+export type PageSize = "a4" | "a3" | "phone";
 export type PageOrientation = "landscape" | "portrait";
 
 /** Partner-role filter — same taxonomy as Partner Mode (core/partner.ts). */
@@ -101,6 +105,7 @@ const PRESET_TITLE: Record<PlanPreset, string> = {
 interface Xform { X: (wx: number) => number; Y: (wz: number) => number; s: number }
 
 function pageDims(page: PageSize, orientation: PageOrientation): { w: number; h: number } {
+  if (page === "phone") return { w: 1080, h: 1920 };
   const long = page === "a3" ? 1980 : 1400;
   const short = Math.round(long / 1.4142);
   return orientation === "portrait" ? { w: short, h: long } : { w: long, h: short };
@@ -175,6 +180,7 @@ function contentBounds(project: Project): Bounds {
 
 export function renderConstructionPlan(project: Project, options?: Partial<PlanOptions>): string {
   const opt = { ...DEFAULT_OPTIONS, ...options };
+  activePageSize = opt.page;
   if (opt.preset === "inventory") return renderInventorySheet(project, opt);
   project = applyRoleFilter(project, opt.roleFilter, opt.simplify);
   const bounds = contentBounds(project);
@@ -186,9 +192,10 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const worldH = maxZ - minZ;
 
   const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
-  const pad = 56;
+  const phone = opt.page === "phone";
+  const pad = phone ? 48 : 56;
   const notes = opt.extraNotes?.slice(0, 6) ?? [];
-  const headerH = 86 + (notes.length ? notes.length * 21 + 8 : 0);
+  const headerH = phone ? 132 + (notes.length ? notes.length * 36 + 10 : 0) : 86 + (notes.length ? notes.length * 21 + 8 : 0);
 
   // Size the footer from real content so the legend never collides with the
   // scale bar or runs off the page.
@@ -201,7 +208,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const invPerRow = Math.max(1, Math.floor((cw / 2 - 80) / invColW));
   const invRows = Math.ceil(invLines.length / invPerRow) || 1;
   const footerRows = Math.max(legendRows, invRows);
-  const footerH = 30 + 26 + footerRows * 30 + 48;
+  const footerH = phone ? 74 : 30 + 26 + footerRows * 30 + 48;
 
   const regionW = cw - pad * 2;
   const regionH = ch - headerH - footerH;
@@ -226,7 +233,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const showRouteBadges = emphasizeRoutes || opt.preset === "staff";
   const emphasizeZones = opt.preset === "zones" || opt.preset === "partner";
   const showTilesFaint = opt.preset !== "full";
-  const fadeFurniture = opt.preset === "route" || opt.preset === "staff" || opt.preset === "zones";
+  const fadeFurniture = opt.preset === "route" || opt.preset === "staff" || opt.preset === "zones" || opt.preset === "mats";
 
   drawFloors(ctx, project, t);
   withAlpha(ctx, showTilesFaint ? 0.4 : 1, () => drawTiles(ctx, project, t, minX, minZ, maxX, maxZ));
@@ -236,10 +243,12 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
     // Furniture + fixtures.
     for (const o of project.objects) {
       if (o.hidden) continue;
-      const fade = fadeFurniture && (o.kind === "table" || o.kind === "chair");
+      const fade = opt.preset === "mats"
+        ? o.kind !== "door" && o.kind !== "screen"
+        : fadeFurniture && (o.kind === "table" || o.kind === "chair");
       withAlpha(ctx, fade ? 0.35 : 1, () => drawObject(ctx, o, t, opt.preset, project));
     }
-    drawGroups(ctx, project, t, opt.preset === "mats" || opt.preset === "full");
+    drawGroups(ctx, project, t, opt.preset === "mats" || opt.preset === "full", opt.preset === "mats");
   } else {
     // Route preset: keep the path readable while retaining the physical
     // landmarks that explain where a route actually ends.
@@ -268,17 +277,21 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   if (notes.length) {
     ctx.fillStyle = "#334155";
     ctx.font = font("16px");
-    let ny = 88;
+    let ny = phone ? 132 : 88;
     for (const line of notes) {
       ctx.fillText(line, 24, ny);
-      ny += 21;
+      ny += phone ? 36 : 21;
     }
   }
   const footerY = ch - footerH + 26;
-  drawLegend(ctx, legendEntries, footerY, legendPerRow, legendColW);
-  if (opt.inventory) drawInventory(ctx, invLines, footerY, cw, invPerRow, invColW);
+  if (phone) {
+    drawPhoneFooter(ctx, project, cw, ch, opt.preset);
+  } else {
+    drawLegend(ctx, legendEntries, footerY, legendPerRow, legendColW);
+    if (opt.inventory) drawInventory(ctx, invLines, footerY, cw, invPerRow, invColW);
+  }
   drawCalibrationFooter(ctx, project, cw, ch);
-  drawScaleBar(ctx, t, ch - 26, pad, cw);
+  if (!phone) drawScaleBar(ctx, t, ch - 26, pad, cw);
 
   return canvas.toDataURL("image/png");
 }
@@ -286,6 +299,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
 /** 物資清單圖 — the item list is the page, with a small locator plan. */
 function renderInventorySheet(project: Project, opt: PlanOptions): string {
   const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
+  const phone = opt.page === "phone";
   const scale = Math.max(1, opt.scale);
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(cw * scale);
@@ -303,9 +317,9 @@ function renderInventorySheet(project: Project, opt: PlanOptions): string {
 
   ctx.fillStyle = TEXT;
   ctx.font = font("700 18px");
-  ctx.fillText("物資數量", 32, 116);
+  ctx.fillText("物資數量", 32, phone ? 132 : 116);
   ctx.font = font("400 16px");
-  let y = 148;
+  let y = phone ? 176 : 148;
   if (!lines.length) {
     ctx.fillStyle = "#64748b";
     ctx.fillText("目前沒有任何物資 — 回到「場佈」放入桌椅、地墊或報到桌。", 32, y);
@@ -334,13 +348,13 @@ function renderInventorySheet(project: Project, opt: PlanOptions): string {
 
   if (zoneLines.length) {
     ctx.font = font("700 18px");
-    ctx.fillText("功能區", cw / 2 + 20, 116);
+    ctx.fillText("功能區", phone ? 32 : cw / 2 + 20, phone ? Math.min(ch - 340, y + 48) : 116);
     ctx.font = font("400 16px");
-    let zy = 148;
+    let zy = phone ? Math.min(ch - 300, y + 84) : 148;
     for (const z of zoneLines) {
-      ctx.fillText(`${z.icon} ${z.name}${z.count ? ` · ${z.count} 人` : ""}`, cw / 2 + 20, zy);
+      ctx.fillText(`${z.icon} ${z.name}${z.count ? ` · ${z.count} 人` : ""}`, phone ? 32 : cw / 2 + 20, zy);
       zy += 30;
-      if (zy > ch / 2) break;
+      if (zy > (phone ? ch - 240 : ch / 2)) break;
     }
   }
 
@@ -348,12 +362,14 @@ function renderInventorySheet(project: Project, opt: PlanOptions): string {
   const miniW = Math.round(cw * 0.42);
   const miniH = Math.round(ch * 0.4);
   const mini = renderMiniPlan(project, miniW, miniH);
-  ctx.drawImage(mini, cw - miniW - 32, ch - miniH - 40, miniW, miniH);
+  ctx.drawImage(mini, phone ? cw - miniW - 32 : cw - miniW - 32, ch - miniH - 40, miniW, miniH);
+  if (phone) drawPhoneFooter(ctx, project, cw, ch, "inventory");
   drawCalibrationFooter(ctx, project, cw, ch);
   return canvas.toDataURL("image/png");
 }
 
 function drawCalibrationFooter(ctx: CanvasRenderingContext2D, project: Project, width: number, height: number): void {
+  if (activePageSize === "phone") return;
   const text = calibrationFooterText(project);
   if (!text) return;
   ctx.fillStyle = "#b45309";
@@ -361,6 +377,16 @@ function drawCalibrationFooter(ctx: CanvasRenderingContext2D, project: Project, 
   ctx.textAlign = "right";
   ctx.fillText(text, width - 24, height - 10);
   ctx.textAlign = "left";
+}
+
+function drawPhoneFooter(ctx: CanvasRenderingContext2D, project: Project, width: number, height: number, preset: PlanPreset): void {
+  ctx.fillStyle = "#e2e8f0";
+  ctx.fillRect(0, height - 74, width, 74);
+  ctx.fillStyle = TEXT;
+  ctx.font = font("700 20px");
+  const calibration = calibrationFooterText(project);
+  const text = `${PRESET_TITLE[preset]} · 圖例精簡 · 地磚 ${Math.round(project.tile.width * 100)}×${Math.round(project.tile.depth * 100)} cm · 1 m 比例尺${calibration ? ` · ${calibration}` : ""}`;
+  ctx.fillText(fitText(ctx, text, width - 48), 24, height - 28);
 }
 
 /** Bare-bones top view used as a locator thumbnail (no header/footer). */
@@ -426,6 +452,7 @@ function drawTiles(ctx: CanvasRenderingContext2D, p: Project, t: Xform, minX: nu
 }
 
 function drawZones(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emphasize = false): void {
+  const placed: { x: number; y: number; w: number; h: number }[] = [];
   for (const z of p.zones) {
     if (z.hidden) continue;
     const x = t.X(z.x - z.width / 2), y = t.Y(z.z - z.depth / 2), w = z.width * t.s, h = z.depth * t.s;
@@ -437,9 +464,19 @@ function drawZones(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emphasiz
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
     ctx.fillStyle = TEXT;
-    ctx.font = font("700 20px");
+    ctx.font = font("700 34px");
     const label = `${z.icon ? `${z.icon} ` : ""}${z.name}`;
-    ctx.fillText(label, x + 6, y + (emphasize ? 22 : 18));
+    const labelW = Math.min(Math.max(180, w - 12), Math.max(180, t.s * 4.5));
+    const lineH = activePageSize === "phone" ? 42 : 30;
+    let labelY = y + (emphasize ? lineH : lineH - 4);
+    const labelH = lineH;
+    while (placed.some((r) => x + 6 < r.x + r.w && x + 6 + labelW > r.x && labelY - labelH < r.y + r.h && labelY > r.y)) {
+      const above = labelY - lineH;
+      const below = labelY + lineH;
+      labelY = above - labelH > 6 ? above : below;
+    }
+    ctx.fillText(fitText(ctx, label, labelW), x + 6, labelY);
+    placed.push({ x: x + 6, y: labelY - labelH, w: labelW, h: labelH });
   }
 }
 
@@ -501,18 +538,20 @@ function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, pre
   }
 }
 
-function drawGroups(ctx: CanvasRenderingContext2D, p: Project, t: Xform, numbered: boolean): void {
+function drawGroups(ctx: CanvasRenderingContext2D, p: Project, t: Xform, numbered: boolean, seatMap = false): void {
   for (const g of p.groups) {
     if (g.hidden) continue;
     if (isFieldMatGroup(g)) {
-      drawFieldGroup(ctx, g, t);
+      drawFieldGroup(ctx, g, t, seatMap);
       continue;
     }
     const dense = g.rows * g.cols > 60; // hide labels when too dense to read
-    for (const m of groupMembers(g)) {
-      drawRectAt(ctx, m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg, t, assetDef(g.sourceKind).color,
-        numbered && !dense ? memberLabel(g, m.row, m.col) : undefined);
-    }
+    withAlpha(ctx, seatMap ? 0.28 : 1, () => {
+      for (const m of groupMembers(g)) {
+        drawRectAt(ctx, m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg, t, assetDef(g.sourceKind).color,
+          numbered && !dense ? memberLabel(g, m.row, m.col) : undefined);
+      }
+    });
   }
 }
 
@@ -520,7 +559,7 @@ function isFieldMatGroup(g: Project["groups"][number]): boolean {
   return g.sourceKind === "mat" && Math.abs(g.itemWidth - 0.6) < 1e-6 && Math.abs(g.itemDepth - 0.6) < 1e-6;
 }
 
-function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][number], t: Xform): void {
+function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][number], t: Xform, seatMap = false): void {
   const points = groupMembers(g).flatMap((m) => rectCorners(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
   if (!points.length) return;
   const minX = Math.min(...points.map((p) => p.x));
@@ -537,8 +576,25 @@ function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][numb
   ctx.strokeRect(x, y, w, h);
   ctx.setLineDash([]);
 
-  const label = `${g.name || "巧拼區塊"} · ${g.cols}×${g.rows}・${g.rows * g.cols} 片`;
-  ctx.font = font("700 20px");
+  if (seatMap) {
+    const rows = new Map<number, ReturnType<typeof groupMembers>[number]>();
+    for (const member of groupMembers(g)) {
+      drawRectAt(ctx, member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg, t, color, undefined, 0.08, 2.5);
+      if (!rows.has(member.row)) rows.set(member.row, member);
+    }
+    ctx.fillStyle = TEXT;
+    ctx.font = font("700 18px");
+    ctx.textAlign = "right";
+    for (const [row, member] of rows) {
+      ctx.fillText(`${g.numberPrefix || "A"}${row + 1}`, t.X(member.x - g.itemWidth * 0.7), t.Y(member.z) + 6);
+    }
+    ctx.textAlign = "left";
+    ctx.font = font("600 16px");
+    ctx.fillText("一人約 1 格寬 × 1.5 格深", x, y + h + 28);
+  }
+
+  const label = `${g.name || "巧拼區塊"} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`;
+  ctx.font = font("700 22px");
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const labelX = x + w / 2, labelY = y + h / 2;
@@ -548,19 +604,23 @@ function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][numb
   ctx.strokeText(fitText(ctx, label, Math.max(160, w - 16)), labelX, labelY);
   ctx.fillStyle = TEXT;
   ctx.fillText(fitText(ctx, label, Math.max(160, w - 16)), labelX, labelY);
+  if (seatMap) {
+    ctx.font = font("600 16px");
+    ctx.fillText(`${groupFootprint(g).totalWidth.toFixed(1)} × ${groupFootprint(g).totalDepth.toFixed(1)} m`, labelX, labelY + 30);
+  }
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
 }
 
-function drawRectAt(ctx: CanvasRenderingContext2D, cx: number, cz: number, w: number, d: number, rot: number, t: Xform, color: string, label?: string): void {
+function drawRectAt(ctx: CanvasRenderingContext2D, cx: number, cz: number, w: number, d: number, rot: number, t: Xform, color: string, label?: string, fillAlpha = 0.5, lineWidth = 1.5): void {
   const corners = rectCorners(cx, cz, w, d, rot).map((c) => ({ x: t.X(c.x), y: t.Y(c.z) }));
   ctx.beginPath();
   ctx.moveTo(corners[0].x, corners[0].y);
   for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
   ctx.closePath();
-  ctx.fillStyle = hexA(color, 0.5);
+  ctx.fillStyle = hexA(color, fillAlpha);
   ctx.strokeStyle = NEUTRAL_STROKE;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = lineWidth;
   ctx.fill();
   ctx.stroke();
   if (label) {

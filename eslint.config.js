@@ -22,9 +22,12 @@ export default tseslint.config(
   },
   {
     // Node utility scripts drive a real browser, so both worlds apply.
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.{mjs,cjs}"],
     languageOptions: {
       globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
 );

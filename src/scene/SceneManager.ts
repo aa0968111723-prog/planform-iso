@@ -30,7 +30,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { AssetCatalog } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
 import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
-import { groupMembers } from "../core/arrays";
+import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
@@ -132,7 +132,7 @@ export class SceneManager {
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
   private stationLabels = new Map<string, TextLabel>();
   private bottleneckLabels = new Map<string, TextLabel>();
-  private arrayNodes = new Map<string, { mesh: InstancedMesh; sig: string }>();
+  private arrayNodes = new Map<string, { mesh: InstancedMesh; overlay: Group; sig: string }>();
   private zoneNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private measureNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
@@ -428,15 +428,43 @@ export class SceneManager {
     clearGroup(this.floorGroup);
     clearGroup(this.tileGroup);
     for (const area of [project.classroom, project.corridor]) {
+      const areaGroup = new Group();
       const floor = new Mesh(
         new PlaneGeometry(area.length, area.width),
-        new MeshStandardMaterial({ color: area.id === "classroom" ? 0x243040 : 0x1c2734, roughness: 1, side: DoubleSide }),
+        new MeshStandardMaterial({ color: area.id === "classroom" ? 0x334155 : 0x172033, roughness: 1, side: DoubleSide }),
       );
       floor.rotation.x = -Math.PI / 2;
       floor.position.set(area.x + area.length / 2, 0, area.z + area.width / 2);
-      this.floorGroup.add(floor);
+      areaGroup.add(floor);
+      areaGroup.add(this.buildAreaWalls(area));
+      const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
+      label.set(area.name, area.id === "classroom" ? "#e2e8f0" : "#bae6fd");
+      label.sprite.scale.set(1.8, 0.42, 1);
+      label.sprite.position.set(area.x + area.length / 2, 0.14, area.z + area.width / 2);
+      areaGroup.add(label.sprite);
+      this.floorGroup.add(areaGroup);
     }
     this.tileGroup.add(this.buildTileGrid(project));
+  }
+
+  /** Raised, thick wall rails make an empty classroom and its corridor legible. */
+  private buildAreaWalls(area: Project["classroom"]): Group {
+    const walls = new Group();
+    const material = new MeshBasicMaterial({ color: area.id === "classroom" ? 0xf8fafc : 0x7dd3fc });
+    const thickness = 0.1;
+    const height = 0.12;
+    const rails = [
+      [area.length, thickness, area.x + area.length / 2, area.z],
+      [area.length, thickness, area.x + area.length / 2, area.z + area.width],
+      [thickness, area.width, area.x, area.z + area.width / 2],
+      [thickness, area.width, area.x + area.length, area.z + area.width / 2],
+    ] as const;
+    for (const [width, depth, x, z] of rails) {
+      const wall = new Mesh(new BoxGeometry(width, height, depth), material);
+      wall.position.set(x, height / 2, z);
+      walls.add(wall);
+    }
+    return walls;
   }
 
   private buildTileGrid(project: Project): Object3D {
@@ -525,12 +553,24 @@ export class SceneManager {
     for (const g of project.groups) {
       seen.add(g.id);
       const members = groupMembers(g);
-      const sig = `${g.sourceKind}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
+      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
       let entry = this.arrayNodes.get(g.id);
       if (!entry || entry.sig !== sig) {
-        if (entry) { this.arrayGroupRoot.remove(entry.mesh); entry.mesh.geometry.dispose(); }
+        if (entry) {
+          this.arrayGroupRoot.remove(entry.mesh);
+          this.arrayGroupRoot.remove(entry.overlay);
+          entry.mesh.geometry.dispose();
+          disposeObject(entry.overlay);
+        }
         const geom = buildMergedGeometry(g.sourceKind, { width: g.itemWidth, depth: g.itemDepth, height: g.itemHeight });
         const material = assetInstanceMaterial(g.sourceKind).clone();
+        if (isFieldMatGroup(g)) {
+          // The individual meshes remain pickable, but the field itself reads
+          // as a plan rather than a single purple slab.
+          material.transparent = true;
+          material.opacity = 0.08;
+          material.depthWrite = false;
+        }
         const mesh = new InstancedMesh(geom, material, Math.max(members.length, 1));
         mesh.count = members.length;
         mesh.userData = { type: "group", id: g.id };
@@ -541,24 +581,63 @@ export class SceneManager {
           mesh.setMatrixAt(i, dummy.matrix);
         }
         mesh.instanceMatrix.needsUpdate = true;
+        const overlay = this.buildArrayOverlay(g, members);
         this.arrayGroupRoot.add(mesh);
-        entry = { mesh, sig };
+        this.arrayGroupRoot.add(overlay);
+        entry = { mesh, overlay, sig };
         this.arrayNodes.set(g.id, entry);
       }
       entry.mesh.visible = !g.hidden;
+      entry.overlay.visible = !g.hidden;
     }
     for (const [id, entry] of this.arrayNodes) {
       if (!seen.has(id)) {
-        this.arrayGroupRoot.remove(entry.mesh); entry.mesh.geometry.dispose();
+        this.arrayGroupRoot.remove(entry.mesh);
+        this.arrayGroupRoot.remove(entry.overlay);
+        entry.mesh.geometry.dispose();
+        disposeObject(entry.overlay);
         this.arrayNodes.delete(id);
       }
     }
+  }
+
+  /** Editor presentation for square mat fields: a 60 cm grid plus one clear label. */
+  private buildArrayOverlay(g: Project["groups"][number], members: ReturnType<typeof groupMembers>): Group {
+    const overlay = new Group();
+    if (!isFieldMatGroup(g) || !members.length) return overlay;
+
+    const positions: number[] = [];
+    for (const member of members) {
+      const r = member.rotationDeg * D2R;
+      const cos = Math.cos(r), sin = Math.sin(r);
+      const hw = g.itemWidth / 2, hd = g.itemDepth / 2;
+      const corners = [
+        [-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd],
+      ].map(([x, z]) => ({ x: member.x + x * cos - z * sin, z: member.z + x * sin + z * cos }));
+      for (let i = 0; i < corners.length; i++) {
+        const a = corners[i], b = corners[(i + 1) % corners.length];
+        positions.push(a.x, 0.12, a.z, b.x, 0.12, b.z);
+      }
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    overlay.add(new LineSegments(geo, new LineBasicMaterial({ color: 0xf5d0fe, transparent: true, opacity: 0.95 })));
+
+    const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
+    const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
+    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, "#f8fafc");
+    label.sprite.scale.set(3.25, 0.52, 1);
+    const center = groupCenter(g);
+    label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
+    overlay.add(label.sprite);
+    return overlay;
   }
 
   private syncZones(project: Project): void {
     this.zoneGroup.visible = this.layersState.zones;
     const partner = this.partner;
     const seen = new Set<string>();
+    const placedLabels: { x: number; z: number; width: number; depth: number; y: number }[] = [];
     for (const zone of project.zones) {
       seen.add(zone.id);
       // Partner labels are drawn at a higher texture resolution, so the mode
@@ -580,6 +659,14 @@ export class SceneManager {
       fillMat.color.set(zone.color);
       edgeMat.color.set(zone.color);
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
+      let labelY = partner ? 0.8 : 0.5;
+      while (placedLabels.some((other) =>
+        Math.abs(zone.x - other.x) < (zone.width + other.width) / 2 &&
+        Math.abs(zone.z - other.z) < (zone.depth + other.depth) / 2 &&
+        Math.abs(labelY - other.y) < 0.5
+      )) labelY += 0.55;
+      entry.label.sprite.position.y = labelY;
+      placedLabels.push({ x: zone.x, z: zone.z, width: zone.width, depth: zone.depth, y: labelY });
       if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the
         // rest stay as faint context so the room still makes sense.
@@ -1216,6 +1303,10 @@ export function planBounds(project: Project): { minX: number; maxX: number; minZ
 interface Route2 { id: string; color: string; type?: string; points: { x: number; z: number }[] }
 
 function round(n: number): number { return Math.round(n * 1000) / 1000; }
+
+function isFieldMatGroup(g: Project["groups"][number]): boolean {
+  return g.sourceKind === "mat" && Math.abs(g.itemWidth - 0.6) < 1e-6 && Math.abs(g.itemDepth - 0.6) < 1e-6;
+}
 
 function measureText(a: { x: number; z: number }, b: { x: number; z: number }): string {
   const m = Math.hypot(b.x - a.x, b.z - a.z);
