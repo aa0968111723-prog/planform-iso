@@ -135,15 +135,40 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   const needs = config.needs;
   const backWallZ = c.z + c.width; // entrance side (door faces the corridor)
 
-  // Entrance-side zones form one non-overlapping chain along the back wall,
-  // starting at the door and walking toward the room interior (−X):
-  // 報到 → 收費 → 鞋子 → 背包, rear edges aligned 0.35 m off the wall.
+  // E310's real flow does check-in/payment in the corridor BEFORE the door
+  // (spec workflow: 走廊→排隊→報到→收費→進教室) — the honest 12×9 room cannot
+  // hold 60 seats plus an indoor service chain without violating its own
+  // aisle rules. Other venues keep the indoor rear-wall chain.
+  const corridorService = project.venuePresetId === "venue:tku-e310";
+  if (corridorService && (needs.checkin || needs.payment)) {
+    const corr = project.corridor;
+    const outerZ = corr.z + corr.width - 0.6; // hug the outer corridor wall
+    const service: ZoneType[] = [];
+    if (needs.checkin) service.push("registration");
+    if (needs.payment) service.push("payment");
+    // Walk order along the corridor toward the door: checkin then payment.
+    let sx = entry.x - 1.2;
+    for (const type of [...service].reverse()) {
+      const d = ZONE_DEFAULTS[type];
+      const zone = makeZone(type, clamp(sx - d.width / 2, corr.x + d.width / 2 + 0.2, corr.x + corr.length - d.width / 2 - 0.2), outerZ);
+      zone.depth = 1.2;
+      project.zones.push(zone);
+      // Desks face the walkway (−Z, toward the classroom-side wall).
+      if (type === "registration") project.objects.push(deskObject("builtin:regTable", zone.x, zone.z, 180));
+      if (type === "payment") project.objects.push(deskObject("builtin:payment-desk", zone.x, zone.z, 180));
+      sx = zone.x - d.width / 2 - 0.3 - d.width / 2;
+    }
+  }
+
+  // Remaining entrance-side zones form one non-overlapping chain along the
+  // back wall, starting clear of the door swing and walking toward the room
+  // interior (−X); rear edges aligned 0.35 m off the wall.
   const chain: ZoneType[] = [];
-  if (needs.checkin) chain.push("registration");
-  if (needs.payment) chain.push("payment");
+  if (!corridorService && needs.checkin) chain.push("registration");
+  if (!corridorService && needs.payment) chain.push("payment");
   if (needs.shoe) chain.push("shoe");
   if (needs.backpack) chain.push("backpack");
-  let cursor = Math.min(entry.x + 1.2, c.x + c.length - 0.2);
+  let cursor = Math.min(entry.x - 0.95, c.x + c.length - 0.2);
   for (const type of chain) {
     const d = ZONE_DEFAULTS[type];
     const centerX = inX(cursor - d.width / 2, d.width / 2);
@@ -166,10 +191,15 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   }
   if (needs.life) {
     const d = ZONE_DEFAULTS.life;
-    const lifeZ = project.venuePresetId === "venue:tku-e310"
-      ? project.corridor.z + project.corridor.width / 2
-      : inZ(backWallZ - d.depth / 2 - 0.35, d.depth / 2);
-    project.zones.push(makeZone("life", inX(c.x + c.length - d.width / 2 - 0.5, d.width / 2), lifeZ));
+    if (corridorService) {
+      // Life crew stages in the corridor past the door, hugging the outer
+      // wall so a walking lane stays clear.
+      const zone = makeZone("life", inX(c.x + c.length - d.width / 2 - 0.5, d.width / 2), project.corridor.z + project.corridor.width - 0.6);
+      zone.depth = 1.2;
+      project.zones.push(zone);
+    } else {
+      project.zones.push(makeZone("life", inX(c.x + c.length - d.width / 2 - 0.5, d.width / 2), inZ(backWallZ - d.depth / 2 - 0.35, d.depth / 2)));
+    }
   }
   if (needs.groups) {
     const d = ZONE_DEFAULTS.group;
@@ -180,9 +210,13 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   if (needs.mats && config.participants > 0) {
     const bounds = areaBounds(c);
     const inset = 0.4;
-    // Reserve a strip for the entrance-side zones, and a deeper front strip
-    // only when a teacher zone actually needs the stage area.
-    const entranceReserve = needs.checkin || needs.payment || needs.shoe || needs.backpack ? 1.9 : 0.6;
+    // Reserve the strip the rear-wall service zones actually occupy plus a
+    // real walking aisle, instead of a hardcoded depth.
+    const rearZones = project.zones.filter((z) =>
+      (z.type === "registration" || z.type === "payment" || z.type === "shoe" || z.type === "backpack") &&
+      z.z <= backWallZ && z.z > c.z + c.width / 2);
+    const rearFront = rearZones.length ? Math.min(...rearZones.map((z) => z.z - z.depth / 2)) : backWallZ - 0.2;
+    const entranceReserve = Math.max(0.6, backWallZ - rearFront + 0.95);
     // Reserve exactly what the front actually occupies (stage platform and/or
     // the teacher strip), instead of a hardcoded depth.
     const teacherZone = project.zones.find((z) => z.type === "meditation");
@@ -250,16 +284,28 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
     }
   }
 
-  // Starter entry route: door → check-in → shoe → to the front edge of the
-  // seating area (never straight across the mats).
-  const routeStops: { x: number; z: number }[] = [{ x: entry.x, z: inZ(backWallZ - 0.4, 0) }];
+  // Starter entry route — follows the actual service order and never cuts
+  // across the mats. Corridor service: 報到 → 收費 → 門 → 鞋 → 座區前緣.
+  const routeStops: { x: number; z: number }[] = [];
   const checkinZone = project.zones.find((z) => z.type === "registration");
-  if (checkinZone) routeStops.push({ x: checkinZone.x, z: checkinZone.z });
+  const paymentZone = project.zones.find((z) => z.type === "payment");
   const shoeZone = project.zones.find((z) => z.type === "shoe");
+  if (corridorService) {
+    if (checkinZone) routeStops.push({ x: checkinZone.x, z: checkinZone.z });
+    if (paymentZone) routeStops.push({ x: paymentZone.x, z: paymentZone.z });
+    routeStops.push({ x: entry.x, z: backWallZ }); // through the door
+    routeStops.push({ x: entry.x, z: inZ(backWallZ - 0.5, 0) });
+  } else {
+    routeStops.push({ x: entry.x, z: inZ(backWallZ - 0.4, 0) });
+    if (checkinZone) routeStops.push({ x: checkinZone.x, z: checkinZone.z });
+  }
   if (shoeZone) routeStops.push({ x: shoeZone.x, z: shoeZone.z });
-  const seatingEdgeZ = needs.mats
-    ? c.z + c.width - ((needs.checkin || needs.payment || needs.shoe || needs.backpack ? 1.9 : 0.6) + 0.4)
-    : c.z + c.width / 2;
+  const fieldGroup = project.groups.find((g) => g.sourceKind === "mat");
+  const seatingEdgeZ = fieldGroup
+    ? fieldGroup.anchorZ + fieldGroup.rows * fieldGroup.itemDepth + 0.3
+    : needs.mats
+      ? c.z + c.width - 2.3
+      : c.z + c.width / 2;
   routeStops.push({ x: c.x + c.length / 2, z: inZ(seatingEdgeZ, 0) });
   if (routeStops.length >= 2) {
     const preset = routePreset("entry");
@@ -364,8 +410,9 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
     { x: entrance.x, z: entrance.z },
     { x: guide.x, z: guide.z },
     { x: queue.x, z: queue.z },
-    { x: door?.x ?? project.classroom.x + project.classroom.length - 1.4, z: door?.z ?? project.classroom.z + project.classroom.width },
     { x: checkinZone.x, z: checkinZone.z },
+    { x: paymentZone.x, z: paymentZone.z },
+    { x: door?.x ?? project.classroom.x + project.classroom.length - 1.4, z: door?.z ?? project.classroom.z + project.classroom.width },
     { x: shoeZone.x, z: shoeZone.z },
     { x: aisleMouthX, z: Math.min(fieldRearZ, project.classroom.z + project.classroom.width - 0.4) },
   ];

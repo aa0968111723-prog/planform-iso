@@ -12,3 +12,7 @@ _audit_grok.md
 _smoke/
 _review_grok.md
 test-results/
+
+# agent working dirs (raw adversarial-test artifacts stay local)
+_grok_round*/
+_lead/

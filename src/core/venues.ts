@@ -110,7 +110,7 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
     // 所有尺寸都掛「待校正」，到現場用地磚／門寬／已知牆距校正。
     note: "工學大樓 3F E310 起點模板；到現場用一塊地磚／門寬／已知牆距 30 秒校正。",
     classroom: { name: "教室", length: 12, width: 9, x: 0, z: 0 },
-    corridor: { name: "走廊", length: 12, width: 2, x: 0, z: 9 },
+    corridor: { name: "走廊", length: 12, width: 2.4, x: 0, z: 9 },
     tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
     fixtures: [
       { kind: "door", areaId: "classroom", edge: "s", offset: 8.6 },

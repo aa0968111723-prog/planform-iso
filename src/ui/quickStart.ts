@@ -130,7 +130,13 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
 
   const renderNeedsStep = (venue: VenuePreset): void => {
     card.innerHTML = "";
-    const needs: QuickStartNeeds = { ...DEFAULT_NEEDS };
+    // E310 exists for one purpose — the club's real events there are lectures
+    // with on-site payment, a teacher zone and a life-crew corner. Default the
+    // ticks (and 60 people below) to that reality instead of a generic 30.
+    const isE310 = venue.id === "venue:tku-e310";
+    const needs: QuickStartNeeds = isE310
+      ? { ...DEFAULT_NEEDS, payment: true, life: true, teacher: true }
+      : { ...DEFAULT_NEEDS };
     let centralAisle = true;
     card.append(el("div", { class: "quickstart__title", text: "這次活動需要什麼？" }));
     card.append(el("p", { class: "hint", text: `場地：${venue.name}（之後可改）` }));
@@ -162,13 +168,16 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
     const countInput = el("input", {
       type: "number",
       class: "field__input",
-      value: "30",
+      value: isE310 ? "60" : "30",
       min: "1",
       max: "300",
       inputmode: "numeric",
     }) as HTMLInputElement;
     countRow.append(countInput);
     card.append(countRow);
+    if (isE310) {
+      card.append(el("p", { class: "hint", text: "已繳／現場繳的人數，之後在「▶ 模擬」裡填就可以。" }));
+    }
 
     const aisleChip = button("✓ 留中央走道", () => {
       centralAisle = !centralAisle;

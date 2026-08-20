@@ -3,6 +3,7 @@ import { applyCalibrationPath } from "../src/core/calibration";
 import { buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS } from "../src/core/quickStart";
 import { groupMembers } from "../src/core/arrays";
 import { calibrationComplete, calibrationPendingLabels } from "../src/core/model";
+import { validateProject } from "../src/core/validation";
 import { generateLayouts } from "../src/core/smartLayout";
 import { calibrationFooterText } from "../src/export/constructionPlan";
 import { runDiscreteEvent } from "../src/core/eventFlow";
@@ -53,6 +54,14 @@ describe("E310 golden venue", () => {
     const bagZone = p.zones.find((z) => z.type === "backpack")!;
     expect(Math.abs(bagTables[0].x - bagZone.x)).toBeLessThanOrEqual(bagZone.width / 2 - 0.9 + 1e-6);
     expect(bagZone.z + bagZone.depth / 2).toBeCloseTo(p.classroom.z + p.classroom.width, 6);
+    // E310 does check-in/payment in the corridor, desks facing the walkway.
+    for (const type of ["registration", "payment"] as const) {
+      const zone = p.zones.find((z) => z.type === type)!;
+      expect(zone.z).toBeGreaterThan(p.classroom.z + p.classroom.width);
+    }
+    const desks = p.objects.filter((o) => o.serviceRole === "checkin" || o.serviceRole === "payment");
+    expect(desks).toHaveLength(2);
+    for (const desk of desks) expect(desk.rotationDeg).toBe(180);
   });
 
   it("one click golden scenario has the 40/20 branch and corridor-first route", () => {
@@ -73,6 +82,12 @@ describe("E310 golden venue", () => {
     expect(result.completed).toBe(60);
     expect(p.routes[0].points[0].z).toBeGreaterThanOrEqual(p.classroom.width);
     expect(p.routes[0].points.some((point) => point.z === p.classroom.width)).toBe(true);
+  });
+
+  it("official golden scenario passes its own field validation with no errors", () => {
+    const p = buildE310GoldenProject(e310);
+    const issues = validateProject(p);
+    expect(issues.filter((issue) => issue.severity === "error")).toEqual([]);
   });
 
   it("each field calibration path updates its field and clears its badge", () => {
