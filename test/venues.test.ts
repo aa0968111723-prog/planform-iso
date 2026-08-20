@@ -31,6 +31,7 @@ describe("venue presets", () => {
       "淡江教室模板",
       "一般矩形教室",
       "空白自訂場地",
+      "E310＋走廊（待現場校正）",
     ]);
     for (const p of BUILTIN_VENUE_PRESETS) {
       expect(p.builtin).toBe(true);
@@ -48,6 +49,19 @@ describe("venue presets", () => {
     expect(screen?.wallAnchor?.edge).toBe("n");
     const issues = validateProject(p);
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("E310 has rear corridor door, front locked platform and lectern", () => {
+    const preset = venuePresetById("venue:tku-e310")!;
+    const p = createProjectFromVenuePreset(preset, "E310");
+    const door = p.objects.find((o) => o.kind === "door");
+    const platform = p.objects.find((o) => o.assetId === "builtin:stage-platform");
+    const lectern = p.objects.find((o) => o.assetId === "builtin:lectern");
+    expect(p.venuePresetId).toBe("venue:tku-e310");
+    expect(door?.wallAnchor).toMatchObject({ areaId: "classroom", edge: "s", offset: 8.6 });
+    expect(platform).toMatchObject({ width: 6, depth: 1.2, height: 0.18, locked: true });
+    expect(lectern).toMatchObject({ width: 0.6, depth: 0.45, height: 1.1, elevation: 0.18 });
+    expect(platform!.z + platform!.depth / 2).toBeCloseTo(1.2);
   });
 
   it("apply keeps existing fixtures instead of duplicating them", () => {

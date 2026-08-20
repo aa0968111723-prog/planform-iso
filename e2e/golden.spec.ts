@@ -218,3 +218,29 @@ test.describe("Golden Flow 3 — 完全自訂（桌機）", () => {
     expect(p2.classroom.length).toBe(12);
   });
 });
+
+test.describe("Golden Flow 4 — E310 演講範例", () => {
+  test.use({ viewport: { width: 1366, height: 1024 } });
+
+  test("一鍵範例 → 模擬 → 匯出含走廊的場刊圖", async ({ page }) => {
+    await openFresh(page);
+    await page.locator(".quickstart__card button", { hasText: "E310 演講範例（60 人）" }).click();
+    await settle(page);
+
+    const p = await probeProject(page);
+    expect(p.name).toBe("E310 演講活動（範例）");
+    expect(p.groups.length).toBeGreaterThan(0);
+    expect(p.routes.map((r) => r.type)).toContain("entry");
+
+    await page.locator(".topbar .chip", { hasText: "動線" }).first().click();
+    await settle(page);
+    await page.locator(".left button", { hasText: "▶ 模擬" }).click();
+    await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible({ timeout: 20_000 });
+
+    await page.locator(".topbar .chip", { hasText: "分享" }).first().click();
+    await settle(page);
+    const download = page.waitForEvent("download");
+    await page.locator(".left button", { hasText: "場佈總覽圖" }).click();
+    expect((await download).suggestedFilename()).toContain("場佈總覽");
+  });
+});

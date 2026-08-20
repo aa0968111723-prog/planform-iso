@@ -8,9 +8,10 @@
  * v4: visual-comm — description, zone icon/capacity, route type + zone links.
  * v5: Asset Catalog — optional assetId / serviceRole; custom catalogExtras.
  * v6: Event Flow — ServiceStation / EventScenario for DES simulation.
+ * v7: E310 venue identity + three independent field-calibration confirmations.
  */
 
-export const PROJECT_VERSION = 6;
+export const PROJECT_VERSION = 7;
 
 export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
@@ -35,6 +36,12 @@ export interface TileConfig {
 export interface Calibration {
   referenceLength: number | null;
   note: string;
+  /** Independent on-site confirmations; missing means not yet confirmed. */
+  confirmed: {
+    tile?: boolean;
+    door?: boolean;
+    room?: boolean;
+  };
 }
 
 export type ObjectKind =
@@ -289,6 +296,8 @@ export interface ProjectCatalogExtra {
 export interface Project {
   version: number;
   name: string;
+  /** Built-in venue identity, retained so honest calibration copy survives reload. */
+  venuePresetId?: string;
   /** Short activity description shown in the team/partner view. */
   description: string;
   classroom: AreaConfig;
@@ -338,7 +347,7 @@ export function createDefaultProject(): Project {
     classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 },
     corridor: { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8 },
     tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
-    calibration: { referenceLength: null, note: "" },
+    calibration: { referenceLength: null, note: "", confirmed: {} },
     zones: [],
     objects: [],
     groups: [],
@@ -351,4 +360,24 @@ export function createDefaultProject(): Project {
     scenarios: [],
     activeScenarioId: null,
   };
+}
+
+export function venueNeedsCalibration(project: Project): boolean {
+  return project.venuePresetId === "venue:tku-e310";
+}
+
+export function calibrationComplete(project: Project): boolean {
+  if (!venueNeedsCalibration(project)) return true;
+  const c = project.calibration.confirmed;
+  return c.tile === true && c.door === true && c.room === true;
+}
+
+export function calibrationPendingLabels(project: Project): string[] {
+  if (!venueNeedsCalibration(project)) return [];
+  const c = project.calibration.confirmed;
+  return [
+    c.tile ? null : "地磚",
+    c.door ? null : "門寬",
+    c.room ? null : "已知距離",
+  ].filter((x): x is string => x !== null);
 }

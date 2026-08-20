@@ -9,7 +9,7 @@
 import { assetDef } from "../core/assets";
 import { catalogFromProject } from "../core/migrate";
 import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
-import type { ObjectKind, Project, SceneObject } from "../core/model";
+import { calibrationComplete, venueNeedsCalibration, type ObjectKind, type Project, type SceneObject } from "../core/model";
 import { groupMembers, memberLabel } from "../core/arrays";
 
 import { doorSweep, facingVec, rectCorners } from "../core/placement";
@@ -28,6 +28,10 @@ export type PageOrientation = "landscape" | "portrait";
 
 /** Partner-role filter — same taxonomy as Partner Mode (core/partner.ts). */
 export type RoleFilter = "checkin" | "payment" | "guide" | "life" | null;
+
+export function calibrationFooterText(project: Project): string {
+  return venueNeedsCalibration(project) && !calibrationComplete(project) ? "尺寸待現場校正" : "";
+}
 
 export interface PlanOptions {
   preset: PlanPreset;
@@ -228,6 +232,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const footerY = ch - footerH + 26;
   drawLegend(ctx, legendEntries, footerY, legendPerRow, legendColW);
   if (opt.inventory) drawInventory(ctx, invLines, footerY, cw, invPerRow, invColW);
+  drawCalibrationFooter(ctx, project, cw, ch);
   drawScaleBar(ctx, t, ch - 26, pad, cw);
 
   return canvas.toDataURL("image/png");
@@ -292,7 +297,18 @@ function renderInventorySheet(project: Project, opt: PlanOptions): string {
   const miniH = Math.round(ch * 0.4);
   const mini = renderMiniPlan(project, miniW, miniH);
   ctx.drawImage(mini, cw - miniW - 32, ch - miniH - 40, miniW, miniH);
+  drawCalibrationFooter(ctx, project, cw, ch);
   return canvas.toDataURL("image/png");
+}
+
+function drawCalibrationFooter(ctx: CanvasRenderingContext2D, project: Project, width: number, height: number): void {
+  const text = calibrationFooterText(project);
+  if (!text) return;
+  ctx.fillStyle = "#b45309";
+  ctx.font = font("700 13px");
+  ctx.textAlign = "right";
+  ctx.fillText(text, width - 24, height - 10);
+  ctx.textAlign = "left";
 }
 
 /** Bare-bones top view used as a locator thumbnail (no header/footer). */

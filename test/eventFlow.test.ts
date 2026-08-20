@@ -190,7 +190,7 @@ describe("createDefaultScenario + migration v6", () => {
       ],
     });
     expect(p.version).toBe(PROJECT_VERSION);
-    expect(p.version).toBe(6);
+    expect(p.version).toBe(7);
     expect(Array.isArray(p.scenarios)).toBe(true);
     expect(p.scenarios).toHaveLength(0);
     expect(p.activeScenarioId).toBeNull();

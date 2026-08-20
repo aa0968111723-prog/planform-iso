@@ -29,6 +29,18 @@ export interface VenueFixture {
   width?: number;
 }
 
+export interface VenueExtraObject {
+  /** Catalog id; variants keep the legacy ObjectKind bucket (usually table). */
+  assetId: string;
+  x: number;
+  z: number;
+  rotationDeg?: number;
+  locked?: boolean;
+  surface?: "floor" | "wall" | "tabletop";
+  elevation?: number;
+  note?: string;
+}
+
 export interface VenueAreaSpec {
   name: string;
   length: number;
@@ -47,6 +59,7 @@ export interface VenuePreset {
   corridor: VenueAreaSpec;
   tile: TileConfig;
   fixtures: VenueFixture[];
+  extraObjects?: VenueExtraObject[];
 }
 
 /**
@@ -89,6 +102,40 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
     tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
     fixtures: [],
   },
+  {
+    id: "venue:tku-e310",
+    name: "E310＋走廊（待現場校正）",
+    builtin: true,
+    // 12 × 9 是從現場照片可數物件（桌椅列數、巧拼格數）推的起點，不是實測 —
+    // 所有尺寸都掛「待校正」，到現場用地磚／門寬／已知牆距校正。
+    note: "工學大樓 3F E310 起點模板；到現場用一塊地磚／門寬／已知牆距 30 秒校正。",
+    classroom: { name: "教室", length: 12, width: 9, x: 0, z: 0 },
+    corridor: { name: "走廊", length: 12, width: 2, x: 0, z: 9 },
+    tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
+    fixtures: [
+      { kind: "door", areaId: "classroom", edge: "s", offset: 8.6 },
+      { kind: "screen", areaId: "classroom", edge: "n", offset: 6 },
+    ],
+    extraObjects: [
+      {
+        assetId: "builtin:stage-platform",
+        x: 6,
+        z: 0.6,
+        locked: true,
+        surface: "floor",
+        note: "合理起點尺寸，待現場校正",
+      },
+      {
+        assetId: "builtin:lectern",
+        x: 4.6,
+        z: 0.6,
+        locked: false,
+        surface: "floor",
+        elevation: 0.18,
+        note: "講台上的合理起點位置，待現場校正",
+      },
+    ],
+  },
 ];
 
 function catalogDims(id: string): { width: number; depth: number; height: number; elevation: number; assetId: string } {
@@ -100,6 +147,29 @@ function catalogDims(id: string): { width: number; depth: number; height: number
     height: entry.dimensions.height,
     elevation: entry.defaultElevation ?? 0,
     assetId: entry.id,
+  };
+}
+
+function extraObjectToObject(extra: VenueExtraObject): SceneObject | null {
+  const dims = catalogDims(extra.assetId);
+  const entry = BUILTIN_CATALOG.find((e) => e.id === extra.assetId);
+  if (!entry) return null;
+  return {
+    id: uid("obj"),
+    kind: entry.kind,
+    x: extra.x,
+    z: extra.z,
+    rotationDeg: extra.rotationDeg ?? entry.defaultFacingDeg,
+    width: dims.width,
+    depth: dims.depth,
+    height: dims.height,
+    locked: extra.locked ?? false,
+    hidden: false,
+    surface: extra.surface ?? "floor",
+    elevation: extra.elevation ?? dims.elevation,
+    note: extra.note,
+    assetId: entry.id,
+    serviceRole: entry.serviceRole,
   };
 }
 
@@ -173,7 +243,18 @@ export function applyVenuePreset(
       const obj = fixtureToObject(fixture, project);
       if (obj) project.objects.push(obj);
     }
+    for (const extra of preset.extraObjects ?? []) {
+      const already = project.objects.some((o) => o.assetId === extra.assetId && !o.hidden);
+      if (!already) {
+        const obj = extraObjectToObject(extra);
+        if (obj) project.objects.push(obj);
+      }
+    }
+    const stage = project.objects.find((o) => o.assetId === "builtin:stage-platform" && !o.hidden);
+    const lectern = project.objects.find((o) => o.assetId === "builtin:lectern" && !o.hidden);
+    if (stage && lectern) lectern.parentId = stage.id;
   }
+  project.venuePresetId = preset.id;
 }
 
 /** Fresh project from a preset (Quick Start path). */
@@ -212,6 +293,12 @@ export function venuePresetFromProject(project: Project, name: string): VenuePre
     x: project.corridor.x,
     z: project.corridor.z,
   };
+  const extraObjects: VenueExtraObject[] = project.objects
+    .filter((o) => (o.assetId === "builtin:stage-platform" || o.assetId === "builtin:lectern") && !o.hidden)
+    .map((o) => ({
+      assetId: o.assetId!, x: o.x, z: o.z, rotationDeg: o.rotationDeg,
+      locked: o.locked, surface: o.surface, elevation: o.elevation, note: o.note,
+    }));
   return {
     id: uid("venue"),
     name,
@@ -221,6 +308,7 @@ export function venuePresetFromProject(project: Project, name: string): VenuePre
     corridor,
     tile: { ...project.tile },
     fixtures,
+    extraObjects: extraObjects.length ? extraObjects : undefined,
   };
 }
 
@@ -249,7 +337,7 @@ export function listUserVenuePresets(): VenuePreset[] {
       (p): p is VenuePreset =>
         !!p && typeof p === "object" && typeof (p as VenuePreset).name === "string" &&
         !!(p as VenuePreset).classroom && !!(p as VenuePreset).tile,
-    ).map((p) => ({ ...p, builtin: false, fixtures: Array.isArray(p.fixtures) ? p.fixtures : [] }));
+    ).map((p) => ({ ...p, builtin: false, fixtures: Array.isArray(p.fixtures) ? p.fixtures : [], extraObjects: Array.isArray(p.extraObjects) ? p.extraObjects : [] }));
   } catch {
     return [];
   }

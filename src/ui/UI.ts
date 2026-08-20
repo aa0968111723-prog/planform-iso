@@ -1,6 +1,6 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import type { MeasurementType, RouteType, ViewName } from "../core/model";
+import { calibrationPendingLabels, type MeasurementType, type RouteType, type ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
 import { ROUTE_PRESETS } from "../core/routes";
 import { issueCounts, type Severity } from "../core/validation";
@@ -476,6 +476,11 @@ export class UI {
 
   private venuePresetSection(): HTMLElement {
     const body: HTMLElement[] = [];
+    const pending = calibrationPendingLabels(this.app.store.getState());
+    if (pending.length) {
+      body.push(el("div", { class: "readout readout--warn", text: `⚠ 待校正：${pending.join("、")}` }),
+        button("現場校正", () => { this.app.startCalibration(); }, "btn btn--primary"));
+    }
     const apply = (id: string) => {
       if (window.confirm("套用場地模板會改變教室尺寸與地磚（物件會保留、可復原）。繼續？")) {
         this.app.applyVenuePresetById(id);
@@ -586,8 +591,11 @@ export class UI {
     actual.addEventListener("input", compare);
     compare();
 
+    const doorInput = el("input", { type: "number", step: "1", class: "field__input", placeholder: "門寬 (cm)" }) as HTMLInputElement;
+    const pending = calibrationPendingLabels(s);
     const body: HTMLElement[] = [
-      el("p", { class: "hint", text: "① 在畫布點兩個已知距離的端點 ② 輸入實際長度 ③ 選擇套用方式。" }),
+      ...(pending.length ? [el("div", { class: "readout readout--warn", text: `待校正：${pending.join("、")}` })] : [el("div", { class: "readout", text: "✓ 三項尺寸都已校正" })]),
+      el("p", { class: "hint", text: "三個選項各自完成：量地磚、量門寬，或在圖上量一段已知距離。" }),
       this.app.session.mode === "calibrate"
         ? button("重新選點（校正中…）", () => this.startCalibrationFromSheet(), "btn btn--primary")
         : button("在畫布選兩點", () => this.startCalibrationFromSheet()),
@@ -600,6 +608,11 @@ export class UI {
         button("套用到地磚", () => this.applyCalib("tile", actual), "btn btn--ghost"),
         button("套用到教室長", () => this.applyCalib("classroom-length", actual), "btn btn--ghost"),
       ]),
+      el("div", { class: "subhead", text: "量門寬" }),
+      el("div", { class: "row" }, [
+        doorInput,
+        button("更新門寬", () => this.applyCalib("door", doorInput)),
+      ]),
     );
     return section("現場校正", body);
   }
@@ -610,7 +623,7 @@ export class UI {
     if (this.compact) this.setSheet("none");
   }
 
-  private applyCalib(action: "record" | "tile" | "classroom-length", input: HTMLInputElement): void {
+  private applyCalib(action: "record" | "tile" | "door" | "classroom-length", input: HTMLInputElement): void {
     const cm = parseFloat(input.value);
     if (!cm) { this.showToast("請先輸入實際長度"); return; }
     this.app.applyCalibration(action, cm / 100);
@@ -619,14 +632,23 @@ export class UI {
   /** 排地墊 options: 直向/橫向 and 相黏（gap 0）/留縫. */
   private matOrient: "v" | "h" = "v";
   private matSnug = true;
+  private matMode: "individual" | "field" = "individual";
+  /** Venue the matMode default was last derived from — manual choices stick until the venue changes. */
+  private matModeVenue: string | undefined;
 
-  private matOpts(): { matWidth: number; matDepth: number; gap: number } {
+  private matOpts(): { matWidth: number; matDepth: number; gap: number; mode: "individual" | "field" } {
+    if (this.matMode === "field") return { matWidth: 0.6, matDepth: 0.6, gap: 0, mode: "field" };
     const w = this.matOrient === "v" ? 0.6 : 1.8;
     const d = this.matOrient === "v" ? 1.8 : 0.6;
-    return { matWidth: w, matDepth: d, gap: this.matSnug ? 0 : 0.1 };
+    return { matWidth: w, matDepth: d, gap: this.matSnug ? 0 : 0.1, mode: "individual" };
   }
 
   private smartLayoutSection(): HTMLElement {
+    const venueId = this.app.store.getState().venuePresetId;
+    if (venueId !== this.matModeVenue) {
+      this.matModeVenue = venueId;
+      if (venueId === "venue:tku-classroom" || venueId === "venue:tku-e310") this.matMode = "field";
+    }
     const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input", inputmode: "numeric" }) as HTMLInputElement;
     pIn.addEventListener("change", () => { this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0)); });
     const regen = () => { this.app.computeMatCandidates(this.participants, this.matOpts()); };
@@ -646,8 +668,12 @@ export class UI {
     }, this.matSnug ? "chip chip--sm chip--primary" : "chip chip--sm");
     return section("排地墊", [
       el("p", { class: "hint", text: "選人數就出 A/B/C 方案，看圖套用。先選一個區域可只排在區域內。" }),
+      el("div", { class: "row wrap" }, [
+        button(this.matMode === "field" ? "✓ 巧拼整片" : "巧拼整片", () => { this.matMode = "field"; regen(); this.update(); }, this.matMode === "field" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(this.matMode === "individual" ? "✓ 個人墊" : "個人墊", () => { this.matMode = "individual"; regen(); this.update(); }, this.matMode === "individual" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      ]),
       quick,
-      el("div", { class: "row wrap" }, [orientChip("v", "直向"), orientChip("h", "橫向"), snugChip]),
+      ...(this.matMode === "individual" ? [el("div", { class: "row wrap" }, [orientChip("v", "直向"), orientChip("h", "橫向"), snugChip])] : []),
       el("div", { class: "row" }, [
         el("label", { class: "field" }, [el("span", { class: "field__label", text: "自訂人數" }), pIn]),
         button("產生方案", () => regen()),
@@ -664,7 +690,7 @@ export class UI {
       const warn = c.warnings.length ? ` ⚠ ${c.warnings.join("、")}` : " ✓ 可放置";
       this.smartBox.append(el("div", { class: `card smart ${c.fits ? "" : "smart--warn"}` }, [
         el("span", { class: "card__body" }, [
-          el("span", { class: "card__title", text: `${c.label}（${c.count} 張）` }),
+          el("span", { class: "card__title", text: c.mode === "field" ? c.label : `${c.label}（${c.count} 張）` }),
           el("span", { class: "card__sub", text: `${c.footprint.width.toFixed(1)} × ${c.footprint.depth.toFixed(1)} m${warn}` }),
         ]),
         button("套用", () => { this.app.applyMatCandidate(c.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm chip--primary"),

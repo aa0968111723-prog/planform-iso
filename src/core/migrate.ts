@@ -6,6 +6,7 @@
  * v3 → v4: description, zone icon/capacity, route type + zone links
  * v4 → v5: Asset Catalog assetId / serviceRole / catalogExtras
  * v5 → v6: Event Flow scenarios / ServiceStations
+ * v6 → v7: venue identity + independent field-calibration confirmations
  */
 
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
@@ -397,7 +398,11 @@ export function migrateProject(input: Partial<Project>): Project {
   p.classroom = { ...base.classroom, ...input.classroom };
   p.corridor = { ...base.corridor, ...input.corridor };
   p.tile = { ...base.tile, ...input.tile };
-  p.calibration = { ...base.calibration, ...input.calibration };
+  p.calibration = {
+    ...base.calibration,
+    ...input.calibration,
+    confirmed: { ...base.calibration.confirmed, ...(input.calibration?.confirmed ?? {}) },
+  };
   p.layers = { ...base.layers, ...input.layers };
   p.description = input.description ?? "";
   p.zones = (Array.isArray(input.zones) ? input.zones : []).map(migrateZone);
