@@ -57,6 +57,14 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
     onDone();
   };
 
+  /** Loading a wizard result replaces the current plan — ask when it has content. */
+  const confirmReplace = (): boolean => {
+    const p = app.store.getState();
+    const hasContent = p.objects.length > 0 || p.zones.length > 0 || p.groups.length > 0 || p.routes.length > 0;
+    if (!hasContent) return true;
+    return window.confirm("目前的場佈會被新的取代（建議先到「分享」把它存成平面圖）。確定繼續？");
+  };
+
   const renderVenueStep = (): void => {
     card.innerHTML = "";
     card.append(el("div", { class: "quickstart__title", text: "今天要排什麼？" }));
@@ -89,6 +97,7 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       card.append(el("div", { class: "subhead", text: "已存的平面圖（直接載入整份場佈）" }));
       for (const name of layouts) {
         card.append(button(`📄 ${name}`, () => {
+          if (!confirmReplace()) return;
           app.store.loadNamedLayout(name);
           app.recenterView();
           close(true);
@@ -153,10 +162,11 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       aisleChip.textContent = `${centralAisle ? "✓ " : ""}留中央走道`;
       aisleChip.classList.toggle("chip--primary", centralAisle);
     }, "chip chip--primary");
-    card.append(el("div", { class: "row" }, [aisleChip, el("span", { class: "hint", text: "地墊朝向投影幕" })]));
+    card.append(el("div", { class: "row" }, [aisleChip, el("span", { class: "hint", text: "地墊之間留 90cm 走道" })]));
 
     card.append(
       button("建立場佈", () => {
+        if (!confirmReplace()) return;
         const participants = Math.max(1, Math.min(300, Number(countInput.value) || 30));
         const project = buildQuickStartProject({
           venue,
@@ -175,8 +185,10 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
   };
 
   renderVenueStep();
+  // A tap outside dismisses WITHOUT marking "seen": an accidental tap on the
+  // first run should not hide the wizard forever.
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close(true);
+    if (e.target === overlay) close(false);
   });
   return overlay;
 }

@@ -43,9 +43,13 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   const panels: { label: string; body: HTMLElement }[] = [];
   const pick = (run: () => void) => () => { run(); opts.onPick?.(); };
 
-  const common = COMMON_SUPPLY_IDS
-    .map((id) => catalog.get(id))
-    .filter((e): e is AssetCatalogEntry => !!e);
+  // 常用物資 only belongs on the main 場佈 library; a narrow library
+  // (e.g. 場地 → 固定設施) must not surface mats and desks.
+  const common = opts.categories && !opts.zones
+    ? []
+    : COMMON_SUPPLY_IDS
+        .map((id) => catalog.get(id))
+        .filter((e): e is AssetCatalogEntry => !!e);
   if (common.length) {
     panels.push({
       label: "常用物資",

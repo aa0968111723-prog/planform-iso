@@ -148,6 +148,24 @@ export function applyVenuePreset(
   project.classroom = { id: "classroom", ...preset.classroom };
   project.corridor = { id: "corridor", ...preset.corridor };
   project.tile = { ...preset.tile };
+  // Keep existing wall-anchored assets glued to the (resized/moved) walls,
+  // clamping the along-wall offset so nothing falls off a shorter wall.
+  const areas = [project.classroom, project.corridor];
+  for (const o of project.objects) {
+    if (!o.wallAnchor) continue;
+    const area = areas.find((a) => a.id === o.wallAnchor!.areaId);
+    if (area) {
+      const wallLen = o.wallAnchor.edge === "n" || o.wallAnchor.edge === "s" ? area.length : area.width;
+      const half = Math.min(o.width / 2, wallLen / 2);
+      o.wallAnchor.offset = Math.min(Math.max(o.wallAnchor.offset, half), wallLen - half);
+    }
+    const pos = wallAnchorToPosition(o.wallAnchor, areas);
+    if (pos) {
+      o.x = pos.x;
+      o.z = pos.z;
+      o.rotationDeg = pos.rotationDeg;
+    }
+  }
   if (options.withFixtures !== false) {
     for (const fixture of preset.fixtures) {
       const already = project.objects.some((o) => o.kind === fixture.kind && !o.hidden);

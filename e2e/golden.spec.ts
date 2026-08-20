@@ -108,9 +108,8 @@ test.describe("Golden Flow 1 — 30 人社課（手機）", () => {
     await canvas.click({ position: { x: 160, y: 320 } });
     await canvas.click({ position: { x: 220, y: 380 } });
     await canvas.click({ position: { x: 280, y: 430 } });
-    await page.locator('.navbtn[data-nav="route"]').click();
-    await settle(page);
-    await page.locator(".left button", { hasText: "完成繪製" }).click();
+    // The floating route bar keeps 完成 on screen even with the sheet closed.
+    await page.locator(".placebar-wrap button", { hasText: "完成繪製" }).click();
     const p2 = await probeProject(page);
     expect(p2.routes.map((r) => r.type)).toContain("registration");
 

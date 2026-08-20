@@ -519,8 +519,10 @@ function emptyResult(scenario: EventScenario, msg: string): SimulationResult {
 }
 
 function formatMin(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
+  // Round to whole seconds FIRST so 46:59.6 reads 47 分 0 秒, never 46 分 60 秒.
+  const total = Math.round(seconds);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   return `${m} 分 ${s} 秒`;
 }
 

@@ -58,6 +58,7 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,png,svg,webmanifest}"],
         navigateFallback: "index.html",
+        navigateFallbackDenylist: [/version\.json$/],
         // version.json must always come from the network so update checks
         // and ops probes never see a cached value.
         globIgnores: ["version.json"],

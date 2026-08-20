@@ -70,7 +70,7 @@ export function buildPartnerMode(
       const state = app.store.getState();
       const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false, inventory: false });
       void sharePng(dataUrl, pngFilename(state.name, "夥伴觀看圖")).then((how) => {
-        app.notifyToast?.(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+        if (how !== "cancelled") app.notifyToast?.(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
       });
     }, "btn partneraction"),
   ]);

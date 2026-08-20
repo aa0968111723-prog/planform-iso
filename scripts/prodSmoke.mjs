@@ -110,7 +110,7 @@ const browser = await chromium.launch({
   await page.locator(".quickstart__title").waitFor();
   await completeWizard(page, 30);
   await page.locator(".topbar .chip", { hasText: "分享" }).first().click();
-  const buttons = ["場佈總覽圖", "動線圖", "地墊 / 座位圖", "工作分區圖", "物資清單圖", "夥伴觀看圖"];
+  const buttons = ["場佈總覽圖", "3D 場佈圖", "動線圖", "地墊 / 座位圖", "工作分區圖", "物資清單圖", "夥伴觀看圖"];
   for (const label of buttons) {
     const dl = page.waitForEvent("download", { timeout: 15000 });
     await page.locator(".left button", { hasText: label }).first().click();

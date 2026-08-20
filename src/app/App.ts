@@ -529,7 +529,10 @@ export class App {
 
   saveCurrentVenuePreset(name: string): boolean {
     const trimmed = name.trim();
-    if (!trimmed) return false;
+    if (!trimmed) {
+      this.toast("請先輸入場地名稱");
+      return false;
+    }
     const preset = venuePresetFromProject(this.state, trimmed);
     const ok = saveUserVenuePreset(preset);
     this.toast(ok ? `已把目前場地存成「${trimmed}」` : "儲存場地失敗（儲存空間可能已滿）");
@@ -538,10 +541,12 @@ export class App {
 
   /** Load a Quick Start generated project and land the user in 場佈. */
   startFromQuickStart(project: Project): void {
+    // loadProject resets history, so no undo chip here — the wizard confirms
+    // before replacing a non-empty plan instead.
     this.store.loadProject(project);
     this.setWorkflow("layout");
     this.recenterView();
-    this.toast("場佈起點已建立，直接拖曳調整即可", true);
+    this.toast("場佈起點已建立，直接拖曳調整即可");
   }
 
   // --- array groups ------------------------------------------------------

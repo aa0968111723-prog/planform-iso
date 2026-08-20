@@ -55,7 +55,7 @@ function render(app: App): HTMLElement {
             hasOnsitePayment: cnt > 0,
           });
         },
-        1,
+        0,
       ),
     ]),
     el("div", { class: "row wrap" }, [

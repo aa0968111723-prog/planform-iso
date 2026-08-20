@@ -48,7 +48,7 @@ export function pngFilename(projectName: string, kind: string): string {
  * Share a PNG via the native share sheet (LINE 等) when available, falling
  * back to a normal download. Returns how it was delivered.
  */
-export async function sharePng(dataUrl: string, name: string): Promise<"shared" | "downloaded"> {
+export async function sharePng(dataUrl: string, name: string): Promise<"shared" | "downloaded" | "cancelled"> {
   try {
     const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
     if (typeof nav.share === "function" && typeof nav.canShare === "function") {
@@ -60,8 +60,8 @@ export async function sharePng(dataUrl: string, name: string): Promise<"shared" 
       }
     }
   } catch (err) {
-    // AbortError = user closed the share sheet; treat as done, not fallback.
-    if (err instanceof DOMException && err.name === "AbortError") return "shared";
+    // AbortError = the user closed the share sheet on purpose — do nothing.
+    if (err instanceof DOMException && err.name === "AbortError") return "cancelled";
   }
   download(name, dataUrl);
   return "downloaded";

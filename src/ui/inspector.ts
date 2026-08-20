@@ -165,7 +165,7 @@ function buildGroupInspector(root: HTMLElement, app: App, g: NonNullable<ReturnT
     num("垂直間距 (cm)", Math.round(metersToCm(g.gapZ)), 1, (v) => app.updateSelectedGroup({ gapZ: v / 100 }), 0),
   ]));
   root.append(nudgePanel(app));
-  root.append(el("div", { class: "subhead", text: "施工編號" }));
+  root.append(el("div", { class: "subhead", text: "編號" }));
   root.append(
     textField("編號前綴", g.numberPrefix, (v) => app.updateSelectedGroup({ numberPrefix: v || "A" })),
     el("div", { class: "grid2" }, [

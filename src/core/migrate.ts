@@ -344,7 +344,7 @@ export function createDefaultScenario(
   }
 
   if (seatZone) {
-    push("seating", seatZone.x + seatZone.width / 2, seatZone.z + seatZone.depth / 2, {
+    push("seating", seatZone.x, seatZone.z, {
       zoneId: seatZone.id,
     });
   } else {

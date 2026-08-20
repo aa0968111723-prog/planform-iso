@@ -74,7 +74,7 @@ function deskObject(assetId: "builtin:regTable" | "builtin:payment-desk", x: num
   const entry = BUILTIN_CATALOG.find((e) => e.id === assetId)!;
   return {
     id: uid("obj"),
-    kind: "regTable",
+    kind: entry.kind,
     x,
     z,
     rotationDeg,
@@ -110,26 +110,25 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   const inZ = (z: number, halfD: number) => clamp(z, c.z + halfD + 0.2, c.z + c.width - halfD - 0.2);
   const needs = config.needs;
   const backWallZ = c.z + c.width; // entrance side (door faces the corridor)
-  const near = (dx: number, dz: number, type: ZoneType): Zone => {
-    const d = ZONE_DEFAULTS[type];
-    return makeZone(type, inX(entry.x + dx, d.width / 2), inZ(backWallZ + dz, d.depth / 2));
-  };
 
-  // Zones cluster around the entrance so 報到 → 鞋子 → 背包 reads as one path.
-  if (needs.checkin) {
-    const zone = near(-1.8, -1.2, "registration");
+  // Entrance-side zones form one non-overlapping chain along the back wall,
+  // starting at the door and walking toward the room interior (−X):
+  // 報到 → 收費 → 鞋子 → 背包, rear edges aligned 0.35 m off the wall.
+  const chain: ZoneType[] = [];
+  if (needs.checkin) chain.push("registration");
+  if (needs.payment) chain.push("payment");
+  if (needs.shoe) chain.push("shoe");
+  if (needs.backpack) chain.push("backpack");
+  let cursor = Math.min(entry.x + 1.2, c.x + c.length - 0.2);
+  for (const type of chain) {
+    const d = ZONE_DEFAULTS[type];
+    const centerX = inX(cursor - d.width / 2, d.width / 2);
+    const centerZ = inZ(backWallZ - 0.35 - d.depth / 2, d.depth / 2);
+    const zone = makeZone(type, centerX, centerZ);
     project.zones.push(zone);
-    project.objects.push(deskObject("builtin:regTable", zone.x, zone.z, 180));
-  }
-  if (needs.payment) {
-    const zone = near(0.6, -1.2, "payment");
-    project.zones.push(zone);
-    project.objects.push(deskObject("builtin:payment-desk", zone.x, zone.z, 180));
-  }
-  if (needs.shoe) project.zones.push(near(2.6, -0.8, "shoe"));
-  if (needs.backpack) {
-    const d = ZONE_DEFAULTS.backpack;
-    project.zones.push(makeZone("backpack", inX(c.x + d.width / 2 + 0.3, d.width / 2), inZ(backWallZ - 0.8, d.depth / 2)));
+    if (type === "registration") project.objects.push(deskObject("builtin:regTable", zone.x, zone.z, 0));
+    if (type === "payment") project.objects.push(deskObject("builtin:payment-desk", zone.x, zone.z, 0));
+    cursor = centerX - d.width / 2 - 0.3;
   }
   if (needs.teacher) {
     const d = ZONE_DEFAULTS.meditation;
@@ -148,17 +147,20 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
     // only when a teacher zone actually needs the stage area.
     const entranceReserve = needs.checkin || needs.payment || needs.shoe || needs.backpack ? 1.9 : 0.6;
     const frontReserve = needs.teacher ? 3.0 : inset;
+    // A group-work zone lives along the +X side — keep the mats clear of it.
+    const sideReserve = needs.groups ? ZONE_DEFAULTS.group.width + 1.0 : inset;
     const matArea = {
       minX: bounds.minX + inset,
-      maxX: bounds.maxX - inset,
+      maxX: bounds.maxX - sideReserve,
       minZ: bounds.minZ + frontReserve,
       maxZ: bounds.maxZ - entranceReserve,
     };
+    // 禪學社的地墊習慣直向、一排排相黏（gap 0）；走道另外留。
     const candidates = generateLayouts({
       participants: config.participants,
       matWidth: 0.6,
       matDepth: 1.8,
-      gap: 0.1,
+      gap: 0,
       aisleWidth: 0.9,
       bounds: matArea,
     });
@@ -231,5 +233,8 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   }
 
   project.description = `${config.participants} 人`;
+  // Open in the 3D isometric view so the result reads as a real room, not a
+  // flat diagram; 俯視 stays one tap away in 視角.
+  project.view = "iso";
   return project;
 }

@@ -20,4 +20,11 @@ export default tseslint.config(
       globals: { ...globals.node },
     },
   },
+  {
+    // Node utility scripts drive a real browser, so both worlds apply.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
 );
