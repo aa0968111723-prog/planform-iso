@@ -56,7 +56,7 @@ export class TextLabel {
     ctx.fillStyle = color;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, this.canvas.width / 2, this.canvas.height / 2, this.canvas.width - 16);
+    ctx.fillText(fitLabelText(ctx, text, this.canvas.width - 16), this.canvas.width / 2, this.canvas.height / 2);
     this.texture.needsUpdate = true;
   }
 
@@ -64,6 +64,14 @@ export class TextLabel {
     this.texture.dispose();
     (this.sprite.material as SpriteMaterial).dispose();
   }
+}
+
+function fitLabelText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number): string {
+  if (ctx.measureText(value).width <= maxWidth) return value;
+  const suffix = "…";
+  let text = value;
+  while (text.length > 1 && ctx.measureText(`${text}${suffix}`).width > maxWidth) text = text.slice(0, -1);
+  return `${text}${suffix}`;
 }
 
 function roundRect(

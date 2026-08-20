@@ -112,7 +112,9 @@ export function buildPartnerMode(
     ]) as HTMLButtonElement;
     chip.addEventListener("click", () => {
       app.setPartnerRole(role.id as PartnerRole);
-      if (sheetKind === "timeline" || sheetKind === "suggest") return;
+      // Keep an open step sheet open, but let the already-rendered briefing
+      // replace its list with the newly selected role's instructions.
+      if (sheetKind === "steps" || sheetKind === "timeline" || sheetKind === "suggest") return;
       openSheet("none");
     });
     roles.append(chip);
@@ -122,6 +124,7 @@ export function buildPartnerMode(
 
   function renderBrief(): void {
     const b = app.partnerBriefing();
+    const role = app.session.partner?.role ?? "all";
     brief.innerHTML = "";
     if (b.emptyHint) {
       brief.append(el("span", { class: "partnerbrief__line", text: b.emptyHint }));
@@ -129,8 +132,12 @@ export function buildPartnerMode(
     }
     const lines: { icon: string; text: string }[] = [];
     if (b.youAre) lines.push({ icon: "📍", text: `你在「${b.youAre}」` });
-    if (b.peopleComeFrom) lines.push({ icon: "⬅️", text: `人從「${b.peopleComeFrom}」來` });
-    if (b.nextStop) lines.push({ icon: "➡️", text: `再往「${b.nextStop}」` });
+    if (role === "all" && b.flowSummary) {
+      lines.push({ icon: "➡️", text: `整體流程：${b.flowSummary}` });
+    } else {
+      if (b.peopleComeFrom) lines.push({ icon: "⬅️", text: `人從「${b.peopleComeFrom}」來` });
+      if (b.nextStop) lines.push({ icon: "➡️", text: `再往「${b.nextStop}」` });
+    }
     if (!lines.length) {
       lines.push({ icon: "👀", text: `整場流程共 ${b.steps.length} 步，點我看順序` });
     }
@@ -143,7 +150,9 @@ export function buildPartnerMode(
     brief.append(el("span", { class: "partnerbrief__more", text: sheetKind === "steps" ? "收起 ▾" : "看步驟 ▸" }));
     brief.append(el("span", {
       class: "partnerbrief__journey",
-      text: `上一站：${b.peopleComeFrom ?? "入口"} → 你：${b.youAre ?? "目前沒有指定站點"} → 下一站：${b.nextStop ?? "座區結束"}`,
+      text: role === "all"
+        ? `整體流程：${b.flowSummary ?? "依現場動線前進"}`
+        : `上一站：${b.peopleComeFrom ?? "入口"} → 你：${b.youAre ?? "目前沒有指定站點"} → 下一站：${b.nextStop ?? "座區結束"}`,
     }));
   }
 

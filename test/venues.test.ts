@@ -38,6 +38,8 @@ describe("venue presets", () => {
       expect(p.classroom.length).toBeGreaterThan(0);
       expect(p.tile.width).toBeGreaterThan(0);
     }
+    expect(BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:rect-classroom")?.fixtures).toHaveLength(1);
+    expect(BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:blank")?.fixtures).toHaveLength(1);
   });
 
   it("淡江 template creates a valid project with door and screen on walls", () => {

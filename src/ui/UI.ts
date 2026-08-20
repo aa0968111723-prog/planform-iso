@@ -861,6 +861,11 @@ export class UI {
         if (how !== "cancelled") this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
       });
     };
+    const planChoice = (label: string, preset: PlanPreset, kind: string, extra: Partial<PlanOptions> = {}, role: RoleFilter = null) =>
+      el("div", { class: "export-choice" }, [
+        button(label, () => share(preset, role, kind, extra)),
+        button("手機版", () => share(preset, role, `${kind}-手機版`, { ...extra, page: "phone", orientation: "portrait" }), "chip chip--sm"),
+      ]);
     const checkCounts = issueCounts(this.app.session.issues);
     const uncalibratedExport = !calibrationComplete(this.app.store.getState());
     const preExportChecklist = section("分享前先確認", [
@@ -877,25 +882,25 @@ export class UI {
     const planSection = section("場刊圖（傳給夥伴）", [
       el("p", { class: "hint", text: "乾淨、看得懂的圖，手機會直接開分享（LINE），電腦則下載。" }),
       el("div", { class: "export-grid" }, [
-        button("場佈總覽圖", () => share("full", null, "場佈總覽")),
+        planChoice("場佈總覽圖", "full", "場佈總覽"),
         button("3D 場佈圖", () => {
           const dataUrl = this.app.scene.renderToDataURL(state(), "iso");
           void sharePng(dataUrl, pngFilename(state().name, "3D場佈")).then((how) => {
             if (how !== "cancelled") this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
           });
         }),
-        button("動線圖", () => share("route", null, "動線圖"), "btn btn--ghost"),
-        button("地墊 / 座位圖", () => share("mats", null, "地墊座位圖"), "btn btn--ghost"),
-        button("工作分區圖", () => share("zones", null, "工作分區圖"), "btn btn--ghost"),
-        button("物資清單圖", () => share("inventory", null, "物資清單", { orientation: "portrait" }), "btn btn--ghost"),
-        button("夥伴觀看圖", () => share("partner", null, "夥伴觀看圖", { simplify: true, dims: false }), "btn btn--ghost"),
+        planChoice("動線圖", "route", "動線圖", { }, null),
+        planChoice("地墊 / 座位圖", "mats", "地墊座位圖"),
+        planChoice("工作分區圖", "zones", "工作分區圖"),
+        planChoice("物資清單圖", "inventory", "物資清單", { orientation: "portrait" }),
+        planChoice("夥伴觀看圖", "partner", "夥伴觀看圖", { simplify: true, dims: false }),
       ]),
       el("div", { class: "subhead", text: "各組任務圖（只顯示該組需要的）" }),
       el("div", { class: "row wrap" }, [
-        button("報到組", () => share("staff", "checkin", "報到組", { titleSuffix: "報到組" }), "chip chip--sm"),
-        button("收費組", () => share("staff", "payment", "收費組", { titleSuffix: "收費組" }), "chip chip--sm"),
-        button("引導組", () => share("staff", "guide", "引導組", { titleSuffix: "引導組" }), "chip chip--sm"),
-        button("生活組", () => share("staff", "life", "生活組", { titleSuffix: "生活組" }), "chip chip--sm"),
+        planChoice("報到組", "staff", "報到組", { titleSuffix: "報到組" }, "checkin"),
+        planChoice("收費組", "staff", "收費組", { titleSuffix: "收費組" }, "payment"),
+        planChoice("引導組", "staff", "引導組", { titleSuffix: "引導組" }, "guide"),
+        planChoice("生活組", "staff", "生活組", { titleSuffix: "生活組" }, "life"),
       ]),
       el("div", { class: "row wrap" }, [
         button(o.dims ? "✓ 顯示尺寸" : "顯示尺寸", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
@@ -914,7 +919,7 @@ export class UI {
 
     const advancedSection = section("進階匯出", [
       el("div", { class: "grid2" }, [
-        selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),
+        selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }, { value: "phone", label: "手機版 1080×1920" }], o.page, (v) => { o.page = v as PageSize; }),
         selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
       ]),
       button(o.simplify ? "✓ 簡化顯示（略過開關、電腦）" : "簡化顯示（略過開關、電腦）", () => { o.simplify = !o.simplify; this.update(); }, o.simplify ? "chip chip--sm chip--primary" : "chip chip--sm"),
