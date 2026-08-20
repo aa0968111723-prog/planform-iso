@@ -1,19 +1,22 @@
-# Build main and publish dist/ to GitHub Pages (production URL).
-# The PWA uses a relative base, so the project subpath works as-is.
-name: deploy
+# CI gates on every push/PR to main; GitHub Pages publish is MANUAL ONLY
+# (workflow_dispatch) — the canonical production origin is Zeabur, which
+# auto-builds main. Keeping Pages manual avoids a second auto-updating origin
+# (separate per-origin storage looked like data loss to volunteers).
+name: ci
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
   pages: write
   id-token: write
 concurrency:
-  group: pages
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  build:
+  gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +26,23 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      # Smoke the REAL built bundle (service worker, offline boot, exports).
+      - run: |
+          npm run preview -- --port 4173 &
+          sleep 5
+          node scripts/prodSmoke.mjs http://localhost:4173
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
-  deploy:
-    needs: build
+  deploy-pages:
+    # Manual staging deploy only — run from the Actions tab when needed.
+    if: github.event_name == 'workflow_dispatch'
+    needs: gates
     runs-on: ubuntu-latest
     environment:
       name: github-pages
