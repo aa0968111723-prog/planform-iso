@@ -7,7 +7,7 @@
  */
 
 import type { App } from "../app/App";
-import { buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
+import { buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
 import { BUILTIN_VENUE_PRESETS, listUserVenuePresets, type VenuePreset } from "../core/venues";
 import { button, el } from "./dom";
 
@@ -38,6 +38,7 @@ const NEED_OPTIONS: NeedOption[] = [
   { key: "mats", label: "🟪 地墊" },
   { key: "checkin", label: "👋 報到" },
   { key: "payment", label: "💰 收費" },
+  { key: "life", label: "🧺 生活組區" },
   { key: "shoe", label: "👟 鞋子區" },
   { key: "backpack", label: "🎒 背包區" },
   { key: "teacher", label: "🧘 講師區" },
@@ -72,6 +73,18 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
     const tku = BUILTIN_VENUE_PRESETS[0];
     const rect = BUILTIN_VENUE_PRESETS[1];
     const blank = BUILTIN_VENUE_PRESETS[2];
+    const e310 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e310");
+    if (e310) {
+      card.append(
+        button(`🎤 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
+        el("p", { class: "hint", text: e310.note }),
+        button("⚡ E310 演講範例（60 人）", () => {
+          if (!confirmReplace()) return;
+          app.startFromQuickStart(buildE310GoldenProject(e310));
+          close(true);
+        }, "btn btn--big btn--primary"),
+      );
+    }
     card.append(
       button(`🏫 ${tku.name}`, () => renderNeedsStep(tku), "btn btn--big"),
       el("p", { class: "hint", text: tku.note }),

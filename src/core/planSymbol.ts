@@ -20,6 +20,8 @@ export type PlanSymbolKind =
   | "queue-barrier"
   | "storage"
   | "payment-box"
+  | "stage-platform"
+  | "lectern"
   | "other";
 
 export interface PlanSymbolSpec {
@@ -31,6 +33,12 @@ export interface PlanSymbolSpec {
 }
 
 export function planSymbolForEntry(entry: AssetCatalogEntry): PlanSymbolSpec {
+  if (entry.id === "builtin:stage-platform") {
+    return { kind: "stage-platform", label: "講台", fill: entry.color, showFacing: false, icon: "講台" };
+  }
+  if (entry.id === "builtin:lectern") {
+    return { kind: "lectern", label: "講桌", fill: entry.color, showFacing: true, icon: "講桌" };
+  }
   return planSymbolForSemantic(entry.semanticType, entry.serviceRole, entry.color, entry.name);
 }
 
@@ -152,6 +160,26 @@ export function drawPlanSymbolOverlay(
     ctx.moveTo(-wPx / 2, 0);
     ctx.lineTo(wPx / 2, 0);
     ctx.stroke();
+  } else if (spec.kind === "stage-platform") {
+    ctx.fillStyle = hexA(spec.fill, 0.72);
+    ctx.strokeStyle = "#1f2937";
+    ctx.lineWidth = 2;
+    ctx.fillRect(-wPx / 2, -dPx / 2, wPx, dPx);
+    ctx.strokeRect(-wPx / 2, -dPx / 2, wPx, dPx);
+    ctx.strokeStyle = "rgba(226,232,240,0.7)";
+    ctx.lineWidth = 1;
+    for (let x = -wPx / 2 - dPx; x < wPx / 2 + dPx; x += Math.max(8, dPx * 0.7)) {
+      ctx.beginPath(); ctx.moveTo(x, dPx / 2); ctx.lineTo(x + dPx, -dPx / 2); ctx.stroke();
+    }
+  } else if (spec.kind === "lectern") {
+    ctx.fillStyle = hexA(spec.fill, 0.68);
+    ctx.strokeStyle = "#713f12";
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, -wPx / 2, -dPx / 2, wPx, dPx, 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "#f8fafc";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, dPx * 0.4); ctx.stroke();
   } else if (spec.kind === "storage") {
     ctx.fillStyle = hexA(spec.fill, 0.5);
     ctx.strokeStyle = "#cbd5e1";

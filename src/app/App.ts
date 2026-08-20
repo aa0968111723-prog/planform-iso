@@ -53,6 +53,7 @@ import {
   type FieldInfo,
   type SnappedPoint,
 } from "../core/measure";
+import { applyCalibrationPath, type CalibrationPath } from "../core/calibration";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
 import { applyVenuePreset, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
@@ -544,6 +545,19 @@ export class App {
     // loadProject resets history, so no undo chip here — the wizard confirms
     // before replacing a non-empty plan instead.
     this.store.loadProject(project);
+    const scenario = project.activeScenarioId
+      ? project.scenarios.find((s) => s.id === project.activeScenarioId)
+      : project.scenarios[0];
+    if (scenario) {
+      const prepaid = scenario.profiles.find((p) => p.id === "prepaid")?.ratio ?? 1;
+      this.session.simQuick = {
+        ...this.session.simQuick,
+        participants: scenario.participantCount,
+        arrivalWindowSeconds: scenario.arrivalWindowSeconds,
+        prepaidRatio: prepaid,
+        hasOnsitePayment: scenario.profiles.some((p) => p.id === "pay-on-site" && p.ratio > 0),
+      };
+    }
     this.setWorkflow("layout");
     this.recenterView();
     this.toast("場佈起點已建立，直接拖曳調整即可");
@@ -753,11 +767,10 @@ export class App {
     if (!c || !c.a || !c.b) return null;
     return Math.hypot(c.b.x - c.a.x, c.b.z - c.a.z);
   }
-  applyCalibration(action: "record" | "tile" | "classroom-length", actualMeters: number, note = ""): void {
+  applyCalibration(action: CalibrationPath, actualMeters: number, note = ""): void {
     if (!actualMeters || actualMeters <= 0) return;
-    if (action === "tile") this.applyCalibrationToTile(actualMeters);
-    else if (action === "classroom-length") this.updateArea("classroom", { length: actualMeters });
-    else this.updateCalibration({ referenceLength: actualMeters, note });
+    const measured = action === "classroom-length" ? this.getCalibrationDistance() ?? undefined : undefined;
+    this.store.mutate((p) => applyCalibrationPath(p, action, actualMeters, measured, note));
     this.toast(action === "record" ? "已記錄校正結果" : "已套用校正（可復原）", true);
     this.cancelCalibration();
   }
@@ -988,7 +1001,7 @@ export class App {
 
   // --- smart layout (participant-driven mats) ---------------------------
 
-  computeMatCandidates(participants: number, opts?: { centralAisleWidth?: number; matWidth?: number; matDepth?: number; gap?: number }): LayoutCandidate[] {
+  computeMatCandidates(participants: number, opts?: { centralAisleWidth?: number; matWidth?: number; matDepth?: number; gap?: number; mode?: "individual" | "field" }): LayoutCandidate[] {
     this.session.participants = participants;
     const vs = this.state.validationSettings;
     const zone = this.getSelectedZone();
@@ -1007,6 +1020,7 @@ export class App {
       gap: opts?.gap ?? 0.1,
       aisleWidth: opts?.centralAisleWidth ?? Math.max(vs.minAisleWidth, 0.9),
       bounds,
+      mode: opts?.mode ?? (this.state.venuePresetId === "venue:tku-classroom" || this.state.venuePresetId === "venue:tku-e310" ? "field" : "individual"),
     });
     this.notifyUi();
     return this.session.matCandidates;
@@ -1029,7 +1043,7 @@ export class App {
       });
     });
     this.session.matCandidates = [];
-    this.toast(`已套用 ${cand.count} 張地墊`, true);
+    this.toast(cand.mode === "field" ? `已套用巧拼座區（可坐 ${cand.count} 人）` : `已套用 ${cand.count} 張地墊`, true);
     if (newIds.length) this.setSelection(newIds);
   }
 
@@ -1316,7 +1330,11 @@ export class App {
   updateCalibration(patch: Partial<Project["calibration"]>): void { this.store.mutate((p) => Object.assign(p.calibration, patch)); }
 
   applyCalibrationToTile(actualMeters: number): void {
-    this.store.mutate((p) => { p.tile.width = actualMeters; p.tile.depth = actualMeters; p.calibration.referenceLength = actualMeters; });
+    this.store.mutate((p) => applyCalibrationPath(p, "tile", actualMeters));
+  }
+
+  applyCalibrationToDoor(actualMeters: number): void {
+    this.store.mutate((p) => applyCalibrationPath(p, "door", actualMeters));
   }
 
   // --- validation --------------------------------------------------------
