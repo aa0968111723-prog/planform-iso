@@ -16,3 +16,4 @@ test-results/
 # agent working dirs (raw adversarial-test artifacts stay local)
 _grok_round*/
 _lead/
+_lead_wpc/
