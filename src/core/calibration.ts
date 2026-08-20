@@ -50,6 +50,8 @@ export function applyCalibrationPath(project: Project, path: CalibrationPath, ac
       const pos = wallAnchorToPosition(object.wallAnchor, areas);
       if (pos) { object.x = pos.x; object.z = pos.z; object.rotationDeg = pos.rotationDeg; }
     }
+    // Only an APPLIED room measurement confirms the third calibration item —
+    // merely recording a measurement must not clear the badge.
+    project.calibration.confirmed.room = true;
   }
-  project.calibration.confirmed.room = true;
 }

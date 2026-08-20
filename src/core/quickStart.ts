@@ -376,6 +376,24 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
   const paymentObj = project.objects.find((o) => o.serviceRole === "payment");
   if (checkinObj) project.objects.push(tabletopObject("builtin:computer", checkinObj));
   if (paymentObj) project.objects.push(tabletopObject("builtin:payment-box", paymentObj));
+  // 實際要搬的現場物資也擺進範例，物資清單才數得出鞋架/欄杆/立牌。
+  const prop = (assetId: string, x: number, z: number, rotationDeg = 0): SceneObject => {
+    const entry = BUILTIN_CATALOG.find((e) => e.id === assetId)!;
+    return {
+      id: uid("obj"), kind: entry.kind, x, z, rotationDeg,
+      width: entry.dimensions.width, depth: entry.dimensions.depth, height: entry.dimensions.height,
+      locked: false, hidden: false, surface: "floor", elevation: 0,
+      assetId: entry.id, serviceRole: entry.serviceRole,
+    };
+  };
+  project.objects.push(
+    prop("builtin:shoe-rack", shoeZone.x - 0.55, shoeZone.z + shoeZone.depth / 2 - 0.25),
+    prop("builtin:shoe-rack", shoeZone.x + 0.55, shoeZone.z + shoeZone.depth / 2 - 0.25),
+    prop("builtin:queue-barrier", queue.x - 1.1, queue.z + 0.45),
+    prop("builtin:queue-barrier", queue.x, queue.z + 0.45),
+    prop("builtin:queue-barrier", queue.x + 1.1, queue.z + 0.45),
+    prop("builtin:signage-stand", guide.x + 0.5, guide.z, 180),
+  );
   const stations: ServiceStation[] = [
     entrance, guide, queue,
     station("checkin", "報到", checkinObj?.x ?? checkinZone.x, checkinObj?.z ?? checkinZone.z, { objectId: checkinObj?.id, zoneId: checkinZone.id, staffCount: 2, parallelServers: 2 }),

@@ -1,6 +1,6 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import { calibrationComplete, calibrationPendingLabels, type MeasurementType, type RouteType, type ViewName } from "../core/model";
+import { calibrationComplete, calibrationPendingLabels, venueNeedsCalibration, type MeasurementType, type RouteType, type ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
 import { ROUTE_PRESETS } from "../core/routes";
 import type { LayoutCandidate } from "../core/smartLayout";
@@ -613,8 +613,22 @@ export class UI {
 
     const doorInput = el("input", { type: "number", step: "1", class: "field__input", placeholder: "門寬 (cm)" }) as HTMLInputElement;
     const pending = calibrationPendingLabels(s);
+    const needsCal = venueNeedsCalibration(s);
+    const doorObj = s.objects.find((ob) => ob.kind === "door" && !ob.hidden);
+    const ok = (flag: boolean | undefined) => (flag ? " ✓" : needsCal ? "（待校正）" : "");
+    const currentLine = el("div", {
+      class: "hint",
+      text: `目前：地磚 ${Math.round(s.tile.width * 100)}×${Math.round(s.tile.depth * 100)} cm${ok(s.calibration.confirmed.tile)}｜` +
+        `門寬 ${doorObj ? Math.round(doorObj.width * 100) + " cm" : "—"}${ok(s.calibration.confirmed.door)}｜` +
+        `教室 ${s.classroom.length.toFixed(1)}×${s.classroom.width.toFixed(1)} m${ok(s.calibration.confirmed.room)}`,
+    });
     const body: HTMLElement[] = [
-      ...(pending.length ? [el("div", { class: "readout readout--warn", text: `待校正：${pending.join("、")}` })] : [el("div", { class: "readout", text: "✓ 三項尺寸都已校正" })]),
+      ...(pending.length
+        ? [el("div", { class: "readout readout--warn", text: `待校正：${pending.join("、")}` })]
+        : needsCal
+          ? [el("div", { class: "readout", text: "✓ 三項尺寸都已現場校正" })]
+          : [el("div", { class: "hint", text: "此場地尺寸為自訂值；需要時可用下面工具對照現場。" })]),
+      currentLine,
       el("p", { class: "hint", text: "三個選項各自完成：量地磚、量門寬，或在圖上量一段已知距離。" }),
       el("div", { class: "row wrap calibration-actions" }, [
         button("量一塊地磚", () => this.startCalibrationFromSheet(), "btn btn--primary"),
@@ -671,8 +685,14 @@ export class UI {
       this.matModeVenue = venueId;
       if (venueId === "venue:tku-classroom" || venueId === "venue:tku-e310") this.matMode = "field";
     }
+    // One head count everywhere: follow the session (seeded from the event's
+    // scenario) unless the user has typed something here since.
+    if (this.app.session.participants > 0) this.participants = this.app.session.participants;
     const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input", inputmode: "numeric" }) as HTMLInputElement;
-    pIn.addEventListener("change", () => { this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0)); });
+    pIn.addEventListener("change", () => {
+      this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0));
+      this.app.session.participants = this.participants;
+    });
     const regen = () => { this.app.computeMatCandidates(this.participants, this.matOpts()); };
     const quick = el("div", { class: "row wrap" }, [20, 30, 40, 60].map((n) =>
       button(String(n), () => {
@@ -707,7 +727,22 @@ export class UI {
   private updateSmartBox(): void {
     this.smartBox.innerHTML = "";
     const cands = this.app.session.matCandidates;
-    if (!cands.length) { this.smartBox.append(el("span", { class: "hint", text: "尚未產生方案。" })); return; }
+    if (!cands.length) {
+      // With mats already on the floor, say what IS there instead of the
+      // misleading 「尚未產生方案」 (the 60p example ships pre-laid).
+      const matGroups = this.app.store.getState().groups.filter((g) => g.sourceKind === "mat" && !g.hidden);
+      if (matGroups.length) {
+        const pieces = matGroups.reduce((sum, g) => sum + g.rows * g.cols, 0);
+        const seats = matGroups.reduce((sum, g) =>
+          sum + (g.itemWidth === g.itemDepth
+            ? g.cols * Math.floor((g.rows * g.itemDepth + 1e-9) / 0.9)
+            : g.rows * g.cols), 0);
+        this.smartBox.append(el("span", { class: "hint", text: `已排好：巧拼 ${pieces} 片，約可坐 ${seats} 人。要重排就選人數再「產生方案」。` }));
+      } else {
+        this.smartBox.append(el("span", { class: "hint", text: "尚未產生方案。" }));
+      }
+      return;
+    }
     for (const c of cands) {
       const warn = c.warnings.length ? ` ⚠ ${c.warnings.join("、")}` : " ✓ 可放置";
       this.smartBox.append(el("div", { class: `card smart ${c.fits ? "" : "smart--warn"}` }, [
@@ -827,11 +862,16 @@ export class UI {
       });
     };
     const checkCounts = issueCounts(this.app.session.issues);
+    const uncalibratedExport = !calibrationComplete(this.app.store.getState());
     const preExportChecklist = section("分享前先確認", [
       el("div", { class: "checklist-row" }, [
         el("span", { text: checkCounts.error ? "🔴" : checkCounts.warning ? "🟡" : "🟢" }),
         el("span", { text: checkCounts.error ? "還有問題要先處理" : checkCounts.warning ? "有提醒，請看一下" : "目前沒有阻擋分享的問題" }),
       ]),
+      ...(uncalibratedExport ? [el("div", { class: "checklist-row" }, [
+        el("span", { text: "🟡" }),
+        el("span", { text: "尺寸還沒現場校正——圖可以先傳討論，右下角會標「尺寸待現場校正」" }),
+      ])] : []),
       el("div", { class: "hint", text: "分享會使用目前畫面與活動名稱；需要修改時可回到場地、場佈或動線。" }),
     ]);
     const planSection = section("場刊圖（傳給夥伴）", [
@@ -896,6 +936,9 @@ export class UI {
     ], false);
 
     return section("分享 / 匯出", [
+      // 「給夥伴看」是主流程第四步的一半 — 夥伴模式在這裡有一級入口
+      // （手機不用再鑽 ⋯ 選單）。
+      button("👥 夥伴模式（給志工看的現場畫面）", () => this.app.enterPartnerMode(), "btn btn--big"),
       preExportChecklist,
       planSection,
       el("div", { class: "subhead", text: "活動資訊" }),
@@ -950,15 +993,28 @@ export class UI {
     const sess = this.app.session;
     const s = this.app.store.getState();
     const counts = issueCounts(sess.issues);
-    const tone = counts.error ? "bad" : counts.warning ? "warn" : "ok";
+    const uncalibrated = !calibrationComplete(s);
+    // 「檢查通過」next to a 待校正 banner reads as a contradiction — an
+    // uncalibrated venue can never claim a green light.
+    const tone = counts.error ? "bad" : counts.warning || uncalibrated ? "warn" : "ok";
     this.statusBadge.className = "status-badge status-badge--" + tone;
-    this.statusBadge.textContent = counts.error ? "有問題待處理" : counts.warning ? "有提醒" : "檢查通過";
-    const pendingCalibration = !calibrationComplete(s);
+    this.statusBadge.textContent = counts.error
+      ? "有問題待處理"
+      : counts.warning ? "有提醒" : uncalibrated ? "尺寸待校正" : "檢查通過";
+    const pendingCalibration = uncalibrated;
     this.calibrationBanner.style.display = pendingCalibration ? "flex" : "none";
     if (pendingCalibration) {
       const labels = calibrationPendingLabels(s);
-      this.calibrationBanner.querySelector("span")!.textContent =
-        labels.length ? `尺寸待現場校正：${labels.join("、")}` : "尺寸待現場校正";
+      const span = this.calibrationBanner.querySelector("span")!;
+      span.innerHTML = "";
+      // Wrap between terms only — never inside 「校正」 or 「門寬」.
+      span.append(el("span", { text: "尺寸待現場校正", style: "white-space:nowrap" }));
+      if (labels.length) {
+        span.append(el("span", { text: "：" }));
+        labels.forEach((label, i) => span.append(
+          el("span", { text: label + (i < labels.length - 1 ? "、" : ""), style: "white-space:nowrap" }),
+        ));
+      }
     }
 
     if (this.compact) {

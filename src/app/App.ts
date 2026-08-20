@@ -490,6 +490,19 @@ export class App {
       assetId: entry.id,
       serviceRole: entry.serviceRole,
     };
+    if (entry.placementType === "floor") {
+      // A tap near the edge must not leave furniture sticking through a wall
+      // (Grok placed a desk at 距牆 −15 cm) — clamp the footprint into the
+      // room the tap landed in (classroom by default).
+      const rooms = [this.state.classroom, this.state.corridor];
+      const room = rooms.find((r) => g.x >= r.x && g.x <= r.x + r.length && g.z >= r.z && g.z <= r.z + r.width)
+        ?? this.state.classroom;
+      const rad = (g.rotationDeg * Math.PI) / 180;
+      const hx = (Math.abs(Math.cos(rad)) * g.dims.width + Math.abs(Math.sin(rad)) * g.dims.depth) / 2;
+      const hz = (Math.abs(Math.sin(rad)) * g.dims.width + Math.abs(Math.cos(rad)) * g.dims.depth) / 2;
+      obj.x = Math.min(Math.max(g.x, room.x + hx), room.x + Math.max(hx, room.length - hx));
+      obj.z = Math.min(Math.max(g.z, room.z + hz), room.z + Math.max(hz, room.width - hz));
+    }
     if (entry.placementType === "wall") {
       const snap = nearestWallSnap(g.x, g.z, [this.state.classroom, this.state.corridor], g.dims.width);
       if (snap) obj.wallAnchor = { areaId: snap.areaId, edge: snap.edge, offset: snap.offset };
@@ -565,8 +578,16 @@ export class App {
         prepaidRatio: prepaid,
         hasOnsitePayment: scenario.profiles.some((p) => p.id === "pay-on-site" && p.ratio > 0),
       };
+      // One head count everywhere: the mat arranger and the AI read the same
+      // number the event was created with.
+      this.session.participants = scenario.participantCount;
     }
     this.setWorkflow("layout");
+    // Two flat purple slabs in a shallow isometric view read as nothing on a
+    // phone — compact devices open the plan top-down.
+    if (typeof window !== "undefined" && window.matchMedia?.("(max-width: 600px)").matches) {
+      this.setView("top");
+    }
     this.recenterView();
     this.toast("場佈起點已建立，直接拖曳調整即可");
   }
@@ -779,7 +800,17 @@ export class App {
     if (!actualMeters || actualMeters <= 0) return;
     const measured = action === "classroom-length" ? this.getCalibrationDistance() ?? undefined : undefined;
     this.store.mutate((p) => applyCalibrationPath(p, action, actualMeters, measured, note));
-    this.toast(action === "record" ? "已記錄校正結果" : "已套用校正（可復原）", true);
+    // Concrete numbers in the toast — a 60→58 cm tile change is invisible on
+    // screen, so say exactly what the model now believes.
+    const cm = Math.round(actualMeters * 100);
+    const after = this.state;
+    const msg =
+      action === "tile" ? `地磚已設為 ${cm}×${cm} cm（可復原）`
+      : action === "door" ? `門寬已設為 ${cm} cm（可復原）`
+      : action === "classroom-length"
+        ? `教室已修正為 ${after.classroom.length.toFixed(1)}×${after.classroom.width.toFixed(1)} m（可復原）`
+        : "已記錄量測（尚未套用到圖上）";
+    this.toast(msg, action !== "record");
     this.cancelCalibration();
   }
 
@@ -1309,7 +1340,10 @@ export class App {
   private applyDesFrame(t: number, result: SimulationResult): void {
     const frame = frameAt(result, t);
     if (!frame) return;
-    this.session.simTime = frame.t;
+    // Track the CONTINUOUS clock, not the sampled frame time — assigning
+    // frame.t floored progress back to the sample grid, which pinned the
+    // playback at 0 s forever (dt per tick < sampleDt).
+    this.session.simTime = t;
     this.session.simQueues = frame.queues;
     this.session.simPositions = frame.agents
       .filter((a) => a.state !== "pending" && a.state !== "done")
@@ -1337,7 +1371,9 @@ export class App {
   private simLoop(): void {
     if (!this.session.simPlaying || this.session.simPaused) return;
     const now = performance.now();
-    const dt = Math.min(0.1, ((now - this.simLast) / 1000) * this.session.simSpeed);
+    // Cap a single tick at ~a quarter second of wall time so hitches don't
+    // teleport agents, while still letting high replay speeds progress.
+    const dt = Math.min(Math.max(0.1, 0.25 * this.session.simSpeed), ((now - this.simLast) / 1000) * this.session.simSpeed);
     this.simLast = now;
 
     if (this.session.simMode === "event-flow" && this.session.simResult) {
