@@ -106,18 +106,20 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
     id: "venue:tku-e310",
     name: "E310＋走廊（待現場校正）",
     builtin: true,
+    // 12 × 9 是從現場照片可數物件（桌椅列數、巧拼格數）推的起點，不是實測 —
+    // 所有尺寸都掛「待校正」，到現場用地磚／門寬／已知牆距校正。
     note: "工學大樓 3F E310 起點模板；到現場用一塊地磚／門寬／已知牆距 30 秒校正。",
-    classroom: { name: "教室", length: 10, width: 8, x: 0, z: 0 },
-    corridor: { name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+    classroom: { name: "教室", length: 12, width: 9, x: 0, z: 0 },
+    corridor: { name: "走廊", length: 12, width: 2, x: 0, z: 9 },
     tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
     fixtures: [
       { kind: "door", areaId: "classroom", edge: "s", offset: 8.6 },
-      { kind: "screen", areaId: "classroom", edge: "n", offset: 5 },
+      { kind: "screen", areaId: "classroom", edge: "n", offset: 6 },
     ],
     extraObjects: [
       {
         assetId: "builtin:stage-platform",
-        x: 5,
+        x: 6,
         z: 0.6,
         locked: true,
         surface: "floor",
@@ -125,7 +127,7 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
       },
       {
         assetId: "builtin:lectern",
-        x: 3.8,
+        x: 4.6,
         z: 0.6,
         locked: false,
         surface: "floor",

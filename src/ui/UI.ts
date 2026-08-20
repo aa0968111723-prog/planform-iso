@@ -633,6 +633,8 @@ export class UI {
   private matOrient: "v" | "h" = "v";
   private matSnug = true;
   private matMode: "individual" | "field" = "individual";
+  /** Venue the matMode default was last derived from — manual choices stick until the venue changes. */
+  private matModeVenue: string | undefined;
 
   private matOpts(): { matWidth: number; matDepth: number; gap: number; mode: "individual" | "field" } {
     if (this.matMode === "field") return { matWidth: 0.6, matDepth: 0.6, gap: 0, mode: "field" };
@@ -643,7 +645,10 @@ export class UI {
 
   private smartLayoutSection(): HTMLElement {
     const venueId = this.app.store.getState().venuePresetId;
-    this.matMode = venueId === "venue:tku-classroom" || venueId === "venue:tku-e310" ? "field" : this.matMode;
+    if (venueId !== this.matModeVenue) {
+      this.matModeVenue = venueId;
+      if (venueId === "venue:tku-classroom" || venueId === "venue:tku-e310") this.matMode = "field";
+    }
     const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input", inputmode: "numeric" }) as HTMLInputElement;
     pIn.addEventListener("change", () => { this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0)); });
     const regen = () => { this.app.computeMatCandidates(this.participants, this.matOpts()); };

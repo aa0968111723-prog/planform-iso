@@ -98,7 +98,7 @@ function tableObject(x: number, z: number): SceneObject {
   const entry = BUILTIN_CATALOG.find((e) => e.id === "builtin:table")!;
   return {
     id: uid("obj"), kind: entry.kind, x, z, rotationDeg: 0,
-    width: 1.8, depth: 0.6, height: entry.dimensions.height,
+    width: 1.5, depth: 0.6, height: entry.dimensions.height,
     locked: false, hidden: false, surface: "floor", elevation: 0,
     assetId: entry.id, note: "桌上放背包／水壺",
   };
@@ -158,7 +158,11 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
     const d = ZONE_DEFAULTS.meditation;
     const platform = project.objects.find((o) => o.assetId === "builtin:stage-platform");
     const platformFront = platform ? platform.z + platform.depth / 2 : c.z + 1.2;
-    project.zones.push(makeZone("meditation", c.x + c.length / 2, inZ(platformFront + d.depth / 2 + 0.25, d.depth / 2)));
+    // 有講台時，講師帶是講台前的一條窄走動帶（照片實況），壓縮深度留座位空間。
+    const depth = platform ? 1.2 : d.depth;
+    const zone = makeZone("meditation", c.x + c.length / 2, inZ(platformFront + depth / 2 + 0.25, depth / 2));
+    zone.depth = depth;
+    project.zones.push(zone);
   }
   if (needs.life) {
     const d = ZONE_DEFAULTS.life;
@@ -179,7 +183,15 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
     // Reserve a strip for the entrance-side zones, and a deeper front strip
     // only when a teacher zone actually needs the stage area.
     const entranceReserve = needs.checkin || needs.payment || needs.shoe || needs.backpack ? 1.9 : 0.6;
-    const frontReserve = needs.teacher ? 3.7 : inset;
+    // Reserve exactly what the front actually occupies (stage platform and/or
+    // the teacher strip), instead of a hardcoded depth.
+    const teacherZone = project.zones.find((z) => z.type === "meditation");
+    const platformObj = project.objects.find((o) => o.assetId === "builtin:stage-platform");
+    const frontObstacleZ = Math.max(
+      platformObj ? platformObj.z + platformObj.depth / 2 : c.z,
+      teacherZone ? teacherZone.z + teacherZone.depth / 2 : c.z,
+    );
+    const frontReserve = Math.max(inset, frontObstacleZ - c.z + 0.25);
     // A group-work zone lives along the +X side — keep the mats clear of it.
     const sideReserve = needs.groups ? ZONE_DEFAULTS.group.width + 1.0 : inset;
     const matArea = {
@@ -231,9 +243,9 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   if (project.venuePresetId === "venue:tku-e310" && needs.backpack) {
     const bag = project.zones.find((z) => z.type === "backpack");
     if (bag) {
-      const x = clamp(bag.x, c.x + 1.9, c.x + c.length - 1.9);
-      project.objects.push(tableObject(x - 1.0, backWallZ - 0.3));
-      project.objects.push(tableObject(x + 1.0, backWallZ - 0.3));
+      const x = clamp(bag.x, c.x + 1.7, c.x + c.length - 1.7);
+      project.objects.push(tableObject(x - 0.78, backWallZ - 0.31));
+      project.objects.push(tableObject(x + 0.78, backWallZ - 0.31));
     }
   }
 

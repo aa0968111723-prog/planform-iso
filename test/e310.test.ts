@@ -40,12 +40,15 @@ describe("E310 golden venue", () => {
       expect(g.gapZ).toBe(0);
       for (const m of groupMembers(g)) {
         expect(m.x - g.itemWidth / 2).toBeGreaterThanOrEqual(0);
-        expect(m.x + g.itemWidth / 2).toBeLessThanOrEqual(10);
+        expect(m.x + g.itemWidth / 2).toBeLessThanOrEqual(p.classroom.length);
         expect(m.z - g.itemDepth / 2).toBeGreaterThan(platform.z + platform.depth / 2);
-        expect(m.z + g.itemDepth / 2).toBeLessThan(8);
+        expect(m.z + g.itemDepth / 2).toBeLessThan(p.classroom.width);
       }
     }
-    expect(p.objects.filter((o) => o.width === 1.8 && o.depth === 0.6)).toHaveLength(2);
+    const fieldCapacity = p.groups.reduce(
+      (sum, g) => sum + g.cols * Math.floor((g.rows * g.itemDepth + 1e-9) / 0.9), 0);
+    expect(fieldCapacity).toBeGreaterThanOrEqual(60);
+    expect(p.objects.filter((o) => o.width === 1.5 && o.depth === 0.6)).toHaveLength(2);
   });
 
   it("one click golden scenario has the 40/20 branch and corridor-first route", () => {
@@ -64,8 +67,8 @@ describe("E310 golden venue", () => {
     ]);
     const result = runDiscreteEvent(scenario, { sampleDt: 5 });
     expect(result.completed).toBe(60);
-    expect(p.routes[0].points[0].z).toBeGreaterThanOrEqual(8);
-    expect(p.routes[0].points.some((point) => point.z === 8)).toBe(true);
+    expect(p.routes[0].points[0].z).toBeGreaterThanOrEqual(p.classroom.width);
+    expect(p.routes[0].points.some((point) => point.z === p.classroom.width)).toBe(true);
   });
 
   it("each field calibration path updates its field and clears its badge", () => {
@@ -77,9 +80,9 @@ describe("E310 golden venue", () => {
     applyCalibrationPath(p, "door", 0.8);
     expect(p.objects.find((o) => o.kind === "door")?.width).toBe(0.8);
     expect(p.calibration.confirmed.door).toBe(true);
-    applyCalibrationPath(p, "classroom-length", 12, 10);
-    expect(p.classroom.length).toBe(12);
-    expect(p.classroom.width).toBe(9.6);
+    applyCalibrationPath(p, "classroom-length", 13.2, 12);
+    expect(p.classroom.length).toBeCloseTo(13.2, 6);
+    expect(p.classroom.width).toBeCloseTo(9.9, 6);
     expect(calibrationComplete(p)).toBe(true);
     expect(calibrationFooterText(p)).toBe("");
   });

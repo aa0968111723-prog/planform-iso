@@ -133,9 +133,13 @@ export function generateLayouts(input: LayoutInput): LayoutCandidate[] {
 
 /**
  * Generate contiguous 60 × 60 cm mat fields. The group footprint is kept on
- * the tile grid and the capacity is deliberately reported as seats, not tile
- * count: one person uses one cell wide by two cells deep.
+ * the tile grid; capacity is reported as seats, not tile count. Seat pitch
+ * follows the club's real usage (photo-verified): one person per 0.6 m column,
+ * 0.9 m of field depth per row when packed, 1.2 m for the spacious option.
  */
+const FIELD_PITCH_DENSE = 0.9;
+const FIELD_PITCH_SPACIOUS = 1.2;
+
 function generateFieldLayouts(input: LayoutInput): LayoutCandidate[] {
   const n = Math.max(0, Math.floor(input.participants));
   const tile = 0.6;
@@ -144,19 +148,22 @@ function generateFieldLayouts(input: LayoutInput): LayoutCandidate[] {
   const D = Math.max(0, bounds.maxZ - bounds.minZ);
   const colsMax = Math.floor((W + 1e-9) / tile);
   const rowsMax = Math.floor((D + 1e-9) / tile);
-  const personRowsMax = Math.floor(rowsMax / 2);
-  if (n <= 0 || colsMax <= 0 || personRowsMax <= 0) return [];
+  if (n <= 0 || colsMax <= 0 || rowsMax < 2) return [];
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cz = (bounds.minZ + bounds.maxZ) / 2;
   const rot = input.rotationDeg ?? 0;
-  const block = (rows: number, cols: number) => ({ width: cols * tile, depth: rows * tile });
-  const centered = (rows: number, cols: number) => {
-    const size = block(rows, cols);
-    return { anchorX: cx - size.width / 2, anchorZ: cz - size.depth / 2 };
+  const seatsIn = (tileRows: number, cols: number, pitch: number) =>
+    cols * Math.floor((tileRows * tile + 1e-9) / pitch);
+  const rowsFor = (cols: number, people: number, pitch: number): number => {
+    const neededDepth = Math.ceil(people / Math.max(1, cols)) * pitch;
+    return Math.max(2, Math.min(rowsMax, Math.ceil(neededDepth / tile - 1e-9)));
   };
-  const make = (id: string, label: string, groups: GroupSpec[]): LayoutCandidate => {
-    const tiles = groups.reduce((sum, g) => sum + g.rows * g.cols, 0);
-    const capacity = Math.floor(tiles / 2);
+  const centered = (rows: number, cols: number) => ({
+    anchorX: cx - (cols * tile) / 2,
+    anchorZ: cz - (rows * tile) / 2,
+  });
+  const make = (id: string, base: string, groups: GroupSpec[], pitch: number): LayoutCandidate => {
+    const capacity = groups.reduce((sum, g) => sum + seatsIn(g.rows, g.cols, pitch), 0);
     const minX = Math.min(...groups.map((g) => g.anchorX));
     const minZ = Math.min(...groups.map((g) => g.anchorZ));
     const maxX = Math.max(...groups.map((g) => g.anchorX + g.cols * tile));
@@ -166,43 +173,41 @@ function generateFieldLayouts(input: LayoutInput): LayoutCandidate[] {
     const geometryFits = maxX <= bounds.maxX + 1e-6 && minX >= bounds.minX - 1e-6 && maxZ <= bounds.maxZ + 1e-6 && minZ >= bounds.minZ - 1e-6;
     if (!geometryFits) warnings.push("超出可用區域");
     return {
-      id, label, groups, count: capacity, capacity, mode: "field",
+      id, label: `${base}（可坐 ${capacity} 人）`, groups, count: capacity, capacity, mode: "field",
       footprint: { width: maxX - minX, depth: maxZ - minZ },
       warnings, fits: geometryFits && capacity >= n,
     };
   };
-  const rowsFor = (cols: number, people = n): number => Math.max(2, Math.min(personRowsMax, Math.ceil(people / Math.max(1, cols))) * 2);
   const group = (rows: number, cols: number, anchorX: number, anchorZ: number): GroupSpec => ({
     rows, cols, itemWidth: tile, itemDepth: tile, gapX: 0, gapZ: 0, rotationDeg: rot, anchorX, anchorZ,
   });
   const out: LayoutCandidate[] = [];
 
   // A — one centred field, favouring a compact rectangle.
-  const targetCols = Math.max(1, Math.min(colsMax, Math.ceil(Math.sqrt((n * 2 * W) / Math.max(D, tile)))));
-  const colsA = Math.min(colsMax, Math.max(1, targetCols));
-  const rowsA = rowsFor(colsA);
-  const a = centered(rowsA, colsA);
-  out.push(make("field-balanced", `A 整片座區 ${Math.floor(rowsA / 2)} × ${colsA}（可坐 ${Math.floor(rowsA * colsA / 2)} 人）`, [group(rowsA, colsA, a.anchorX, a.anchorZ)]));
+  const pitchFactor = FIELD_PITCH_DENSE / tile;
+  const targetCols = Math.max(1, Math.min(colsMax, Math.ceil(Math.sqrt((n * pitchFactor * W) / Math.max(D, tile)))));
+  const rowsA = rowsFor(targetCols, n, FIELD_PITCH_DENSE);
+  const a = centered(rowsA, targetCols);
+  out.push(make("field-balanced", "A 整片座區", [group(rowsA, targetCols, a.anchorX, a.anchorZ)], FIELD_PITCH_DENSE));
 
   // B — two contiguous fields with a real central walking lane.
   const aisle = Math.max(0.9, input.aisleWidth);
   const sideCols = Math.floor(Math.max(0, (W - aisle) / 2) / tile);
   if (sideCols > 0) {
-    const rowsB = rowsFor(sideCols, Math.ceil(n / 2));
+    const rowsB = rowsFor(sideCols, Math.ceil(n / 2), FIELD_PITCH_DENSE);
     const sideW = sideCols * tile;
     const totalW = sideW * 2 + aisle;
     const startX = cx - totalW / 2;
     const az = cz - (rowsB * tile) / 2;
-    out.push(make("field-aisle", `B 中央走道（可坐 ${sideCols * rowsB} 人）`, [
+    out.push(make("field-aisle", "B 中央走道", [
       group(rowsB, sideCols, startX, az),
       group(rowsB, sideCols, startX + sideW + aisle, az),
-    ]));
+    ], FIELD_PITCH_DENSE));
   }
 
-  // C — wider rows, still grid-aligned and gap-free.
-  const colsC = colsMax;
-  const rowsC = rowsFor(colsC);
-  const c = centered(rowsC, colsC);
-  out.push(make("field-spacious", `C 寬鬆座區（可坐 ${Math.floor(rowsC * colsC / 2)} 人）`, [group(rowsC, colsC, c.anchorX, c.anchorZ)]));
+  // C — same tiles, more space per person (larger seat pitch).
+  const rowsC = rowsFor(colsMax, n, FIELD_PITCH_SPACIOUS);
+  const c = centered(rowsC, colsMax);
+  out.push(make("field-spacious", "C 寬鬆（每人空間加大）", [group(rowsC, colsMax, c.anchorX, c.anchorZ)], FIELD_PITCH_SPACIOUS));
   return out;
 }

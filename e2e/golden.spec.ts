@@ -232,12 +232,12 @@ test.describe("Golden Flow 4 — E310 演講範例", () => {
     expect(p.groups.length).toBeGreaterThan(0);
     expect(p.routes.map((r) => r.type)).toContain("entry");
 
-    await page.locator('.navbtn[data-nav="route"]').click();
+    await page.locator(".topbar .chip", { hasText: "動線" }).first().click();
     await settle(page);
     await page.locator(".left button", { hasText: "▶ 模擬" }).click();
     await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible({ timeout: 20_000 });
 
-    await page.locator('.navbtn[data-nav="export"]').click();
+    await page.locator(".topbar .chip", { hasText: "分享" }).first().click();
     await settle(page);
     const download = page.waitForEvent("download");
     await page.locator(".left button", { hasText: "場佈總覽圖" }).click();
