@@ -28,6 +28,24 @@ import {
 import { groupCenter, groupFootprint, groupMembers, setGroupCenter } from "../core/arrays";
 import { validateProject, type Issue } from "../core/validation";
 import {
+  buildRoleBriefing,
+  partnerEmphasis,
+  partnerMarks,
+  partnerStatus,
+  type PartnerEmphasis,
+  type PartnerMark,
+  type PartnerRole,
+  type RoleBriefing,
+} from "../core/partner";
+import {
+  buildRehearsalTimeline,
+  comparePlainMetrics,
+  plainMetrics,
+  type PlainComparison,
+  type PlainMetrics,
+  type RehearsalEvent,
+} from "../core/rehearsal";
+import {
   objectFieldInfo,
   measure,
   snapMeasurePoint,
@@ -91,7 +109,8 @@ export interface Session {
   /** When set, scene shows agent draft instead of committed project. */
   agentPreview: Project | null;
   // Visual-communication + simulation state
-  teamView: boolean;
+  /** Partner Mode session, or null while the professional editor is active. */
+  partner: PartnerSession | null;
   simplify: boolean;
   focusRouteId: string | null;
   participants: number;
@@ -117,6 +136,26 @@ export interface Session {
   };
 }
 
+/** Live state of Partner Mode — the visual-first, read-only view of a plan. */
+export interface PartnerSession {
+  role: PartnerRole;
+  /** Rehearsal beats from the last run; empty until 演練 is pressed. */
+  timeline: RehearsalEvent[];
+  /** Pending AI suggestion, shown as a visual before/after. */
+  suggestion: PartnerSuggestion | null;
+  /** True while a rehearsal or suggestion is being computed. */
+  busy: boolean;
+}
+
+export interface PartnerSuggestion {
+  message: string;
+  before: PlainMetrics;
+  after: PlainMetrics;
+  comparison: PlainComparison;
+  /** Draft plan the agent proposes; applied only if the user accepts. */
+  afterProject: Project;
+}
+
 interface DragState {
   kind: "move" | "routeNode" | "box";
   startGround: { x: number; z: number } | null;
@@ -126,6 +165,12 @@ interface DragState {
   routeIndex?: number;
   moved: boolean;
   threshold: number;
+}
+
+/** Did the agent actually change the plan, or hand back the same layout? */
+function planDiffers(a: Project, b: Project): boolean {
+  const key = (p: Project) => JSON.stringify({ o: p.objects, z: p.zones, g: p.groups, r: p.routes });
+  return key(a) !== key(b);
 }
 
 function boundsOfPoints(points: { x: number; z: number }[]): { minX: number; maxX: number; minZ: number; maxZ: number } {
@@ -162,7 +207,7 @@ export class App {
     workflow: "site",
     issues: [],
     agentPreview: null,
-    teamView: false,
+    partner: null,
     simplify: false,
     focusRouteId: null,
     participants: 30,
@@ -279,9 +324,12 @@ export class App {
       ghost: this.session.ghost,
       measure: this.session.measure,
       calibrate: this.session.calibrate,
-      showLabels: this.session.showLabels || this.session.teamView,
+      // Partner Mode names places (zones) and flows (routes); per-object name
+      // tags on top of that is what turns the plan into label soup.
+      showLabels: this.session.showLabels,
       focusRouteId: this.session.focusRouteId,
-      simplify: this.session.simplify || this.session.teamView,
+      simplify: this.session.simplify || !!this.session.partner,
+      partner: this.partnerView(),
       simPositions: this.session.simPositions,
       bottlenecks: this.session.bottlenecks,
       simQueues: this.session.simQueues,
@@ -722,10 +770,140 @@ export class App {
   }
   private toast(msg: string, undo = false): void { this.onToast?.(msg, undo); }
 
-  // --- visual communication ---------------------------------------------
-  setTeamView(on: boolean): void {
-    this.session.teamView = on;
-    if (on) { this.session.selection = new Set(); this.setView("top"); }
+  // --- partner mode ------------------------------------------------------
+
+  /**
+   * Enter the visual-first partner view. Nothing about the plan changes — the
+   * editor state is left exactly as it was so leaving returns you to your work.
+   */
+  enterPartnerMode(role: PartnerRole = "all"): void {
+    this.session.partner = { role, timeline: [], suggestion: null, busy: false };
+    this.session.selection = new Set();
+    this.cancelPlacement();
+    if (this.session.mode === "measure") this.stopMeasure();
+    if (this.session.mode === "calibrate") this.cancelCalibration();
+    this.runValidation();
+    this.setView("top");
+    this.render();
+    // Framing is left to the UI: the partner chrome has not been laid out yet,
+    // so fitting here would frame the plan against the editor's rect.
+  }
+
+  exitPartnerMode(): void {
+    if (this.session.partner?.suggestion) this.dismissPartnerSuggestion();
+    this.session.partner = null;
+    this.render();
+  }
+
+  setPartnerRole(role: PartnerRole): void {
+    if (!this.session.partner) return;
+    this.session.partner.role = role;
+    this.render();
+  }
+
+  /** Emphasis + marks the scene needs to render the partner view. */
+  private partnerView(): { role: PartnerRole; emphasis: PartnerEmphasis; marks: PartnerMark[] } | null {
+    const p = this.session.partner;
+    if (!p) return null;
+    return {
+      role: p.role,
+      emphasis: partnerEmphasis(this.viewState, p.role),
+      marks: partnerMarks(this.session.issues),
+    };
+  }
+
+  partnerBriefing(): RoleBriefing {
+    const role = this.session.partner?.role ?? "all";
+    return buildRoleBriefing(this.state, role, this.activeScenario());
+  }
+
+  partnerMarks(): PartnerMark[] {
+    return partnerMarks(this.session.issues);
+  }
+
+  partnerStatus(): { tone: "bad" | "warn" | "ok"; text: string } {
+    return partnerStatus(this.partnerMarks());
+  }
+
+  /** Run the rehearsal and turn it into wall-clock sentences. */
+  runRehearsal(): RehearsalEvent[] {
+    const result = this.runEventSimulation();
+    const timeline = buildRehearsalTimeline(result);
+    if (this.session.partner) this.session.partner.timeline = timeline;
+    this.notifyUi();
+    return timeline;
+  }
+
+  /** Simulate a plan without touching the store — used for the "after" side. */
+  private simulatePlan(project: Project): SimulationResult {
+    const existing =
+      (project.activeScenarioId && project.scenarios?.find((s) => s.id === project.activeScenarioId)) ||
+      project.scenarios?.[0] ||
+      null;
+    const q = this.session.simQuick;
+    const scenario: EventScenario = existing
+      ? { ...existing, participantCount: q.participants, arrivalWindowSeconds: q.arrivalWindowSeconds }
+      : createDefaultScenario(project, { participantCount: q.participants });
+    return runDiscreteEvent(scenario, { sampleDt: 2 });
+  }
+
+  /**
+   * Ask the agent to improve the layout and express the answer as a visual
+   * before/after with numbers a partner already understands. The plan is not
+   * modified until the suggestion is accepted.
+   */
+  async requestPartnerSuggestion(): Promise<PartnerSuggestion | null> {
+    const p = this.session.partner;
+    if (!p) return null;
+    p.busy = true;
+    this.notifyUi();
+    try {
+      // Ask for the two improvements the agent already knows how to make:
+      // keep the doorway clear, and split check-in from payment.
+      const result = await this.quickAgent.run({
+        text: "幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門",
+      });
+      const draft = this.quickAgent.getDraftProject();
+      if (!draft || !planDiffers(this.state, draft)) {
+        this.dismissPartnerSuggestion();
+        p.suggestion = null;
+        this.toast("目前的排法已經夠順，沒有需要改的地方");
+        return null;
+      }
+      const before = plainMetrics(this.simulatePlan(this.state));
+      const after = plainMetrics(this.simulatePlan(draft));
+      const suggestion: PartnerSuggestion = {
+        message: result.response.message,
+        before,
+        after,
+        comparison: comparePlainMetrics(before, after),
+        afterProject: draft,
+      };
+      p.suggestion = suggestion;
+      return suggestion;
+    } catch {
+      this.toast("AI 暫時無法給建議，稍後再試");
+      return null;
+    } finally {
+      p.busy = false;
+      this.notifyUi();
+    }
+  }
+
+  applyPartnerSuggestion(): void {
+    if (!this.session.partner?.suggestion) return;
+    if (this.quickAgent.isPreviewActive()) this.quickAgent.commit();
+    this.session.partner.suggestion = null;
+    this.session.agentPreview = null;
+    this.runValidation();
+    this.toast("已套用建議方案（可復原）", true);
+    this.render();
+  }
+
+  dismissPartnerSuggestion(): void {
+    if (this.quickAgent.isPreviewActive()) this.quickAgent.rollback();
+    this.session.agentPreview = null;
+    if (this.session.partner) this.session.partner.suggestion = null;
     this.render();
   }
   setSimplify(on: boolean): void { this.session.simplify = on; this.render(); }
@@ -1189,6 +1367,10 @@ export class App {
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
     // Two or more fingers → this is a camera gesture (pinch/pan). Never drag objects.
     if (this.pointers.size >= 2) { this.abortDrag(); this.scene.setControlsEnabled(true); return; }
+
+    // Partner Mode is read-only: a volunteer looking at the plan must not be
+    // able to select or drag the furniture. Camera gestures still work.
+    if (this.session.partner) { this.scene.setControlsEnabled(true); return; }
 
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 

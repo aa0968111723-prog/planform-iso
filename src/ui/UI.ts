@@ -2,7 +2,6 @@ import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
 import type { MeasurementType, RouteType, ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
-import { buildSummaryLines } from "../core/summary";
 import { ROUTE_PRESETS } from "../core/routes";
 import { issueCounts, type Severity } from "../core/validation";
 import { dockingPolicy, type WorkspaceMode } from "../core/viewport";
@@ -16,6 +15,7 @@ import { buildVenueCaptureFlow } from "./venueCapture";
 import { refreshSimPanel } from "./simPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
+import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
 
@@ -47,7 +47,7 @@ export class UI {
   private measurebar = el("div", { class: "measurebar", style: "display:none" });
   private box = el("div", { class: "boxsel", style: "display:none" });
   private toast = el("div", { class: "toast", style: "display:none" });
-  private teambar = el("div", { class: "teambar" });
+  private partner: PartnerModeHandles;
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
@@ -68,19 +68,25 @@ export class UI {
   private builtHeaderMode: WorkspaceMode | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
+    this.partner = buildPartnerMode(app, {
+      onExit: () => this.app.exitPartnerMode(),
+      onLayoutChange: () => this.viewport.schedule(),
+    });
     root.append(
       this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
-      this.box, this.toast, this.teambar, this.ctxbar, this.menu.root,
+      this.box, this.toast, this.ctxbar, this.menu.root,
+      this.partner.top, this.partner.dock, this.partner.sheet,
     );
     this.agentSheet = buildQuickAgentSheet(app);
     root.append(this.agentSheet.root);
 
     this.viewport = new WorkspaceViewport(root, app.scene.domElement);
     this.viewport.registerChrome({
-      header: [this.topbar, this.teambar],
-      nav: this.nav,
+      header: [this.topbar, this.partner.top],
+      nav: [this.nav, this.partner.dock],
       left: this.left,
       right: this.right,
+      sheets: [this.partner.sheet],
       bars: [this.ctxbar, this.placebar, this.measurebar, this.agentSheet.root],
     });
     this.viewport.start();
@@ -206,7 +212,7 @@ export class UI {
       snapSel,
       button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent"),
     ]);
-    const team = button("檢視給團隊", () => this.app.setTeamView(true), "chip chip--primary");
+    const team = button("👥 夥伴模式", () => this.app.enterPartnerMode(), "chip chip--primary");
     this.topbar.append(
       el("div", { class: "topbar__title", text: "平面場 ISO" }),
       history, flows, views, more, el("div", { class: "topbar__spacer" }), team,
@@ -249,7 +255,7 @@ export class UI {
         items: [
           { label: "現場量測", onSelect: () => this.app.startMeasure(sess.measureType) },
           { label: "現場校正", onSelect: () => { this.app.setWorkflow("site"); this.app.startCalibration(); this.setSheet("workflow"); } },
-          { label: "檢視給團隊", onSelect: () => this.app.setTeamView(true) },
+          { label: "👥 夥伴模式", sub: "給夥伴看的乾淨視圖", onSelect: () => this.app.enterPartnerMode() },
         ],
       },
       {
@@ -760,8 +766,8 @@ export class UI {
     this.updateSmartBox();
     if (sess.workflow === "route") refreshSimPanel(this.simPanelRoot, this.app);
 
-    // Team / partner view overlay.
-    this.updateTeamView();
+    // Partner Mode shell (replaces the editor chrome entirely).
+    this.updatePartnerMode();
 
     // Inspector: docked rail on desktop, opt-in sheet everywhere else.
     const hasSel = sess.selection.size > 0;
@@ -769,13 +775,14 @@ export class UI {
     this.right.innerHTML = "";
     if (this.compact && this.sheet === "inspector") this.right.append(this.sheetHandle("屬性"));
     this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
-    const dockedInspector = !this.compact && hasSel && !sess.teamView && dockingPolicy(this.mode).autoOpenInspector;
+    const inPartner = !!sess.partner;
+    const dockedInspector = !this.compact && hasSel && !inPartner && dockingPolicy(this.mode).autoOpenInspector;
     this.root.classList.toggle("show-inspector", dockedInspector);
 
     // Compact selection never auto-opens the inspector; it gets a context bar.
     // While placing or measuring, the mode's own bar owns that slot instead.
     const showCtx = this.compact && hasSel && this.sheet !== "inspector"
-      && !sess.teamView && sess.mode === "select";
+      && !inPartner && sess.mode === "select";
     this.ctxbar.style.display = showCtx ? "flex" : "none";
     if (showCtx) renderContextBar(this.ctxbar, this.app, { onOpenProperties: () => { this.setSheet("inspector"); this.update(); } });
 
@@ -803,35 +810,33 @@ export class UI {
     return true;
   }
 
-  private updateTeamView(): void {
-    const on = this.app.session.teamView;
-    this.root.classList.toggle("team", on);
-    this.teambar.innerHTML = "";
-    if (!on) return;
-    const s = this.app.store.getState();
-    const legend = el("div", { class: "teambar__legend" });
-    for (const z of s.zones) legend.append(el("span", { class: "teamchip" }, [el("span", { class: "sw", style: `background:${z.color}` }), el("span", { text: `${z.icon ?? ""}${z.name}` })]));
-    for (const r of s.routes) legend.append(el("span", { class: "teamchip" }, [el("span", { class: "sw", style: `background:${r.color}` }), el("span", { text: r.name })]));
-    this.teambar.append(
-      el("div", { class: "teambar__head" }, [
-        el("div", {}, [
-          el("div", { class: "teambar__title", text: s.name || "活動場佈" }),
-          el("div", { class: "teambar__desc", text: s.description || buildSummaryLines(s).slice(0, 2).join("　") }),
-          ...(this.app.session.simResult
-            ? [el("div", {
-              class: "teambar__desc",
-              text: this.app.session.simResult.summaryLines.join(" "),
-            })]
-            : []),
-        ]),
-        el("div", { class: "row" }, [
-          button("分享圖", () => downloadPng(renderConstructionPlan(s, { preset: "full", simplify: true }), "planform-overview.png"), "chip"),
-          button("退出檢視", () => this.app.setTeamView(false), "chip chip--primary"),
-        ]),
-      ]),
-      legend,
-    );
+  /**
+   * Partner Mode replaces the editor chrome rather than layering on top of it:
+   * the topbar, rails, bottom nav and context bar all go away, so the plan is
+   * the only thing on screen.
+   */
+  private updatePartnerMode(): void {
+    const on = !!this.app.session.partner;
+    this.root.classList.toggle("partner", on);
+    if (on) {
+      this.setSheet("none");
+      this.menu.close();
+      this.partner.update();
+    } else if (this.partner.currentSheet() !== "none") {
+      this.partner.closeSheet();
+    }
+    if (on !== this.partnerWasOn) {
+      this.partnerWasOn = on;
+      // Swapping the whole chrome changes the visible canvas rect, so re-frame
+      // once the new strips have actually been laid out and measured.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        this.viewport.measure();
+        this.app.recenterView();
+      }));
+    }
   }
+
+  private partnerWasOn = false;
 
   private updateMeasureBar(): void {
     const mode = this.app.session.mode;
@@ -870,6 +875,13 @@ export class UI {
     window.addEventListener("keydown", (e) => {
       const tgt = e.target as HTMLElement;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "SELECT" || tgt.tagName === "TEXTAREA")) return;
+      // Partner Mode is read-only: only Escape (close a sheet, then leave).
+      if (this.app.session.partner) {
+        if (e.key !== "Escape") return;
+        if (this.partner.currentSheet() !== "none") this.partner.closeSheet();
+        else this.app.exitPartnerMode();
+        return;
+      }
       const k = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); this.app.undo(); }
       else if ((e.ctrlKey || e.metaKey) && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); this.app.redo(); }

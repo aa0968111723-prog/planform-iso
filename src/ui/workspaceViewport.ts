@@ -23,12 +23,15 @@ import {
 export interface WorkspaceChrome {
   /** Top-anchored bars; the tallest visible one is the header inset. */
   header: HTMLElement | HTMLElement[];
-  nav: HTMLElement;
+  /** Bottom-anchored permanent bars (editor nav, partner dock). */
+  nav: HTMLElement | HTMLElement[];
   /** Bottom sheets on compact layouts, docked rails on desktop. */
   left: HTMLElement;
   right: HTMLElement;
   /** Transient bottom bars (selection context, placement, measure). */
   bars: HTMLElement[];
+  /** Extra bottom sheets that behave like `left`/`right` (partner sheet). */
+  sheets?: HTMLElement[];
 }
 
 export interface WorkspaceViewportState {
@@ -50,6 +53,10 @@ type Listener = (state: WorkspaceViewportState) => void;
 
 function headers(chrome: WorkspaceChrome): HTMLElement[] {
   return Array.isArray(chrome.header) ? chrome.header : [chrome.header];
+}
+
+function navs(chrome: WorkspaceChrome): HTMLElement[] {
+  return Array.isArray(chrome.nav) ? chrome.nav : [chrome.nav];
 }
 
 function visible(node: HTMLElement | null | undefined): boolean {
@@ -90,7 +97,10 @@ export class WorkspaceViewport {
 
   registerChrome(chrome: WorkspaceChrome): void {
     this.chrome = chrome;
-    const nodes = [...headers(chrome), chrome.nav, chrome.left, chrome.right, ...chrome.bars];
+    const nodes = [
+      ...headers(chrome), ...navs(chrome), chrome.left, chrome.right,
+      ...(chrome.sheets ?? []), ...chrome.bars,
+    ];
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver?.disconnect();
       this.resizeObserver = new ResizeObserver(() => this.schedule());
@@ -183,7 +193,8 @@ export class WorkspaceViewport {
     if (!c) return { ...EMPTY_CHROME };
     // Team view swaps the editing header for its own bar; take whichever is up.
     const header = Math.max(0, ...headers(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
-    const nav = visible(c.nav) ? c.nav.getBoundingClientRect().height : 0;
+    // Editor bottom nav and partner dock are mutually exclusive; take whichever is up.
+    const nav = Math.max(0, ...navs(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
     // Rail widths only count when the panel is genuinely docked beside the
     // canvas; in sheet mode it is a bottom overlay instead.
     const docked = (node: HTMLElement) =>
@@ -195,6 +206,7 @@ export class WorkspaceViewport {
     let sheet = 0;
     if (left === 0) sheet = Math.max(sheet, bottomOverlayHeight(c.left, canvas));
     if (right === 0) sheet = Math.max(sheet, bottomOverlayHeight(c.right, canvas));
+    for (const node of c.sheets ?? []) sheet = Math.max(sheet, bottomOverlayHeight(node, canvas));
     let bar = 0;
     for (const node of c.bars) bar = Math.max(bar, bottomOverlayHeight(node, canvas));
 

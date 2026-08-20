@@ -35,6 +35,7 @@ import { applyRendererLook, installStudioLighting } from "./lighting";
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
+import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
 
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
@@ -69,7 +70,22 @@ interface SessionView {
   bottlenecks?: { x: number; z: number; count: number }[];
   simQueues?: Record<string, number>;
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
+  /** Non-null in Partner Mode: emphasis per entity plus red/orange/green marks. */
+  partner?: PartnerPresentation | null;
 }
+
+/** How the scene should present a plan to a partner rather than an editor. */
+export interface PartnerPresentation {
+  role: PartnerRole;
+  emphasis: PartnerEmphasis;
+  marks: PartnerMark[];
+}
+
+const MARK_COLOR: Record<PartnerMark["tone"], string> = {
+  bad: "#ef4444",
+  warn: "#f59e0b",
+  ok: "#22c55e",
+};
 
 const SIMPLIFY_HIDE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["switch", "computer"]);
 
@@ -109,6 +125,7 @@ export class SceneManager {
   private ghostGroup = new Group();
   private measureGroup = new Group(); // persistent dimension lines
   private overlayGroup = new Group(); // selection + live measure/calibrate
+  private partnerGroup = new Group(); // partner-mode marks (never in editor mode)
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
   private stationLabels = new Map<string, TextLabel>();
@@ -135,6 +152,7 @@ export class SceneManager {
     this.scene.add(
       this.floorGroup, this.tileGroup, this.zoneGroup, this.objectGroup,
       this.arrayGroupRoot, this.routeGroup, this.ghostGroup, this.measureGroup, this.overlayGroup,
+      this.partnerGroup,
     );
 
     this.camera = new OrthographicCamera();
@@ -312,6 +330,8 @@ export class SceneManager {
     this.catalog = catalogFromProject(project);
     this.layersState = project.layers;
     const simplify = session.simplify ?? false;
+    const partner = session.partner ?? null;
+    this.partner = partner;
     this.syncAreasAndTiles(project, simplify);
     this.syncObjects(project, session.showLabels, simplify);
     this.syncArrays(project);
@@ -320,7 +340,56 @@ export class SceneManager {
     this.syncGhost(session.ghost);
     this.syncMeasurements(project, simplify);
     this.syncOverlay(project, session);
+    this.syncPartner(partner);
   }
+
+  /** Current partner presentation, or null while the editor is active. */
+  private partner: PartnerPresentation | null = null;
+
+  /**
+   * Partner marks: a red / orange / green pin on the spot, with the plain
+   * sentence describing what to do. Rebuilt wholesale — there are only a
+   * handful and they change with every validation pass.
+   */
+  private syncPartner(partner: PartnerPresentation | null): void {
+    const sig = partner ? JSON.stringify(partner.marks) : "";
+    if (sig === this.lastPartnerSig) { this.partnerGroup.visible = !!partner; return; }
+    this.lastPartnerSig = sig;
+    for (const label of this.partnerLabels) label.dispose();
+    this.partnerLabels = [];
+    clearGroup(this.partnerGroup);
+    this.partnerGroup.visible = !!partner;
+    if (!partner) return;
+    partner.marks.forEach((mark, i) => {
+      const color = MARK_COLOR[mark.tone];
+      const pin = new Mesh(
+        new BoxGeometry(0.34, 0.9, 0.34),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
+      );
+      pin.position.set(mark.x, 0.45, mark.z);
+      this.partnerGroup.add(pin);
+      const halo = new Mesh(
+        new PlaneGeometry(1.1, 1.1),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.28, depthWrite: false }),
+      );
+      halo.rotation.x = -Math.PI / 2;
+      halo.position.set(mark.x, 0.05, mark.z);
+      this.partnerGroup.add(halo);
+      // Only things you must act on get words on the plan. A green mark is a
+      // reassuring dot; its sentence lives in the 要注意的地方 sheet.
+      if (mark.tone === "ok") return;
+      const label = new TextLabel({ width: 512, height: 128, fontSize: 54 });
+      label.set(mark.text, color);
+      label.sprite.scale.set(2.6, 0.65, 1);
+      // Stagger heights so two nearby problems do not overprint each other.
+      label.sprite.position.set(mark.x, 1.35 + (i % 3) * 0.55, mark.z);
+      this.partnerLabels.push(label);
+      this.partnerGroup.add(label.sprite);
+    });
+  }
+
+  private lastPartnerSig = "";
+  private partnerLabels: TextLabel[] = [];
 
   private recenter(project: Project): void {
     this.fitBounds(planBounds(project));
@@ -414,7 +483,11 @@ export class SceneManager {
       }
       entry.group.position.set(o.x, o.elevation, o.z);
       entry.group.rotation.y = o.rotationDeg * D2R;
-      entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind));
+      // In Partner Mode, objects that belong to another role drop out entirely:
+      // their materials are shared from a cache, so fading them would tint every
+      // other object of the same kind too.
+      const roleMuted = !!this.partner && this.partner.emphasis.objects[o.id] === "muted";
+      entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind)) && !roleMuted;
       if (entry.label) {
         entry.label.sprite.visible = showLabels && !o.hidden;
         if (showLabels) {
@@ -471,14 +544,17 @@ export class SceneManager {
 
   private syncZones(project: Project): void {
     this.zoneGroup.visible = this.layersState.zones;
+    const partner = this.partner;
     const seen = new Set<string>();
     for (const zone of project.zones) {
       seen.add(zone.id);
-      const sig = `${zone.width}|${zone.depth}`;
+      // Partner labels are drawn at a higher texture resolution, so the mode
+      // is part of the signature and the node is rebuilt when it changes.
+      const sig = `${zone.width}|${zone.depth}|${partner ? "partner" : "editor"}`;
       let entry = this.zoneNodes.get(zone.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.zoneGroup.remove(entry.group); entry.label.dispose(); }
-        entry = this.buildZone(zone, sig);
+        entry = this.buildZone(zone, sig, !!partner);
         this.zoneGroup.add(entry.group);
         this.zoneNodes.set(zone.id, entry);
       }
@@ -486,17 +562,32 @@ export class SceneManager {
       entry.group.visible = !zone.hidden;
       const fill = entry.group.getObjectByName("fill") as Mesh;
       const edges = entry.group.getObjectByName("edges") as LineSegments;
-      (fill.material as MeshStandardMaterial).color.set(zone.color);
-      (edges.material as LineBasicMaterial).color.set(zone.color);
+      const fillMat = fill.material as MeshStandardMaterial;
+      const edgeMat = edges.material as LineBasicMaterial;
+      fillMat.color.set(zone.color);
+      edgeMat.color.set(zone.color);
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
-      entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), "#e2e8f0");
+      if (partner) {
+        // A zone the current role owns reads as a solid, labelled place; the
+        // rest stay as faint context so the room still makes sense.
+        const muted = partner.emphasis.zones[zone.id] === "muted";
+        fillMat.opacity = muted ? 0.07 : 0.4;
+        edgeMat.opacity = muted ? 0.25 : 1;
+        entry.label.sprite.visible = !muted;
+        entry.label.set(`${zone.icon ?? ""} ${zone.name}${cap}`.trim(), "#f8fafc");
+      } else {
+        fillMat.opacity = 0.2;
+        edgeMat.opacity = 0.9;
+        entry.label.sprite.visible = true;
+        entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), "#e2e8f0");
+      }
     }
     for (const [id, entry] of this.zoneNodes) {
       if (!seen.has(id)) { this.zoneGroup.remove(entry.group); entry.label.dispose(); this.zoneNodes.delete(id); }
     }
   }
 
-  private buildZone(zone: Zone, sig: string) {
+  private buildZone(zone: Zone, sig: string, partner: boolean) {
     const group = new Group();
     const fill = new Mesh(
       new PlaneGeometry(zone.width, zone.depth),
@@ -515,7 +606,10 @@ export class SceneManager {
     edges.position.y = 0.02;
     edges.name = "edges";
     group.add(edges);
-    const label = new TextLabel();
+    const label = partner
+      ? new TextLabel({ width: 640, height: 140, fontSize: 62 })
+      : new TextLabel();
+    if (partner) label.sprite.scale.set(2.9, 0.64, 1);
     label.sprite.position.y = 0.5;
     group.add(label.sprite);
     return { group, label, sig };
@@ -527,17 +621,23 @@ export class SceneManager {
     const seen = new Set<string>();
     for (const route of project.routes) {
       seen.add(route.id);
-      const dim = focusRouteId !== null && focusRouteId !== route.id;
-      const sig = JSON.stringify(route.points) + route.color + (dim ? "|dim" : "");
+      const partner = this.partner;
+      const muted = !!partner && partner.emphasis.routes[route.id] === "muted";
+      const dim = muted || (focusRouteId !== null && focusRouteId !== route.id);
+      const sig = JSON.stringify(route.points) + route.color + (dim ? "|dim" : "") + (partner ? "|partner" : "");
       let entry = this.routeNodes.get(route.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.routeGroup.remove(entry.group); disposeObject(entry.group); entry.label.dispose(); }
-        entry = this.buildRoute(route, 0.06, dim, sig);
+        entry = this.buildRoute(route, 0.06, dim, sig, !!partner);
         this.routeGroup.add(entry.group);
         this.routeNodes.set(route.id, entry);
       }
       entry.group.visible = route.visible;
-      entry.label.set(route.name, dim ? "#64748b" : route.color);
+      // In the 全部 overview the arrows, colours and ①②③ badges carry the flow;
+      // adding four route names on top is what made a phone-sized plan
+      // unreadable. Names come back as soon as a role narrows the picture.
+      entry.label.sprite.visible = partner ? partner.role !== "all" && !dim : true;
+      entry.label.set(partner ? `${routeIcon(route)} ${route.name}` : route.name, dim ? "#64748b" : route.color);
       entry.group.traverse((o) => { if (o instanceof Mesh && o.userData.type === "routeNode") this.routeNodeMeshes.push(o); });
     }
     for (const [id, entry] of this.routeNodes) {
@@ -545,44 +645,68 @@ export class SceneManager {
     }
   }
 
-  private buildRoute(route: Route2, y: number, dim: boolean, sig: string) {
+  private buildRoute(route: Route2, y: number, dim: boolean, sig: string, partner = false) {
     const group = new Group();
     const color = dim ? "#475569" : route.color;
-    const opacity = dim ? 0.35 : 1;
+    const opacity = dim ? (partner ? 0.2 : 0.35) : 1;
+    // Partner mode draws the flow as a bold arrow a stranger can follow across
+    // the room; the editor keeps the thinner, less obtrusive ribbon.
+    const width = dim ? 0.06 : partner ? 0.3 : 0.12;
+    const arrowLen = partner ? 0.8 : 0.34;
+    const arrowWidth = partner ? 0.52 : 0.22;
     // Thick ribbon: a flat box per segment (WebGL line width is unreliable).
     for (let i = 0; i < route.points.length - 1; i++) {
       const a = route.points[i], b = route.points[i + 1];
       const len = Math.hypot(b.x - a.x, b.z - a.z);
       if (len < 1e-4) continue;
-      const ribbon = new Mesh(new BoxGeometry(len, 0.02, dim ? 0.06 : 0.12), new MeshBasicMaterial({ color, transparent: true, opacity }));
+      const ribbon = new Mesh(new BoxGeometry(len, 0.02, width), new MeshBasicMaterial({ color, transparent: true, opacity }));
       ribbon.position.set((a.x + b.x) / 2, y, (a.z + b.z) / 2);
       ribbon.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
       group.add(ribbon);
       // Direction arrow at segment midpoint.
-      const arrow = new Mesh(new BoxGeometry(0.34, 0.02, 0.22), new MeshBasicMaterial({ color, transparent: true, opacity }));
+      const arrow = new Mesh(new BoxGeometry(arrowLen, 0.02, arrowWidth), new MeshBasicMaterial({ color, transparent: true, opacity }));
       arrow.position.set((a.x + b.x) / 2, y + 0.01, (a.z + b.z) / 2);
       arrow.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
       group.add(arrow);
+      if (partner && !dim) {
+        // A second, narrower bar just behind the tip reads as an arrowhead
+        // from directly above without needing a cone mesh.
+        const head = new Mesh(new BoxGeometry(arrowLen * 0.5, 0.02, arrowWidth * 0.5), new MeshBasicMaterial({ color, transparent: true, opacity }));
+        head.position.set(
+          (a.x + b.x) / 2 + ((b.x - a.x) / len) * arrowLen * 0.5,
+          y + 0.02,
+          (a.z + b.z) / 2 + ((b.z - a.z) / len) * arrowLen * 0.5,
+        );
+        head.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+        group.add(head);
+      }
     }
     // Step-number markers + start/end colours.
     route.points.forEach((p, index) => {
       const isStart = index === 0;
       const isEnd = index === route.points.length - 1 && route.points.length > 1;
       const c = dim ? "#475569" : isStart ? "#22c55e" : isEnd ? "#ef4444" : route.color;
-      const node = new Mesh(new BoxGeometry(0.3, 0.3, 0.3), new MeshBasicMaterial({ color: c, transparent: true, opacity }));
+      const size = partner && !dim ? 0.44 : 0.3;
+      const node = new Mesh(new BoxGeometry(size, size, size), new MeshBasicMaterial({ color: c, transparent: true, opacity }));
       node.position.set(p.x, y, p.z);
       node.userData = { type: "routeNode", id: route.id, index };
       group.add(node);
       if (!dim) {
-        const numLabel = new TextLabel();
-        numLabel.set(String(index + 1), "#0b1120");
-        numLabel.sprite.scale.set(0.5, 0.5, 1);
-        numLabel.sprite.position.set(p.x, y + 0.5, p.z);
+        const numLabel = partner
+          ? new TextLabel({ width: 160, height: 160, fontSize: 108 })
+          : new TextLabel();
+        numLabel.set(partner ? circledNumber(index + 1) : String(index + 1), partner ? "#f8fafc" : "#0b1120");
+        numLabel.sprite.scale.set(partner ? 0.9 : 0.5, partner ? 0.9 : 0.5, 1);
+        numLabel.sprite.position.set(p.x, y + (partner ? 0.75 : 0.5), p.z);
         group.add(numLabel.sprite);
       }
     });
-    const label = new TextLabel();
-    if (route.points[0]) label.sprite.position.set(route.points[0].x, 0.9, route.points[0].z);
+    const label = partner ? new TextLabel({ width: 640, height: 140, fontSize: 58 }) : new TextLabel();
+    if (partner) label.sprite.scale.set(2.8, 0.62, 1);
+    // The name sits at the middle of the walk, not on top of step ① — and in
+    // partner mode it rides above the step badges so both stay readable.
+    const anchor = partner ? polylineMidpoint(route.points) : route.points[0];
+    if (anchor) label.sprite.position.set(anchor.x, partner ? 1.7 : 0.9, anchor.z);
     group.add(label.sprite);
     return { group, label, sig };
   }
@@ -898,6 +1022,46 @@ export class SceneManager {
   }
 }
 
+/** Point half-way along a polyline by arc length — where a route name reads best. */
+function polylineMidpoint(points: { x: number; z: number }[]): { x: number; z: number } | null {
+  if (!points.length) return null;
+  if (points.length === 1) return points[0];
+  let total = 0;
+  const segs: number[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const d = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].z - points[i].z);
+    segs.push(d);
+    total += d;
+  }
+  if (total < 1e-6) return points[0];
+  let travelled = 0;
+  for (let i = 0; i < segs.length; i++) {
+    if (travelled + segs[i] >= total / 2) {
+      const t = segs[i] < 1e-6 ? 0 : (total / 2 - travelled) / segs[i];
+      return {
+        x: points[i].x + (points[i + 1].x - points[i].x) * t,
+        z: points[i].z + (points[i + 1].z - points[i].z) * t,
+      };
+    }
+    travelled += segs[i];
+  }
+  return points[points.length - 1];
+}
+
+/** ①②③… for partner-facing step numbers; falls back to plain digits past 20. */
+function circledNumber(n: number): string {
+  return n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : String(n);
+}
+
+const ROUTE_ICONS: Record<string, string> = {
+  entry: "🚪", registration: "👋", shoe: "👟", backpack: "🎒",
+  seating: "🧎", group: "👥", staff: "🦺", custom: "➰",
+};
+
+function routeIcon(route: { id: string; color: string; points: unknown[] } & { type?: string }): string {
+  return ROUTE_ICONS[route.type ?? ""] ?? "➰";
+}
+
 /** World-space bounds of the whole plan (classroom + corridor). */
 export function planBounds(project: Project): { minX: number; maxX: number; minZ: number; maxZ: number } {
   const { classroom, corridor } = project;
@@ -909,7 +1073,7 @@ export function planBounds(project: Project): { minX: number; maxX: number; minZ
   };
 }
 
-interface Route2 { id: string; color: string; points: { x: number; z: number }[] }
+interface Route2 { id: string; color: string; type?: string; points: { x: number; z: number }[] }
 
 function round(n: number): number { return Math.round(n * 1000) / 1000; }
 

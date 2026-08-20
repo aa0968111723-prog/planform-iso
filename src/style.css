@@ -428,23 +428,195 @@ html, body {
 #app[data-ws-mode="desktop"] .menusheet { align-items: center; }
 #app[data-ws-mode="desktop"] .menusheet__panel { border-radius: 16px; border-bottom: 1px solid var(--border); }
 
-/* --- team / partner view ------------------------------------------------ */
-.teambar { display: none; }
-#app.team .topbar, #app.team .left, #app.team .right, #app.team .bottomnav,
-#app.team .ctxbar, #app.team .placebar-wrap { display: none !important; }
-#app.team .teambar {
-  display: flex; flex-direction: column; gap: 8px;
+/* --- partner mode ------------------------------------------------------- */
+/*
+ * Partner Mode is a different application surface, not a skin: the editor
+ * chrome is removed outright so a volunteer never meets an inspector, a rail
+ * or a snapping control. Two thin strips only — never a sidebar, at any width.
+ */
+.partnertop, .partnerdock, .partnersheet { display: none; }
+#app.partner .topbar,
+#app.partner .left,
+#app.partner .right,
+#app.partner .bottomnav,
+#app.partner .ctxbar,
+#app.partner .placebar-wrap,
+#app.partner .measurebar,
+#app.partner .agent-sheet { display: none !important; }
+
+#app.partner .partnertop {
   position: absolute; top: 0; left: 0; right: 0; z-index: 30;
-  padding: 12px 16px calc(12px + env(safe-area-inset-top));
-  background: linear-gradient(to bottom, rgba(11,17,32,0.96), rgba(11,17,32,0.75));
-  border-bottom: 1px solid var(--border); backdrop-filter: blur(6px);
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 12px 8px;
+  padding-top: calc(8px + env(safe-area-inset-top));
+  background: linear-gradient(to bottom, rgba(11, 17, 32, 0.97), rgba(11, 17, 32, 0.82));
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(6px);
 }
-.teambar__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.teambar__title { font-size: 20px; font-weight: 700; }
-.teambar__desc { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
-.teambar__legend { display: flex; flex-wrap: wrap; gap: 6px 12px; }
-.teamchip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
-.teamchip .sw { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.25); }
+.partnerbar { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.partnerbar__title {
+  font-size: 16px; font-weight: 700; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.partnerbar__light {
+  margin-left: auto; flex: 0 0 auto;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  padding: 5px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: rgba(30, 41, 59, 0.7);
+}
+.partnerbar__light { cursor: pointer; font-family: inherit; }
+.light--bad { border-color: var(--danger); color: #fecdd3; }
+.light--warn { border-color: #f59e0b; color: #fed7aa; }
+.light--ok { border-color: #22c55e; color: #bbf7d0; }
+.partnerbar__exit { flex: 0 0 auto; }
+
+.partnerroles {
+  display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.partnerroles::-webkit-scrollbar { display: none; }
+.rolechip {
+  appearance: none; cursor: pointer; flex: 0 0 auto;
+  display: flex; align-items: center; gap: 6px;
+  min-height: var(--tap); padding: 6px 12px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: rgba(30, 41, 59, 0.7); color: var(--text); font: inherit; font-size: 13px;
+}
+.rolechip__icon { font-size: 17px; }
+.rolechip[aria-pressed="true"] {
+  border-color: var(--accent); background: rgba(56, 189, 248, 0.22);
+  color: #e0f2fe; font-weight: 700;
+}
+
+#app.partner .partnerdock {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(11, 17, 32, 0.98), rgba(11, 17, 32, 0.86));
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+}
+.partnerbrief {
+  appearance: none; cursor: pointer; text-align: left; width: 100%;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  padding: 8px 12px; min-height: var(--tap);
+  border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(30, 41, 59, 0.55); color: var(--text); font: inherit; font-size: 14px;
+}
+.partnerbrief__line { display: inline-flex; align-items: center; gap: 6px; }
+.partnerbrief__icon { font-size: 15px; }
+.partnerbrief__more { margin-left: auto; font-size: 12px; color: var(--accent); }
+.partneractions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.partneraction { min-height: var(--tap); font-size: 13px; padding: 8px 6px; line-height: 1.3; }
+.partneraction--accent { border-color: var(--accent); color: #bae6fd; }
+
+#app.partner .partnersheet {
+  position: absolute; left: 0; right: 0; z-index: 32;
+  /* Sits above the dock, never on top of it: the three partner actions stay
+     reachable while a sheet is open. */
+  bottom: var(--ws-nav-h);
+  display: flex; flex-direction: column;
+  max-height: 62dvh; overflow: hidden;
+  padding: 0 14px calc(14px + env(safe-area-inset-bottom));
+  background: var(--panel-solid);
+  border: 1px solid var(--border); border-bottom: none;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+}
+.partnersheet__handle {
+  display: flex; align-items: center; justify-content: center;
+  height: 26px; flex: 0 0 auto; cursor: pointer;
+}
+.partnersheet__head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding-bottom: 8px; }
+.partnersheet__title { font-size: 15px; font-weight: 700; margin-right: auto; }
+.partnersheet__body { overflow-y: auto; overscroll-behavior: contain; padding-bottom: 6px; }
+.partnersheet__actions { display: flex; gap: 8px; flex: 0 0 auto; padding-top: 12px; }
+.partnerempty { margin: 8px 0; font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+
+.partnersteps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.partnerstep {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; font-size: 15px; line-height: 1.5;
+  border: 1px solid var(--border); border-radius: 12px; background: rgba(30, 41, 59, 0.45);
+}
+.partnerstep__no {
+  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700;
+  background: var(--accent); color: #06283a;
+}
+
+.marklist { display: flex; flex-direction: column; gap: 8px; }
+.markrow {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; font-size: 14px; line-height: 1.5;
+  border: 1px solid var(--border); border-left-width: 4px; border-radius: 12px;
+  background: rgba(2, 6, 23, 0.5);
+}
+.markrow--bad { border-left-color: var(--danger); }
+.markrow--warn { border-left-color: #f59e0b; }
+.markrow--ok { border-left-color: #22c55e; }
+.markrow__action { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+
+.timeline { display: flex; flex-direction: column; gap: 6px; }
+.timeline__row {
+  display: grid; grid-template-columns: 52px 24px 1fr; align-items: center; gap: 8px;
+  padding: 9px 10px; font-size: 14px;
+  border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px;
+  background: rgba(2, 6, 23, 0.5);
+}
+.timeline__row--info { border-left-color: var(--accent); }
+.timeline__row--warn { border-left-color: #f59e0b; }
+.timeline__row--good { border-left-color: #22c55e; }
+.timeline__clock { font-variant-numeric: tabular-nums; font-weight: 700; }
+.timeline__icon { text-align: center; }
+
+.beforeafter { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.beforeafter__side { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.beforeafter__cap { font-size: 13px; font-weight: 700; color: var(--text-dim); }
+.beforeafter__side--after .beforeafter__cap { color: var(--accent); }
+.beforeafter__img {
+  width: 100%; height: auto; display: block; border-radius: 10px;
+  border: 1px solid var(--border); background: #fff;
+}
+.beforeafter__side--after .beforeafter__img { border-color: var(--accent); }
+
+.comparerows { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.comparerow {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) 1fr 18px 1fr;
+  align-items: center; gap: 6px;
+  padding: 8px 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 10px; background: rgba(2, 6, 23, 0.45);
+}
+.comparerow__label { color: var(--text-dim); }
+.comparerow__arrow { text-align: center; color: var(--text-dim); }
+.comparerow__after { font-weight: 700; }
+.comparerow--better { border-color: rgba(34, 197, 94, 0.6); }
+.comparerow--better .comparerow__after { color: #bbf7d0; }
+.comparerow--worse { border-color: rgba(244, 63, 94, 0.5); }
+.comparerow--worse .comparerow__after { color: #fecdd3; }
+.partnerverdict {
+  margin: 12px 0 0; font-size: 15px; font-weight: 600; line-height: 1.6;
+}
+
+/* Desktop keeps the same canvas-first shell — Partner Mode never grows a rail. */
+#app[data-ws-mode="desktop"].partner .partnertop,
+#app[data-ws-mode="desktop"].partner .partnerdock { padding-left: 24px; padding-right: 24px; }
+#app[data-ws-mode="desktop"].partner .partnerbrief { font-size: 15px; }
+#app[data-ws-mode="desktop"].partner .partneractions {
+  grid-template-columns: repeat(3, minmax(0, 220px)); justify-content: center;
+}
+#app[data-ws-mode="desktop"].partner .partnersheet {
+  left: 50%; right: auto; transform: translateX(-50%); width: min(900px, 92vw);
+  border-radius: 18px 18px 0 0;
+}
+/* Phone keeps all three actions on one row so the dock stays a thin strip and
+   the canvas holds its share of the screen. */
+#app[data-ws-mode="phone"].partner .partneraction { font-size: 12px; padding: 8px 2px; }
+#app[data-ws-mode="phone"].partner .beforeafter { grid-template-columns: 1fr; }
+#app[data-ws-mode="phone"].partner .comparerow {
+  grid-template-columns: 1fr; gap: 2px; text-align: left;
+}
+#app[data-ws-mode="phone"].partner .comparerow__arrow { display: none; }
 
 /* --- quick start -------------------------------------------------------- */
 .quickstart {
