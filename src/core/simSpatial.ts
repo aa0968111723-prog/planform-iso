@@ -28,13 +28,6 @@ function distance(a: SpatialPoint, b: SpatialPoint): number {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
-function unit(a: SpatialPoint, b: SpatialPoint): SpatialPoint {
-  const dx = b.x - a.x;
-  const dz = b.z - a.z;
-  const len = Math.hypot(dx, dz) || 1;
-  return { x: dx / len, z: dz / len };
-}
-
 export function routeLength(points: RoutePoint[]): number {
   let total = 0;
   for (let i = 0; i < points.length - 1; i++) total += distance(points[i], points[i + 1]);
@@ -154,16 +147,42 @@ export function queuePlacement(
   spatial: SimulationSpatial | undefined,
   spacing = 0.5,
 ): QueuePlacement {
-  const corridor = spatial?.corridor;
-  const fallback: SpatialPoint = corridor && corridor.length >= corridor.width ? { x: -1, z: 0 } : { x: 0, z: -1 };
-  const direction = corridor
-    ? unit({ x: station.x, z: station.z }, { x: corridor.x + corridor.length / 2, z: corridor.z + corridor.width / 2 })
-    : fallback;
-  const safeDirection = distance({ x: 0, z: 0 }, direction) < 1e-6 ? fallback : direction;
-  const capacity = corridor ? Math.max(1, Math.floor(corridor.width / spacing)) : Number.POSITIVE_INFINITY;
+  // Queues run ALONG the room the station is in (people line up down the
+  // corridor, not across it); capacity is the walkable length on the side the
+  // queue extends into, so a corridor station overflows when the line would
+  // run past the corridor, not when the corridor is merely narrow.
+  const inRect = (r: { x: number; z: number; length: number; width: number } | undefined) =>
+    !!r &&
+    station.x >= r.x - 1e-6 && station.x <= r.x + r.length + 1e-6 &&
+    station.z >= r.z - 1e-6 && station.z <= r.z + r.width + 1e-6;
+  const room = inRect(spatial?.corridor) ? spatial?.corridor
+    : inRect(spatial?.classroom) ? spatial?.classroom
+    : undefined;
+  let direction: SpatialPoint = { x: -1, z: 0 };
+  let available = Number.POSITIVE_INFINITY;
+  let lanes = 1;
+  if (room) {
+    if (room === spatial?.corridor) {
+      // Corridor: the line forms on the approach side (back toward the
+      // corridor start, where people come from). A wider corridor lets the
+      // line double up while keeping one walking lane free.
+      direction = { x: -1, z: 0 };
+      available = station.x - room.x;
+      lanes = Math.max(1, Math.floor(room.width / 0.6) - 1);
+    } else {
+      // Classroom: extend toward whichever side of the room has more space.
+      const leftRoom = station.x - room.x;
+      const rightRoom = room.x + room.length - station.x;
+      direction = { x: leftRoom >= rightRoom ? -1 : 1, z: 0 };
+      available = Math.max(leftRoom, rightRoom);
+    }
+  }
+  const capacity = Number.isFinite(available)
+    ? Math.max(1, lanes * Math.floor(Math.max(0, available - 0.3) / spacing))
+    : Number.POSITIVE_INFINITY;
   const point = {
-    x: station.x + safeDirection.x * spacing * (queueIndex + 1),
-    z: station.z + safeDirection.z * spacing * (queueIndex + 1),
+    x: station.x + direction.x * spacing * (queueIndex + 1),
+    z: station.z + direction.z * spacing * (queueIndex + 1),
   };
   return { point, capacity, overflow: queueIndex + 1 > capacity };
 }

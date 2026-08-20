@@ -119,7 +119,9 @@ describe("runDiscreteEvent", () => {
       participantCount: 8,
       arrivalWindowSeconds: 0,
       profiles: [{ id: "general", ratio: 1, branch: ["ck"] }],
-      stations: [station("checkin", 0, 0, { id: "ck", meanServiceSeconds: 20 })],
+      // 1 m into the corridor: little approach length, so lane count (width)
+      // decides how many people fit before the line spills out.
+      stations: [station("checkin", -4, 0, { id: "ck", meanServiceSeconds: 20 })],
     });
     const withWidth = (width: number) => ({
       ...base,

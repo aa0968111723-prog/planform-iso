@@ -545,19 +545,26 @@ export function runDiscreteEvent(
     });
   }
   spatialBottlenecks.sort((left, right) => right.count - left.count || left.id.localeCompare(right.id));
-  const primarySpatial = spatialBottlenecks[0] ?? null;
+  // A blocked/narrow DOOR is an independent cause and may take the headline.
+  // Corridor overflow is a SYMPTOM of a station queue — report it as a
+  // secondary warning instead of hiding the station that actually needs staff.
+  const doorPrimary = spatialBottlenecks.find((b) => b.kind === "door") ?? null;
+  const corridorOverflow = spatialBottlenecks.find((b) => b.kind === "corridor") ?? null;
 
   const summaryLines: string[] = [];
-  if (primarySpatial) summaryLines.push(`最塞：${primarySpatial.name}（${primarySpatial.count} 人）`);
+  if (doorPrimary) summaryLines.push(`最塞：${doorPrimary.name}（約影響 ${doorPrimary.count} 人）`);
   summaryLines.push(
     `完成 ${completedAgents.length}/${agents.length} 人，總時長約 ${formatMin(finishTime)}。`,
   );
-  if (bottleneck && !primarySpatial) {
+  if (bottleneck && !doorPrimary) {
     summaryLines.push(
       `最塞：${bottleneck.name}（最大排隊 ${bottleneck.maxQueue} 人，平均等待 ${Math.round(bottleneck.avgWaitSeconds)} 秒）。`,
     );
-  } else {
+  } else if (!doorPrimary && !corridorOverflow) {
     summaryLines.push("未偵測到明顯站點瓶頸。");
+  }
+  if (corridorOverflow) {
+    summaryLines.push(`排隊人龍會塞滿走廊（約多出 ${corridorOverflow.count} 人）——建議提早分流或加人力。`);
   }
   summaryLines.push(`平均全程 ${Math.round(avgJourney)} 秒。`);
 
@@ -576,8 +583,8 @@ export function runDiscreteEvent(
     spatialBottlenecks,
     finishTimeSeconds: finishTime,
     stations: stationStats,
-    bottleneckStationId: primarySpatial ? null : bottleneck?.stationId ?? null,
-    bottleneckName: primarySpatial?.name ?? bottleneck?.name ?? null,
+    bottleneckStationId: doorPrimary ? null : bottleneck?.stationId ?? null,
+    bottleneckName: doorPrimary?.name ?? bottleneck?.name ?? corridorOverflow?.name ?? null,
     summaryLines,
     playback,
   };
