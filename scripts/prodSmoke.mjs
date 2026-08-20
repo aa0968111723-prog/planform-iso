@@ -12,10 +12,12 @@
  */
 
 import { chromium, devices } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const BASE = process.argv[2] ?? "http://localhost:4173";
-const OUT = new URL("../_smoke/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const OUT = fileURLToPath(new URL("../_smoke/", import.meta.url));
+const PKG_VERSION = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).version;
 mkdirSync(OUT, { recursive: true });
 
 const results = [];
@@ -61,7 +63,7 @@ const browser = await chromium.launch({
   });
   ok("service worker active", swReady);
   const version = await page.evaluate(async () => (await (await fetch("version.json", { cache: "no-store" })).json()).version);
-  ok("/version.json live", version === "1.0.0", `version=${version}`);
+  ok("/version.json live", version === PKG_VERSION, `version=${version} (package ${PKG_VERSION})`);
 
   await page.waitForTimeout(800); // let precache settle
   await ctx.setOffline(true);

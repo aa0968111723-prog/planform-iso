@@ -7,7 +7,14 @@ function gitSha(): string {
   try {
     return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
   } catch {
-    return "unknown";
+    // CI/PaaS builders may lack git or .git (e.g. Zeabur source builds) —
+    // fall back to the env vars those platforms inject before giving up.
+    const env =
+      process.env.ZEABUR_GIT_COMMIT_SHA ??
+      process.env.GITHUB_SHA ??
+      process.env.SOURCE_COMMIT ??
+      process.env.COMMIT_SHA;
+    return env ? env.slice(0, 7) : "unknown";
   }
 }
 
