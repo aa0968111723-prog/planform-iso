@@ -131,5 +131,5 @@ export function buildCustomAssetFlow(app: App): HTMLElement {
     ]),
     photoInput,
     glbInput,
-  ]);
+  ], false);
 }

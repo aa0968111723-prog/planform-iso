@@ -1,8 +1,9 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import { calibrationPendingLabels, type MeasurementType, type RouteType, type ViewName } from "../core/model";
+import { calibrationComplete, calibrationPendingLabels, type MeasurementType, type RouteType, type ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
 import { ROUTE_PRESETS } from "../core/routes";
+import type { LayoutCandidate } from "../core/smartLayout";
 import { issueCounts, type Severity } from "../core/validation";
 import { dockingPolicy, type WorkspaceMode } from "../core/viewport";
 import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanOptions, type PlanPreset, type RoleFilter } from "../export/constructionPlan";
@@ -33,11 +34,15 @@ const SNAPS: { id: SnapMode; label: string }[] = [
 ];
 const WORKFLOWS: { id: Workflow; label: string; icon: string }[] = [
   { id: "site", label: "場地", icon: "▦" }, { id: "layout", label: "場佈", icon: "▤" },
-  { id: "route", label: "動線", icon: "↝" }, { id: "check", label: "檢查", icon: "✓" },
-  { id: "export", label: "分享", icon: "↗" },
+  { id: "route", label: "動線", icon: "↝" }, { id: "export", label: "分享", icon: "↗" },
 ];
+const WORKFLOW_LABELS: Record<Workflow, string> = {
+  site: "場地", layout: "場佈", route: "動線", check: "檢查", export: "分享",
+};
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
+
+const PRIMARY_WORKFLOWS = WORKFLOWS;
 
 /** Which sheet, if any, currently covers part of the canvas on a compact layout. */
 type SheetKind = "none" | "workflow" | "inspector";
@@ -51,6 +56,8 @@ export class UI {
   private measurebar = el("div", { class: "measurebar", style: "display:none" });
   private box = el("div", { class: "boxsel", style: "display:none" });
   private toast = el("div", { class: "toast", style: "display:none" });
+  private calibrationBanner = el("div", { class: "calibration-banner", style: "display:none" });
+  private statusBadge = el("span", { class: "status-badge", role: "status" });
   private partner: PartnerModeHandles;
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
@@ -65,7 +72,7 @@ export class UI {
   private simPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
   private sheet: SheetKind = "none";
-  private placebarKind: "place" | "route" | null = null;
+  private placebarKind: "place" | "route" | "zone" | null = null;
   private sheetDetent: "collapsed" | "half" | "full" = "half";
   private sheetHistoryPushed = false;
   private viewport: WorkspaceViewport;
@@ -73,12 +80,21 @@ export class UI {
   private builtHeaderMode: WorkspaceMode | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
+    this.calibrationBanner.append(
+      el("span", { text: "尺寸待現場校正" }),
+      button("去校正", () => {
+        this.app.setWorkflow("site");
+        this.app.startCalibration();
+        if (this.compact) this.setSheet("workflow");
+        this.update();
+      }, "chip chip--sm chip--primary"),
+    );
     this.partner = buildPartnerMode(app, {
       onExit: () => this.app.exitPartnerMode(),
       onLayoutChange: () => this.viewport.schedule(),
     });
     root.append(
-      this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
+      this.topbar, this.calibrationBanner, this.left, this.right, this.nav, this.placebar, this.measurebar,
       this.box, this.toast, this.ctxbar, this.menu.root,
       this.partner.top, this.partner.dock, this.partner.sheet,
     );
@@ -132,6 +148,8 @@ export class UI {
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.store.onLayoutError = (action) =>
+      this.showToast(action === "save" ? "儲存平面圖失敗，請先匯出 JSON" : "刪除平面圖失敗，原檔案仍保留");
     this.app.onImprove = () => this.agentSheet.runPreset("幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門");
     this.app.onChange(() => this.update());
     this.bindKeys();
@@ -213,7 +231,7 @@ export class UI {
     const ai = button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent");
     const more = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     more.setAttribute("aria-label", "更多設定");
-    this.topbar.append(title, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
+    this.topbar.append(title, this.statusBadge, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
   }
 
   private buildDesktopTopbar(): void {
@@ -223,7 +241,7 @@ export class UI {
     const views = el("div", { class: "group", "data-group": "views" },
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
     const flows = el("div", { class: "group group--flows", "data-group": "flows" },
-      WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
+      PRIMARY_WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
     const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
     for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
     snapSel.value = this.app.session.snap;
@@ -242,6 +260,7 @@ export class UI {
       el("div", { class: "topbar__title", text: "平面場 ISO" }),
       history, flows, views, more, el("div", { class: "topbar__spacer" }), team, moreBtn,
     );
+    this.topbar.append(this.statusBadge);
   }
 
   private openViewMenu(): void {
@@ -327,7 +346,7 @@ export class UI {
   // --- bottom navigation --------------------------------------------------
 
   private buildNav(): void {
-    this.nav.append(...WORKFLOWS.map((it) =>
+    this.nav.append(...PRIMARY_WORKFLOWS.map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.id }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
@@ -443,14 +462,14 @@ export class UI {
   private rebuildLeft(): void {
     this.left.innerHTML = "";
     const wf = this.app.session.workflow;
-    const label = WORKFLOWS.find((w) => w.id === wf)?.label ?? "";
+    const label = WORKFLOW_LABELS[wf];
     if (this.compact) this.left.append(this.sheetHandle(label));
     const onPick = () => { if (this.compact) this.setSheet("none"); };
     if (wf === "site") this.left.append(...this.siteSections(onPick));
     else if (wf === "layout") this.left.append(
       this.smartLayoutSection(),
-      buildCustomAssetFlow(this.app),
       buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true, onPick }),
+      buildCustomAssetFlow(this.app),
     );
     else if (wf === "route") this.left.append(this.routeSection());
     else if (wf === "check") this.left.append(this.validationSection());
@@ -596,9 +615,11 @@ export class UI {
     const body: HTMLElement[] = [
       ...(pending.length ? [el("div", { class: "readout readout--warn", text: `待校正：${pending.join("、")}` })] : [el("div", { class: "readout", text: "✓ 三項尺寸都已校正" })]),
       el("p", { class: "hint", text: "三個選項各自完成：量地磚、量門寬，或在圖上量一段已知距離。" }),
-      this.app.session.mode === "calibrate"
-        ? button("重新選點（校正中…）", () => this.startCalibrationFromSheet(), "btn btn--primary")
-        : button("在畫布選兩點", () => this.startCalibrationFromSheet()),
+      el("div", { class: "row wrap calibration-actions" }, [
+        button("量一塊地磚", () => this.startCalibrationFromSheet(), "btn btn--primary"),
+        button("量門寬", () => { doorInput.focus(); doorInput.scrollIntoView({ block: "nearest" }); }, "btn btn--ghost"),
+        button("量已知距離", () => this.startCalibrationFromSheet(), "btn btn--ghost"),
+      ]),
     ];
     body.push(
       el("label", { class: "field" }, [el("span", { class: "field__label", text: "實際長度 (cm)" }), actual]),
@@ -689,6 +710,7 @@ export class UI {
     for (const c of cands) {
       const warn = c.warnings.length ? ` ⚠ ${c.warnings.join("、")}` : " ✓ 可放置";
       this.smartBox.append(el("div", { class: `card smart ${c.fits ? "" : "smart--warn"}` }, [
+        matCandidateThumb(c),
         el("span", { class: "card__body" }, [
           el("span", { class: "card__title", text: c.mode === "field" ? c.label : `${c.label}（${c.count} 張）` }),
           el("span", { class: "card__sub", text: `${c.footprint.width.toFixed(1)} × ${c.footprint.depth.toFixed(1)} m${warn}` }),
@@ -707,7 +729,7 @@ export class UI {
         el("span", { text: `${r.name}（${r.points.length} 點）` }),
         button(this.app.session.activeRouteId === r.id ? "繪製中" : "編輯", () => { this.app.editRoute(r.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
         button(focused ? "取消聚焦" : "聚焦", () => { this.app.setRouteFocus(focused ? null : r.id); if (this.compact) this.setSheet("none"); }, focused ? "chip chip--sm chip--primary" : "chip chip--sm"),
-        button("刪除", () => { this.app.setSelection([r.id]); this.app.deleteSelection(); }, "chip chip--sm chip--danger"),
+        button("刪除", () => { this.app.setSelection([r.id]); this.app.deleteSelection(); }, "chip chip--sm"),
       ]));
     }
     if (!s.routes.length) list.append(el("span", { class: "hint", text: "尚無動線。選一個類型開始畫。" }));
@@ -776,6 +798,13 @@ export class UI {
     const importInput = el("input", { type: "file", accept: "application/json", style: "display:none" }) as HTMLInputElement;
     importInput.addEventListener("change", async () => {
       const f = importInput.files?.[0]; if (!f) return;
+      const current = this.app.store.getState();
+      const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
+        current.groups.length > 0 || current.routes.length > 0;
+      if (hasContent && !window.confirm("載入 JSON 會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) {
+        importInput.value = "";
+        return;
+      }
       try { this.app.store.loadProject(await importProjectJson(f) as never); this.showToast("已匯入專案"); } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
     });
@@ -796,6 +825,14 @@ export class UI {
         if (how !== "cancelled") this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
       });
     };
+    const checkCounts = issueCounts(this.app.session.issues);
+    const preExportChecklist = section("分享前先確認", [
+      el("div", { class: "checklist-row" }, [
+        el("span", { text: checkCounts.error ? "🔴" : checkCounts.warning ? "🟡" : "🟢" }),
+        el("span", { text: checkCounts.error ? "還有問題要先處理" : checkCounts.warning ? "有提醒，請看一下" : "目前沒有阻擋分享的問題" }),
+      ]),
+      el("div", { class: "hint", text: "分享會使用目前畫面與活動名稱；需要修改時可回到場地、場佈或動線。" }),
+    ]);
     const planSection = section("場刊圖（傳給夥伴）", [
       el("p", { class: "hint", text: "乾淨、看得懂的圖，手機會直接開分享（LINE），電腦則下載。" }),
       el("div", { class: "export-grid" }, [
@@ -858,21 +895,33 @@ export class UI {
     ], false);
 
     return section("分享 / 匯出", [
+      preExportChecklist,
       planSection,
       el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
       textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
       el("div", { class: "subhead", text: "我的平面圖（本機儲存）" }),
-      el("div", { class: "row" }, [layoutName, button("儲存", () => { this.app.store.saveNamedLayout(layoutName.value.trim() || state().name); refreshList(); this.showToast("已儲存平面圖"); })]),
+      el("div", { class: "row" }, [layoutName, button("儲存", () => {
+        const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
+        if (saved) { refreshList(); this.showToast("已儲存平面圖"); }
+      })]),
       el("div", { class: "row" }, [layoutList,
-        button("載入", () => { if (layoutList.value) this.app.store.loadNamedLayout(layoutList.value); }, "btn btn--ghost"),
+        button("載入", () => {
+          if (!layoutList.value) return;
+          const current = this.app.store.getState();
+          const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
+            current.groups.length > 0 || current.routes.length > 0;
+          if (hasContent && !window.confirm("載入平面圖會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) return;
+          if (this.app.store.loadNamedLayout(layoutList.value)) this.showToast("已載入平面圖");
+        }, "btn btn--ghost"),
         button("刪除", () => {
           const name = layoutList.value;
           if (!name) return;
           if (!window.confirm(`確定刪除平面圖「${name}」？此動作無法復原。`)) return;
-          this.app.store.deleteNamedLayout(name);
-          refreshList();
-          this.showToast(`已刪除「${name}」`);
+          if (this.app.store.deleteNamedLayout(name)) {
+            refreshList();
+            this.showToast(`已刪除「${name}」`);
+          }
         }, "btn btn--ghost")]),
       measureSection,
       advancedSection,
@@ -899,13 +948,26 @@ export class UI {
   private update(): void {
     const sess = this.app.session;
     const s = this.app.store.getState();
+    const counts = issueCounts(sess.issues);
+    const tone = counts.error ? "bad" : counts.warning ? "warn" : "ok";
+    this.statusBadge.className = "status-badge status-badge--" + tone;
+    this.statusBadge.textContent = counts.error ? "有問題待處理" : counts.warning ? "有提醒" : "檢查通過";
+    const pendingCalibration = !calibrationComplete(s);
+    this.calibrationBanner.style.display = pendingCalibration ? "flex" : "none";
+    if (pendingCalibration) {
+      const labels = calibrationPendingLabels(s);
+      this.calibrationBanner.querySelector("span")!.textContent =
+        labels.length ? `尺寸待現場校正：${labels.join("、")}` : "尺寸待現場校正";
+    }
 
     if (this.compact) {
       const title = this.topbar.querySelector(".topbar__title--compact");
       if (title) title.textContent = s.name || "平面場 ISO";
     } else {
+      const desktopTitle = this.topbar.querySelector(".topbar__title");
+      if (desktopTitle) desktopTitle.textContent = s.name || "平面場 ISO";
       setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-      setPressed(this.topbar, "flows", (b) => WORKFLOWS[b].id === sess.workflow);
+      setPressed(this.topbar, "flows", (b) => PRIMARY_WORKFLOWS[b].id === sess.workflow);
       setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
       if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     }
@@ -954,7 +1016,17 @@ export class UI {
     // Placement + measure bars.
     // The floating bottom bar serves placement AND route drawing, so 完成
     // is always on screen even when the compact sheet is collapsed.
-    if (sess.mode === "place") {
+    if (sess.zonePlace) {
+      if (this.placebarKind !== "zone") {
+        this.placebar.innerHTML = "";
+        this.placebar.append(el("div", { class: "placebar" }, [
+          el("span", { class: "placebar__hint", text: "點畫布放置區域" }),
+          button("取消放置區域", () => this.app.cancelPlacement(), "chip chip--danger"),
+        ]));
+        this.placebarKind = "zone";
+      }
+      this.placebar.style.display = "flex";
+    } else if (sess.mode === "place") {
       if (this.placebarKind !== "place") {
         this.placebar.innerHTML = "";
         this.placebar.append(buildPlacementToolbar(this.app));
@@ -1100,4 +1172,48 @@ function setPressed(root: HTMLElement, group: string, pred: (i: number) => boole
   const c = root.querySelector(`[data-group="${group}"]`);
   if (!c) return;
   Array.from(c.querySelectorAll("button")).forEach((b, i) => b.setAttribute("aria-pressed", String(pred(i))));
+}
+
+/** Small overhead preview: enough to distinguish A/B/C without pretending it
+ * is a rendered 3D result. */
+function matCandidateThumb(candidate: LayoutCandidate): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.className = "mat-candidate-thumb";
+  canvas.width = 120;
+  canvas.height = 72;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const maxW = Math.max(...candidate.groups.map((g) => g.anchorX + g.cols * g.itemWidth)) -
+    Math.min(...candidate.groups.map((g) => g.anchorX));
+  const maxD = Math.max(...candidate.groups.map((g) => g.anchorZ + g.rows * g.itemDepth)) -
+    Math.min(...candidate.groups.map((g) => g.anchorZ));
+  const minX = Math.min(...candidate.groups.map((g) => g.anchorX));
+  const minZ = Math.min(...candidate.groups.map((g) => g.anchorZ));
+  const scale = Math.min(104 / Math.max(maxW, 0.1), 56 / Math.max(maxD, 0.1));
+  const ox = (canvas.width - maxW * scale) / 2;
+  const oz = (canvas.height - maxD * scale) / 2;
+  ctx.strokeStyle = "#64748b";
+  ctx.lineWidth = 1;
+  for (const group of candidate.groups) {
+    const x = ox + (group.anchorX - minX) * scale;
+    const z = oz + (group.anchorZ - minZ) * scale;
+    const w = group.cols * group.itemWidth * scale;
+    const d = group.rows * group.itemDepth * scale;
+    ctx.fillStyle = "#c4b5fd";
+    ctx.fillRect(x, z, w, d);
+    ctx.strokeRect(x, z, w, d);
+    ctx.strokeStyle = "rgba(100, 116, 139, .45)";
+    for (let col = 1; col < group.cols; col++) {
+      const gx = x + col * group.itemWidth * scale;
+      ctx.beginPath(); ctx.moveTo(gx, z); ctx.lineTo(gx, z + d); ctx.stroke();
+    }
+    for (let row = 1; row < group.rows; row++) {
+      const gz = z + row * group.itemDepth * scale;
+      ctx.beginPath(); ctx.moveTo(x, gz); ctx.lineTo(x + w, gz); ctx.stroke();
+    }
+    ctx.strokeStyle = "#64748b";
+  }
+  return canvas;
 }

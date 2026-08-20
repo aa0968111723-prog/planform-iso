@@ -97,7 +97,8 @@ function render(app: App): HTMLElement {
     body.push(el("div", { class: "readout" }, lines.map((t) => el("div", { text: t }))));
   }
 
-  if (result) {
+  // Finished results and animated playback are separate states.
+  if (result && !playing) {
     const maxQueue = result.maxQueue;
     const avgWait = result.avgWaitSeconds;
     const worst = result.stations.find((s) => s.stationId === result.bottleneckStationId) ??
@@ -108,9 +109,14 @@ function render(app: App): HTMLElement {
       worst ? `最塞：${worst.name}` : "沒有明顯塞車點 ✅",
       `全部完成：約 ${fmtDuration(result.finishTimeSeconds)}`,
     ];
+    for (const b of result.spatialBottlenecks) {
+      lines.push(b.kind === "corridor"
+        ? `走廊出現排隊溢出：多出 ${b.count} 人，請提早分流或增加人手`
+        : `門口通行受阻：約 ${b.count} 人受到影響`);
+    }
     body.push(
       el("div", {
-        class: `readout ${result.bottleneckStationId ? "readout--warn" : ""}`,
+        class: `readout sim-result ${result.bottleneckStationId || result.spatialBottlenecks.length ? "readout--warn" : ""}`,
       }, lines.map((t) => el("div", { text: t }))),
     );
     body.push(
@@ -120,6 +126,9 @@ function render(app: App): HTMLElement {
     );
   }
 
+    if (result && !playing) body.push(el("div", { class: "row wrap" }, [
+      button("▶ 播放走位", () => app.replaySimulation(), "btn btn--ghost"),
+    ]));
   if (cmp) {
     body.push(
       el("div", { class: "card smart" }, [

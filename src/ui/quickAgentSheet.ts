@@ -9,10 +9,13 @@
 
 import type { App } from "../app/App";
 import type { QuickAgentResult } from "../agent/quickAgent";
+import { buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
+import { venuePresetById, venuePresetFromProject } from "../core/venues";
 import { button, el } from "./dom";
 
 export interface QuickAgentSheetHandles {
   root: HTMLElement;
+  previewRoot: HTMLElement;
   open: (preset?: string) => void;
   close: () => void;
   isOpen: () => boolean;
@@ -39,7 +42,9 @@ const TOOL_LABEL: Record<string, string> = {
 };
 
 export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): QuickAgentSheetHandles {
-  const root = el("div", { class: "agent-sheet", style: "display:none" });
+  const root = el("div", { class: "agent-sheet-host" });
+  const sheet = el("div", { class: "agent-sheet", style: "display:none" });
+  root.append(sheet);
   const body = el("div", { class: "agent-sheet__body" });
   const input = el("textarea", {
     class: "field__input agent-sheet__input",
@@ -47,7 +52,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     rows: "2",
   }) as HTMLTextAreaElement;
   const cards = el("div", { class: "agent-sheet__cards" });
-  const previewBar = el("div", { class: "agent-sheet__preview", style: "display:none" });
+  const previewBar = el("div", { class: "agent-preview-bar", style: "display:none" });
 
   const jump = (fn?: () => void) => () => {
     close();
@@ -71,6 +76,15 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
 
   const runBtn = button("執行", () => void run(), "btn chip--primary");
   const closeBtn = button("關閉", () => close(), "chip");
+
+  const shortcuts = [...actions.querySelectorAll<HTMLButtonElement>("button")];
+  if (shortcuts[0]) {
+    shortcuts[0].style.display = "none";
+    actions.prepend(button("打開場佈預覽", previewQuickStart, "chip"));
+  }
+  if (shortcuts[1]) shortcuts[1].textContent = "打開排地墊";
+  if (shortcuts[2]) shortcuts[2].textContent = "打開動線";
+  if (shortcuts[3]) shortcuts[3].textContent = "打開檢查";
 
   previewBar.append(
     el("div", { class: "agent-sheet__preview-label", text: "預覽就緒 — 看畫布上的結果" }),
@@ -99,7 +113,8 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     previewBar,
     cards,
   );
-  root.append(body);
+  sheet.append(body);
+  root.append(previewBar);
 
   async function run(): Promise<void> {
     const text = input.value.trim();
@@ -116,7 +131,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
         cards.append(
           el("div", { class: "agent-card" }, [
             el("div", { class: "agent-card__title", text: humanizeCardTitle(c.title) }),
-            el("div", { class: "agent-card__detail", text: c.detail }),
+            el("div", { class: "agent-card__detail", text: humanizeDetail(c.detail) }),
           ]),
         );
       }
@@ -142,21 +157,83 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     return title;
   }
 
+  function humanizeDetail(detail: string): string {
+    return detail
+      .replace(/Validation/g, "檢查")
+      .replace(/error/gi, "錯誤")
+      .replace(/warning/gi, "提醒")
+      .replace(/tool/gi, "操作");
+  }
+
   function open(preset?: string): void {
-    root.style.display = "block";
+    sheet.style.display = "block";
     if (preset) input.value = preset;
-    input.focus();
+    // On a phone the keyboard must not cover the sheet before the user chooses
+    // an action. Desktop keeps the convenient focus behaviour.
+    if (window.matchMedia?.("(min-width: 601px)").matches) input.focus();
   }
 
   function close(): void {
-    root.style.display = "none";
+    if (app.quickAgent.isPreviewActive()) {
+      app.quickAgent.rollback();
+      app.applyAgentPreview(null);
+      previewBar.style.display = "none";
+    }
+    sheet.style.display = "none";
+  }
+
+  function previewQuickStart(): void {
+    const current = app.store.getState();
+    const venue = (current.venuePresetId ? venuePresetById(current.venuePresetId) : null)
+      ?? venuePresetFromProject(current, current.name || "目前場地");
+    const has = (type: QuickStartNeeds["mats"] extends boolean ? string : never) =>
+      current.zones.some((z) => z.type === type) || current.objects.some((o) => o.serviceRole === type);
+    const needs: QuickStartNeeds = {
+      ...DEFAULT_NEEDS,
+      mats: current.groups.some((g) => g.sourceKind === "mat") || DEFAULT_NEEDS.mats,
+      checkin: true,
+      payment: has("payment"),
+      shoe: current.zones.some((z) => z.type === "shoe") || DEFAULT_NEEDS.shoe,
+      backpack: current.zones.some((z) => z.type === "backpack") || DEFAULT_NEEDS.backpack,
+      life: current.zones.some((z) => z.type === "life"),
+      teacher: current.zones.some((z) => z.type === "meditation"),
+      groups: current.zones.some((z) => z.type === "group"),
+      staffRoute: current.routes.some((r) => r.type === "staff"),
+    };
+    const generated = buildQuickStartProject({
+      venue,
+      eventName: current.name,
+      participants: Math.max(1, app.session.participants),
+      needs,
+      centralAisle: true,
+    });
+    const draft = structuredClone(current);
+    const hasCheckinDesk = current.objects.some((o) => o.kind === "regTable" || o.serviceRole === "checkin");
+    const hasPaymentDesk = current.objects.some((o) => o.serviceRole === "payment");
+    const hasMatGroup = current.groups.some((g) => g.sourceKind === "mat");
+    for (const z of generated.zones) if (!draft.zones.some((x) => x.type === z.type)) draft.zones.push(z);
+    for (const o of generated.objects) {
+      if (o.kind === "door" || o.kind === "screen" || o.assetId === "builtin:stage-platform" || o.assetId === "builtin:lectern") continue;
+      if (o.serviceRole === "checkin" && hasCheckinDesk) continue;
+      if (o.serviceRole === "payment" && hasPaymentDesk) continue;
+      draft.objects.push(o);
+    }
+    if (!hasMatGroup) draft.groups.push(...generated.groups);
+    for (const route of generated.routes) if (!draft.routes.some((r) => r.type === route.type)) draft.routes.push(route);
+    app.quickAgent.tx.start(current);
+    app.quickAgent.tx.mutate((p) => Object.assign(p, draft));
+    app.applyAgentPreview(app.quickAgent.getDraftProject());
+    cards.innerHTML = "";
+    cards.append(el("div", { class: "agent-card", text: "已讀取目前場地，補上缺少的區域與動線；已有報到桌不會重複放。請先看預覽。" }));
+    previewBar.style.display = "flex";
   }
 
   return {
     root,
+    previewRoot: root,
     open,
     close,
-    isOpen: () => root.style.display !== "none",
+    isOpen: () => sheet.style.display !== "none",
     runPreset: (text: string) => {
       open(text);
       void run();
