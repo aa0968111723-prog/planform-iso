@@ -76,7 +76,8 @@ const FOCUS: Record<Exclude<PartnerRole, "all">, RoleFocus> = {
     objectKinds: new Set(["door", "screen"]),
   },
   life: {
-    zoneTypes: new Set<ZoneType>(["life", "meditation"]),
+    // 生活組站生活組區 — never the 講師禪定區 (zone order made find() pick it).
+    zoneTypes: new Set<ZoneType>(["life"]),
     routeTypes: new Set<RouteType>(["staff", "group"]),
     serviceRoles: new Set<ServiceRole>(["storage"]),
     stationTypes: new Set<StationType>(["group"]),

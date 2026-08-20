@@ -268,6 +268,7 @@ export class App {
   private simState: SimState | null = null;
   private simRaf: number | null = null;
   private simLast = 0;
+  private lastPanelSync = 0;
   private partnerReturnView: ViewName | null = null;
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
@@ -571,12 +572,18 @@ export class App {
       : project.scenarios[0];
     if (scenario) {
       const prepaid = scenario.profiles.find((p) => p.id === "prepaid")?.ratio ?? 1;
+      const staffOf = (type: string) =>
+        scenario.stations.find((st) => st.type === type)?.staffCount;
       this.session.simQuick = {
         ...this.session.simQuick,
         participants: scenario.participantCount,
         arrivalWindowSeconds: scenario.arrivalWindowSeconds,
         prepaidRatio: prepaid,
         hasOnsitePayment: scenario.profiles.some((p) => p.id === "pay-on-site" && p.ratio > 0),
+        // The example ships a 2-person check-in desk — the quick panel must
+        // not quietly simulate a 1-person understaffed version of it.
+        checkinStaff: staffOf("checkin") ?? this.session.simQuick.checkinStaff,
+        paymentStaff: staffOf("payment") ?? this.session.simQuick.paymentStaff,
       };
       // One head count everywhere: the mat arranger and the AI read the same
       // number the event was created with.
@@ -799,6 +806,10 @@ export class App {
   applyCalibration(action: CalibrationPath, actualMeters: number, note = ""): void {
     if (!actualMeters || actualMeters <= 0) return;
     const measured = action === "classroom-length" ? this.getCalibrationDistance() ?? undefined : undefined;
+    if (action === "classroom-length" && (!measured || measured <= 0)) {
+      this.toast("請先在畫布點兩個已知距離的端點，再套用到教室長");
+      return;
+    }
     this.store.mutate((p) => applyCalibrationPath(p, action, actualMeters, measured, note));
     // Concrete numbers in the toast — a 60→58 cm tile change is invisible on
     // screen, so say exactly what the model now believes.
@@ -1391,6 +1402,12 @@ export class App {
         return;
       }
       this.applyDesFrame(nextT, result);
+      // The scene animates every frame; the side panel only needs a few
+      // updates a second (it was frozen at 0 s / 0 人 before this).
+      if (now - this.lastPanelSync > 200) {
+        this.lastPanelSync = now;
+        this.notifyUi();
+      }
       this.simRaf = requestAnimationFrame(() => this.simLoop());
       return;
     }

@@ -28,14 +28,13 @@ export function applyCalibrationPath(project: Project, path: CalibrationPath, ac
   project.calibration.referenceLength = actualMeters;
   project.calibration.note = note;
   if (path === "classroom-length") {
+    // Only proportional scaling against a real on-canvas measurement is safe.
+    // Absolute assignment turned 「120 cm」 into a 1.2 m-long classroom.
+    if (!measuredModelMeters || measuredModelMeters <= 0) return;
     const oldClassroomEnd = project.classroom.z + project.classroom.width;
-    if (measuredModelMeters && measuredModelMeters > 0) {
-      const ratio = actualMeters / measuredModelMeters;
-      project.classroom.length *= ratio;
-      project.classroom.width *= ratio;
-    } else {
-      project.classroom.length = actualMeters;
-    }
+    const ratio = actualMeters / measuredModelMeters;
+    project.classroom.length *= ratio;
+    project.classroom.width *= ratio;
     if (Math.abs(project.corridor.z - oldClassroomEnd) < 1e-6) {
       project.corridor.z = project.classroom.z + project.classroom.width;
     }
