@@ -48,7 +48,11 @@ describe("E310 golden venue", () => {
     const fieldCapacity = p.groups.reduce(
       (sum, g) => sum + g.cols * Math.floor((g.rows * g.itemDepth + 1e-9) / 0.9), 0);
     expect(fieldCapacity).toBeGreaterThanOrEqual(60);
-    expect(p.objects.filter((o) => o.width === 1.5 && o.depth === 0.6)).toHaveLength(2);
+    const bagTables = p.objects.filter((o) => o.width === 1.8 && o.depth === 0.6);
+    expect(bagTables).toHaveLength(1);
+    const bagZone = p.zones.find((z) => z.type === "backpack")!;
+    expect(Math.abs(bagTables[0].x - bagZone.x)).toBeLessThanOrEqual(bagZone.width / 2 - 0.9 + 1e-6);
+    expect(bagZone.z + bagZone.depth / 2).toBeCloseTo(p.classroom.z + p.classroom.width, 6);
   });
 
   it("one click golden scenario has the 40/20 branch and corridor-first route", () => {

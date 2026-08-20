@@ -37,6 +37,14 @@
   角色 chips 360px 撕邊漸層提示；紅綠燈按鈕 ≥44px tap target。
 - 損壞備份 toast 補位置提示＋下載後可清除。
 
+## P1 — e2e production harness（viewport audit V1）
+
+7. `window.planform` 測試鉤子改用 `?e2e` query flag 或 `VITE_E2E` 環境變數 gate
+   （不再 DEV-only，main.ts:33-42），確保 PROD build 不外洩鉤子（旗標未帶時）。
+8. playwright 加第二個 project：`npm run build && npm run preview -- --port 4180`
+   驅動 production bundle；至少覆蓋：開站、golden 流程、**SW 更新 banner**
+   （部署新 build 後出現「有新版本可以使用」→ 立即更新 → reload 後新版）。
+
 ## 驗收
 
 - [ ] verify + e2e 綠（新行為含測試：preview 關閉回滾、zonePlace 出口、載入確認）

@@ -98,7 +98,7 @@ function tableObject(x: number, z: number): SceneObject {
   const entry = BUILTIN_CATALOG.find((e) => e.id === "builtin:table")!;
   return {
     id: uid("obj"), kind: entry.kind, x, z, rotationDeg: 0,
-    width: 1.5, depth: 0.6, height: entry.dimensions.height,
+    width: 1.8, depth: 0.6, height: entry.dimensions.height,
     locked: false, hidden: false, surface: "floor", elevation: 0,
     assetId: entry.id, note: "桌上放背包／水壺",
   };
@@ -243,9 +243,10 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   if (project.venuePresetId === "venue:tku-e310" && needs.backpack) {
     const bag = project.zones.find((z) => z.type === "backpack");
     if (bag) {
-      const x = clamp(bag.x, c.x + 1.7, c.x + c.length - 1.7);
-      project.objects.push(tableObject(x - 0.78, backWallZ - 0.31));
-      project.objects.push(tableObject(x + 0.78, backWallZ - 0.31));
+      // Photo-true: bags go on a long table against the rear wall. Keep the
+      // zone flush with the wall and the table fully inside it.
+      bag.z = backWallZ - bag.depth / 2;
+      project.objects.push(tableObject(clamp(bag.x, c.x + 1.1, c.x + c.length - 1.1), backWallZ - 0.31));
     }
   }
 
@@ -351,6 +352,14 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
   };
   project.scenarios = [scenario];
   project.activeScenarioId = scenario.id;
+  // The route ends at the mouth of the central aisle on the field's REAR edge
+  // (where people actually step onto the mats) — never inside the field.
+  const fieldRearZ = field
+    ? field.anchorZ + field.rows * field.itemDepth + 0.3
+    : project.classroom.z + project.classroom.width / 2;
+  const aisleMouthX = project.groups.length >= 2
+    ? (project.groups[0].anchorX + project.groups[0].cols * project.groups[0].itemWidth + project.groups[1].anchorX) / 2
+    : seatingPosition.x;
   const routePoints = [
     { x: entrance.x, z: entrance.z },
     { x: guide.x, z: guide.z },
@@ -358,7 +367,7 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
     { x: door?.x ?? project.classroom.x + project.classroom.length - 1.4, z: door?.z ?? project.classroom.z + project.classroom.width },
     { x: checkinZone.x, z: checkinZone.z },
     { x: shoeZone.x, z: shoeZone.z },
-    { x: seatingPosition.x, z: Math.max(project.classroom.z + 3.7, seatingPosition.z - (field?.rows ?? 2) * 0.6 / 2) },
+    { x: aisleMouthX, z: Math.min(fieldRearZ, project.classroom.z + project.classroom.width - 0.4) },
   ];
   project.routes = [{ id: uid("route"), name: "E310 入場動線", color: "#22c55e", points: routePoints, visible: true, type: "entry" }];
   project.description = "60 人｜40 人預繳／20 人現場繳費｜15 分鐘到達窗";
