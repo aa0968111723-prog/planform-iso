@@ -17,6 +17,13 @@
 4. **3D 場佈圖**（SceneManager.ts:1032-1040）：離屏 renderer 固定 2560px、
    fitBounds(整個 classroom+corridor) 後截圖，再還原相機。不受使用者當下 zoom 影響。
 
+5. **動線圖畫出脈絡**（升級自 P2；Lead 親審 E310 實證）：route preset 以低 alpha 畫
+   巧拼/地墊群組與 blocksFlow 家具（講台、桌），否則「終」點漂在空白處、
+   前方大片空白誤導（講台被略過）。（constructionPlan.ts:203-209）
+6. **巧拼 field 匯出不逐格編號**（Lead 親審）：場佈總覽的 A-01…B-48 逐格號對巧拼是
+   噪音；field 模式（itemW==itemD==0.6 的 mat group）改畫「區塊標籤＋8×6・48 片」，
+   物資清單維持總片數。
+
 ## P2（全修）
 
 - 頁面 fit bounds 納入可見 route points / objects / zones（constructionPlan.ts:141-147）。
