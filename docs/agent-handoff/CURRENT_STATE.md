@@ -1,6 +1,13 @@
 # CURRENT_STATE（Claude Lead checkpoint）
 
-更新：2026-08-21 01:1x（WP-A/WP-B 已整合；Grok R1 已分級；WP-C 進行中）
+更新：2026-08-21 02:0x（WP-C 已合併 `67ebd03`；WP-D 執行中 branch codex/ux-storage）
+
+## 最新進度快照
+
+- WP-C（場刊可讀性）親審通過＋branch e2e 70/70 → 已合併；4 個 P2 記錄於
+  LEAD_REVIEW_NOTES（標籤重疊/生活組貼框/圖面縮小/3D 深色）——交 Grok R2 判定
+- WP-D（UX/AI/模擬呈現/儲存安全 21 項）Codex 執行中；
+  之後：重產截圖 → Grok R2（brief 在 scratchpad grok-round2-prompt.md）→ Release Gate
 
 ## Git
 
