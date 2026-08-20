@@ -678,3 +678,49 @@ html, body {
   left: auto; right: 16px; width: 360px;
   bottom: 16px; max-height: 48dvh;
 }
+
+/* --- Quick Start wizard + build/update banner (1.0) ---------------------- */
+.quickstart__card .btn--big {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  padding: 14px 16px;
+  font-size: 16px;
+  text-align: left;
+}
+.btn--primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.quickstart__needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.quickstart__needs .chip { min-height: 40px; }
+.quickstart__foot {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+}
+.quickstart__card .field__input { width: 100%; margin: 6px 0; }
+.quickstart__card .row { align-items: center; gap: 8px; margin: 8px 0; }
+.update-banner {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(16px + var(--ws-nav-h, 0px));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 10px 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+.quickstart__card { max-height: 88dvh; overflow-y: auto; overscroll-behavior: contain; }

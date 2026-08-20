@@ -306,15 +306,21 @@ export function createDefaultScenario(
   if (checkinObj) {
     push("checkin", checkinObj.x, checkinObj.z, { objectId: checkinObj.id, name: "報到" });
   } else if (checkinZone) {
-    push("checkin", checkinZone.x + checkinZone.width / 2, checkinZone.z + checkinZone.depth / 2, {
+    push("checkin", checkinZone.x, checkinZone.z, {
       zoneId: checkinZone.id,
     });
   } else {
     push("checkin", project.classroom.x + 2, project.classroom.z + project.classroom.width - 1.5);
   }
 
+  const paymentZone = project.zones.find((z) => z.type === "payment");
   if (paymentObj) {
     push("payment", paymentObj.x, paymentObj.z, { objectId: paymentObj.id, name: "收費" });
+  } else if (paymentZone) {
+    push("payment", paymentZone.x, paymentZone.z, {
+      zoneId: paymentZone.id,
+      name: "收費",
+    });
   } else {
     // Combined with checkin by default (same coords, separate station for branching).
     const ck = stations.find((s) => s.type === "checkin")!;
@@ -322,7 +328,7 @@ export function createDefaultScenario(
   }
 
   if (shoeZone) {
-    push("shoe", shoeZone.x + shoeZone.width / 2, shoeZone.z + shoeZone.depth / 2, {
+    push("shoe", shoeZone.x, shoeZone.z, {
       zoneId: shoeZone.id,
     });
   } else {
@@ -330,7 +336,7 @@ export function createDefaultScenario(
   }
 
   if (bagZone) {
-    push("backpack", bagZone.x + bagZone.width / 2, bagZone.z + bagZone.depth / 2, {
+    push("backpack", bagZone.x, bagZone.z, {
       zoneId: bagZone.id,
     });
   } else {

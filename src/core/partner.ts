@@ -62,8 +62,8 @@ const FOCUS: Record<Exclude<PartnerRole, "all">, RoleFocus> = {
     objectKinds: new Set(["regTable", "door"]),
   },
   payment: {
-    zoneTypes: new Set<ZoneType>(["registration"]),
-    routeTypes: new Set<RouteType>(["registration"]),
+    zoneTypes: new Set<ZoneType>(["registration", "payment"]),
+    routeTypes: new Set<RouteType>(["registration", "payment"]),
     serviceRoles: new Set<ServiceRole>(["payment"]),
     stationTypes: new Set<StationType>(["payment"]),
     objectKinds: new Set(["regTable"]),

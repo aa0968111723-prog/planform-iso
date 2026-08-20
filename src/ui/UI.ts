@@ -5,8 +5,8 @@ import { calibrationCompare } from "../core/measure";
 import { ROUTE_PRESETS } from "../core/routes";
 import { issueCounts, type Severity } from "../core/validation";
 import { dockingPolicy, type WorkspaceMode } from "../core/viewport";
-import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanPreset } from "../export/constructionPlan";
-import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
+import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanOptions, type PlanPreset, type RoleFilter } from "../export/constructionPlan";
+import { downloadPng, exportProjectJson, importProjectJson, pngFilename, sharePng } from "../export/exporters";
 import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
@@ -16,6 +16,9 @@ import { refreshSimPanel } from "./simPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
+import { quickStartSeen, showQuickStart } from "./quickStart";
+import { BUILD_INFO } from "../buildInfo";
+import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
 
@@ -54,7 +57,7 @@ export class UI {
   private lastMode: Mode | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
-  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true, simplify: false };
+  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false };
   private agentSheet: QuickAgentSheetHandles;
   private menu: MenuSheetHandles = buildMenuSheet();
   private smartBox = el("div", { class: "list" });
@@ -135,24 +138,17 @@ export class UI {
   }
 
   private buildQuickStart(): void {
-    const KEY = "planform-iso:quickstart";
-    try { if (localStorage.getItem(KEY)) return; } catch { return; }
-    const steps = [
-      "① 場地：設定教室尺寸與地磚，放門 / 投影幕",
-      "② 場佈：建立功能區，輸入人數自動排地墊，放桌椅",
-      "③ 動線：選類型畫人流，可「聚焦」或「▶ 模擬動線」",
-      "④ 分享：匯出場佈總覽 / 動線圖 / 夥伴任務圖，或按「檢視給團隊」",
-    ];
-    const dismiss = () => { try { localStorage.setItem(KEY, "1"); } catch { /* ignore */ } overlay.remove(); this.viewport.schedule(); };
-    const overlay = el("div", { class: "quickstart" }, [
-      el("div", { class: "quickstart__card" }, [
-        el("div", { class: "quickstart__title", text: "平面場 ISO — 三步驟快速上手" }),
-        el("div", { class: "quickstart__steps" }, steps.map((s) => el("div", { text: s }))),
-        el("p", { class: "hint", text: "手機 / 平板：下方分頁切換場地 / 場佈 / 動線 / 分享；再點同一分頁可收回、露出畫布。" }),
-        button("開始使用", dismiss),
-      ]),
-    ]);
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) dismiss(); });
+    if (quickStartSeen()) return;
+    this.openQuickStart();
+  }
+
+  /** Open the Quick Start wizard (first run, or 更多 → 快速開始). */
+  openQuickStart(): void {
+    if (this.root.querySelector(".quickstart")) return;
+    const overlay = showQuickStart(this.app, () => {
+      this.viewport.schedule();
+      this.update();
+    });
     this.root.append(overlay);
   }
 
@@ -261,7 +257,18 @@ export class UI {
       {
         title: "活動",
         items: [
+          { label: "🚀 快速開始", sub: "選場地、勾需求、自動排場佈", onSelect: () => this.openQuickStart() },
           { label: "重新命名活動", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
+        ],
+      },
+      {
+        title: "關於",
+        items: [
+          {
+            label: `版本 ${BUILD_INFO.version}`,
+            sub: `${BUILD_INFO.commit}${BUILD_INFO.builtAt ? ` · ${BUILD_INFO.builtAt.slice(0, 16).replace("T", " ")}` : ""}`,
+            onSelect: () => { /* info only */ },
+          },
         ],
       },
     ];
@@ -408,19 +415,57 @@ export class UI {
   }
 
   /**
-   * 場地 first level is deliberately four things — 教室尺寸 / 地磚 / 現場校正 /
-   * 固定設施. Engineering parameters (X, Z, tile origin, tile rotation) are
-   * real but rarely touched, so they sit in 進階設定 instead of being the first
-   * thing a phone or tablet user meets.
+   * 場地 first level is deliberately five things — 場地模板 / 教室尺寸 / 地磚 /
+   * 現場校正 / 固定設施. Engineering parameters (X, Z, tile origin, tile
+   * rotation) are real but rarely touched, so they sit in 進階設定 instead of
+   * being the first thing a phone or tablet user meets.
    */
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
+      this.venuePresetSection(),
       this.roomSizeSection(),
       this.tileSection(),
       this.calibrationSection(),
       this.fixtureSection(onPick),
       this.siteAdvancedSection(),
     ];
+  }
+
+  private venuePresetSection(): HTMLElement {
+    const body: HTMLElement[] = [];
+    const apply = (id: string) => {
+      if (window.confirm("套用場地模板會改變教室尺寸與地磚（物件會保留、可復原）。繼續？")) {
+        this.app.applyVenuePresetById(id);
+      }
+    };
+    body.push(el("div", { class: "row wrap" },
+      BUILTIN_VENUE_PRESETS.map((p) => button(p.name, () => apply(p.id), "chip chip--sm"))));
+    const mine = listUserVenuePresets();
+    if (mine.length) {
+      body.push(el("div", { class: "subhead", text: "我的場地" }));
+      for (const p of mine) {
+        body.push(el("div", { class: "row" }, [
+          button(`🏫 ${p.name}`, () => apply(p.id), "chip chip--sm"),
+          button("刪除", () => {
+            if (window.confirm(`確定刪除場地模板「${p.name}」？`)) {
+              deleteUserVenuePreset(p.id);
+              this.update();
+            }
+          }, "chip chip--sm"),
+        ]));
+      }
+    }
+    const nameInput = el("input", { type: "text", class: "field__input", placeholder: "場地名稱（例如：B302）" }) as HTMLInputElement;
+    body.push(el("div", { class: "row" }, [
+      nameInput,
+      button("儲存為我的場地", () => {
+        if (this.app.saveCurrentVenuePreset(nameInput.value)) {
+          nameInput.value = "";
+          this.update();
+        }
+      }, "btn btn--ghost"),
+    ]));
+    return section("場地模板", body);
   }
 
   private roomSizeSection(): HTMLElement {
@@ -635,7 +680,7 @@ export class UI {
     const importInput = el("input", { type: "file", accept: "application/json", style: "display:none" }) as HTMLInputElement;
     importInput.addEventListener("change", async () => {
       const f = importInput.files?.[0]; if (!f) return;
-      try { this.app.store.loadProject(await importProjectJson(f) as never); } catch { alert("匯入失敗：JSON 格式錯誤"); }
+      try { this.app.store.loadProject(await importProjectJson(f) as never); this.showToast("已匯入專案"); } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
     });
     const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" }) as HTMLInputElement;
@@ -649,43 +694,35 @@ export class UI {
     };
     refreshList();
     const o = this.planOpts;
-    const shot = (preset: PlanPreset, role: "report" | "life" | "guide" | null, name: string) =>
-      downloadPng(renderConstructionPlan(state(), { ...o, preset, roleFilter: role }), `planform-${name}.png`);
-    const planSection = section("分享給夥伴（圖片）", [
-      el("p", { class: "hint", text: "輸出乾淨、可直接給工作人員看的圖，不含編輯控制點。" }),
-      button("場佈總覽", () => shot("full", null, "overview")),
-      button("動線圖", () => shot("route", null, "route"), "btn btn--ghost"),
-      button("地墊圖", () => shot("mats", null, "mats"), "btn btn--ghost"),
-      el("div", { class: "subhead", text: "夥伴任務圖（只顯示相關資訊）" }),
+    const share = (preset: PlanPreset, role: RoleFilter, kind: string, extra?: Partial<PlanOptions>) => {
+      const dataUrl = renderConstructionPlan(state(), { ...o, preset, roleFilter: role, ...extra });
+      void sharePng(dataUrl, pngFilename(state().name, kind)).then((how) => {
+        this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+      });
+    };
+    const planSection = section("場刊圖（傳給夥伴）", [
+      el("p", { class: "hint", text: "乾淨、看得懂的圖，手機會直接開分享（LINE），電腦則下載。" }),
+      button("場佈總覽圖", () => share("full", null, "場佈總覽")),
       el("div", { class: "row wrap" }, [
-        button("報到組", () => shot("staff", "report", "report"), "chip chip--sm"),
-        button("生活組", () => shot("staff", "life", "life"), "chip chip--sm"),
-        button("引導組", () => shot("staff", "guide", "guide"), "chip chip--sm"),
-      ]),
-      el("div", { class: "subhead", text: "模擬摘要" }),
-      el("p", { class: "hint", text: this.app.session.simResult
-        ? this.app.session.simResult.summaryLines.join(" ")
-        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
-      button("匯出模擬摘要 PNG", () => {
-        const r = this.app.session.simResult ?? this.app.runEventSimulation();
-        downloadPng(renderConstructionPlan(state(), {
-          ...o,
-          preset: "route",
-          simplify: true,
-          titleSuffix: "模擬摘要",
-          extraNotes: r.summaryLines,
-        }), "planform-sim-summary.png");
-      }, "btn btn--ghost"),
-      el("div", { class: "grid2" }, [
-        selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),
-        selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
+        button("動線圖", () => share("route", null, "動線圖"), "btn btn--ghost"),
+        button("地墊 / 座位圖", () => share("mats", null, "地墊座位圖"), "btn btn--ghost"),
       ]),
       el("div", { class: "row wrap" }, [
-        button(o.dims ? "✓ 尺寸標註" : "尺寸標註", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
-        button(o.inventory ? "✓ 數量清單" : "數量清單", () => { o.inventory = !o.inventory; this.update(); }, o.inventory ? "chip chip--sm chip--primary" : "chip chip--sm"),
-        button(o.simplify ? "✓ 簡化顯示" : "簡化顯示", () => { o.simplify = !o.simplify; this.update(); }, o.simplify ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button("工作分區圖", () => share("zones", null, "工作分區圖"), "btn btn--ghost"),
+        button("物資清單圖", () => share("inventory", null, "物資清單", { orientation: "portrait" }), "btn btn--ghost"),
+        button("夥伴觀看圖", () => share("partner", null, "夥伴觀看圖", { simplify: true, dims: false }), "btn btn--ghost"),
       ]),
-      button("3D 示意圖", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), "planform-3d.png"), "btn btn--ghost"),
+      el("div", { class: "subhead", text: "各組任務圖（只顯示該組需要的）" }),
+      el("div", { class: "row wrap" }, [
+        button("報到組", () => share("staff", "checkin", "報到組"), "chip chip--sm"),
+        button("收費組", () => share("staff", "payment", "收費組"), "chip chip--sm"),
+        button("引導組", () => share("staff", "guide", "引導組"), "chip chip--sm"),
+        button("生活組", () => share("staff", "life", "生活組"), "chip chip--sm"),
+      ]),
+      el("div", { class: "row wrap" }, [
+        button(o.dims ? "✓ 顯示尺寸" : "顯示尺寸", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(o.inventory ? "✓ 顯示物資數量" : "顯示物資數量", () => { o.inventory = !o.inventory; this.update(); }, o.inventory ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      ]),
     ]);
 
     const measureSection = section("現場量測", [
@@ -695,24 +732,50 @@ export class UI {
       ], this.app.session.measureType, (v) => this.app.setMeasureType(v as MeasurementType)),
       button("開始量測（端點自動吸附）", () => { this.app.startMeasure(this.app.session.measureType); if (this.compact) this.setSheet("none"); }),
       this.measurementsList(),
-    ]);
+    ], false);
 
-    return section("匯出 / 儲存", [
-      planSection,
-      measureSection,
-      el("div", { class: "subhead", text: "資料" }),
+    const advancedSection = section("進階匯出", [
+      el("div", { class: "grid2" }, [
+        selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),
+        selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
+      ]),
+      button(o.simplify ? "✓ 簡化顯示（略過開關、電腦）" : "簡化顯示（略過開關、電腦）", () => { o.simplify = !o.simplify; this.update(); }, o.simplify ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      el("div", { class: "subhead", text: "模擬摘要" }),
+      el("p", { class: "hint", text: this.app.session.simResult
+        ? this.app.session.simResult.summaryLines.join(" ")
+        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
+      button("匯出模擬摘要圖", () => {
+        const r = this.app.session.simResult ?? this.app.runEventSimulation();
+        share("route", null, "模擬摘要", { simplify: true, titleSuffix: "模擬摘要", extraNotes: r.summaryLines });
+      }, "btn btn--ghost"),
+      button("3D 示意圖", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), pngFilename(state().name, "3D示意")), "btn btn--ghost"),
+      el("div", { class: "subhead", text: "專案資料（備份 / 搬機）" }),
       el("div", { class: "row" }, [
         button("匯出 JSON", () => exportProjectJson(state())),
         button("匯入 JSON", () => importInput.click(), "btn btn--ghost"),
       ]),
       importInput,
-      el("div", { class: "subhead", text: "本機平面圖" }),
+    ], false);
+
+    return section("分享 / 匯出", [
+      planSection,
+      el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
-      textField("簡短說明（團隊檢視顯示）", state().description, (v) => this.app.updateDescription(v)),
-      el("div", { class: "row" }, [layoutName, button("儲存", () => { this.app.store.saveNamedLayout(layoutName.value.trim() || state().name); refreshList(); })]),
+      textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
+      el("div", { class: "subhead", text: "我的平面圖（本機儲存）" }),
+      el("div", { class: "row" }, [layoutName, button("儲存", () => { this.app.store.saveNamedLayout(layoutName.value.trim() || state().name); refreshList(); this.showToast("已儲存平面圖"); })]),
       el("div", { class: "row" }, [layoutList,
         button("載入", () => { if (layoutList.value) this.app.store.loadNamedLayout(layoutList.value); }, "btn btn--ghost"),
-        button("刪除", () => { if (layoutList.value) { this.app.store.deleteNamedLayout(layoutList.value); refreshList(); } }, "btn btn--ghost")]),
+        button("刪除", () => {
+          const name = layoutList.value;
+          if (!name) return;
+          if (!window.confirm(`確定刪除平面圖「${name}」？此動作無法復原。`)) return;
+          this.app.store.deleteNamedLayout(name);
+          refreshList();
+          this.showToast(`已刪除「${name}」`);
+        }, "btn btn--ghost")]),
+      measureSection,
+      advancedSection,
     ]);
   }
 

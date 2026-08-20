@@ -55,6 +55,7 @@ import {
 } from "../core/measure";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
+import { applyVenuePreset, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
 import {
   agentPositions,
   detectBottlenecks,
@@ -115,6 +116,8 @@ export interface Session {
   focusRouteId: string | null;
   participants: number;
   matCandidates: LayoutCandidate[];
+  /** Zone type waiting for a canvas tap ("點畫面放區域"). */
+  zonePlace: ZoneType | null;
   simPositions: { x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
   bottlenecks: Bottleneck[];
   simPlaying: boolean;
@@ -212,6 +215,7 @@ export class App {
     focusRouteId: null,
     participants: 30,
     matCandidates: [],
+    zonePlace: null,
     simPositions: [],
     bottlenecks: [],
     simPlaying: false,
@@ -492,11 +496,50 @@ export class App {
   // --- zones -------------------------------------------------------------
 
   addZone(type: ZoneType): void {
-    const d = ZONE_DEFAULTS[type];
     const c = this.centerOfClassroom();
-    const zone: Zone = { id: uid("zone"), type, name: d.label, x: c.x, z: c.z, width: d.width, depth: d.depth, color: d.color, locked: false, hidden: false, icon: d.icon, capacity: null };
+    this.addZoneAt(type, c.x, c.z);
+  }
+
+  addZoneAt(type: ZoneType, x: number, z: number): void {
+    const d = ZONE_DEFAULTS[type];
+    const zone: Zone = { id: uid("zone"), type, name: d.label, x, z, width: d.width, depth: d.depth, color: d.color, locked: false, hidden: false, icon: d.icon, capacity: null };
     this.store.mutate((p) => p.zones.push(zone));
     this.setSelection([zone.id]);
+    this.toast(`已建立「${d.label}」，拖曳可移動位置`, true);
+  }
+
+  /** Arm one canvas tap to drop a zone of the given type where the user taps. */
+  beginZonePlacement(type: ZoneType): void {
+    this.session.zonePlace = type;
+    this.toast(`點畫面放「${ZONE_DEFAULTS[type].label}」`);
+  }
+
+  // --- venue presets & quick start ---------------------------------------
+
+  applyVenuePresetById(id: string): boolean {
+    const preset = venuePresetById(id);
+    if (!preset) return false;
+    this.store.mutate((p) => applyVenuePreset(p, preset, { withFixtures: true }));
+    this.recenterView();
+    this.toast(`已套用「${preset.name}」（可復原）`, true);
+    return true;
+  }
+
+  saveCurrentVenuePreset(name: string): boolean {
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+    const preset = venuePresetFromProject(this.state, trimmed);
+    const ok = saveUserVenuePreset(preset);
+    this.toast(ok ? `已把目前場地存成「${trimmed}」` : "儲存場地失敗（儲存空間可能已滿）");
+    return ok;
+  }
+
+  /** Load a Quick Start generated project and land the user in 場佈. */
+  startFromQuickStart(project: Project): void {
+    this.store.loadProject(project);
+    this.setWorkflow("layout");
+    this.recenterView();
+    this.toast("場佈起點已建立，直接拖曳調整即可", true);
   }
 
   // --- array groups ------------------------------------------------------
@@ -1391,6 +1434,14 @@ export class App {
       if (!c.a || (c.a && c.b)) { c.a = { x: snapped.x, z: snapped.z }; c.b = null; } else { c.b = { x: snapped.x, z: snapped.z }; }
       this.session.calibrate = c;
       this.render();
+      return;
+    }
+
+    if (this.session.zonePlace && ground) {
+      const type = this.session.zonePlace;
+      this.session.zonePlace = null;
+      const snapped = applySnap(ground.x, ground.z, this.state.tile, this.session.snap);
+      this.addZoneAt(type, snapped.x, snapped.z);
       return;
     }
 

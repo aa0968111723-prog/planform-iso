@@ -57,9 +57,10 @@ describe("traffic simulation", () => {
 });
 
 describe("route presets", () => {
-  it("has 8 presets with colors and icons", () => {
-    expect(ROUTE_PRESETS.length).toBe(8);
+  it("has 9 presets with colors and icons", () => {
+    expect(ROUTE_PRESETS.length).toBe(9);
     expect(routePreset("entry").label).toContain("入場");
+    expect(routePreset("payment").label).toContain("收費");
     expect(routePreset("staff").color).toMatch(/^#/);
     expect(routePreset("unknown" as never).type).toBe("custom");
   });

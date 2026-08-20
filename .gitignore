@@ -7,3 +7,5 @@ dev-dist/
 docs/FIELD_PRECISION_MOBILE_VALIDATION_PLAN.md
 test-results/
 playwright-report/
+baseline_gates.log
+_audit_grok.md

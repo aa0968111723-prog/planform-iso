@@ -1011,13 +1011,23 @@ export class SceneManager {
     return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
   }
 
-  /** Snapshot the current 3D scene (used for the 3D iso export image). */
+  /**
+   * Snapshot the current 3D scene (used for the 3D iso export image).
+   * Editor-only layers (selection outlines, placement ghost, live measure,
+   * simulation markers) are hidden for the shot so none of them bake into
+   * the exported PNG.
+   */
   renderToDataURL(project: Project, view: ViewName): string {
     const prev = project.view;
+    const editorLayers = [this.ghostGroup, this.overlayGroup, this.measureGroup];
+    const prevVisible = editorLayers.map((g) => g.visible);
+    for (const g of editorLayers) g.visible = false;
     this.setView(view);
     this.renderer.render(this.scene, this.camera);
     const url = this.renderer.domElement.toDataURL("image/png");
+    editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
     this.setView(prev);
+    this.renderer.render(this.scene, this.camera);
     return url;
   }
 }

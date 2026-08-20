@@ -148,11 +148,13 @@ export const DEFAULT_VALIDATION_SETTINGS: ValidationSettings = {
 
 export type ZoneType =
   | "registration"
+  | "payment"
   | "life"
   | "group"
   | "meditation"
   | "shoe"
-  | "backpack";
+  | "backpack"
+  | "custom";
 
 export interface Zone {
   id: string;
@@ -176,7 +178,7 @@ export interface RoutePoint {
 }
 
 export type RouteType =
-  | "entry" | "registration" | "shoe" | "backpack" | "seating" | "group" | "staff" | "custom";
+  | "entry" | "registration" | "payment" | "shoe" | "backpack" | "seating" | "group" | "staff" | "custom";
 
 export interface Route {
   id: string;
@@ -319,11 +321,13 @@ export const ZONE_DEFAULTS: Record<
   { label: string; color: string; width: number; depth: number; icon: string }
 > = {
   registration: { label: "報到區", color: "#38bdf8", width: 2.5, depth: 1.5, icon: "👋" },
+  payment: { label: "收費區", color: "#facc15", width: 2, depth: 1.5, icon: "💰" },
   life: { label: "生活組區", color: "#34d399", width: 2, depth: 2, icon: "🧺" },
   group: { label: "小組組別區", color: "#a78bfa", width: 3, depth: 3, icon: "👥" },
   meditation: { label: "講師禪定區", color: "#f472b6", width: 2, depth: 2, icon: "🧘" },
   shoe: { label: "鞋子擺放區", color: "#fbbf24", width: 2, depth: 1, icon: "👟" },
   backpack: { label: "背包放置區", color: "#fb923c", width: 2, depth: 1, icon: "🎒" },
+  custom: { label: "自訂區", color: "#94a3b8", width: 2, depth: 2, icon: "📦" },
 };
 
 export function createDefaultProject(): Project {

@@ -16,6 +16,7 @@ export interface RoutePreset {
 export const ROUTE_PRESETS: RoutePreset[] = [
   { type: "entry", label: "入場動線", color: "#f97316", icon: "🚪" },
   { type: "registration", label: "報到動線", color: "#38bdf8", icon: "👋" },
+  { type: "payment", label: "收費動線", color: "#facc15", icon: "💰" },
   { type: "shoe", label: "鞋子動線", color: "#fbbf24", icon: "👟" },
   { type: "backpack", label: "背包動線", color: "#fb923c", icon: "🎒" },
   { type: "seating", label: "入座動線", color: "#34d399", icon: "🧎" },
