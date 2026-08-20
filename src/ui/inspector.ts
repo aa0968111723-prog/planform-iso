@@ -139,9 +139,10 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
       num("旋轉 (°)", obj.rotationDeg, 5, (v) => app.updateSelectedObject({ rotationDeg: v })),
       num("離地 (cm)", Math.round(metersToCm(obj.elevation)), 1, (v) => app.updateSelectedObject({ elevation: v / 100 }), 0),
     ]));
+    const surfaceLabel = obj.surface === "wall" ? "牆面" : obj.surface === "tabletop" ? "桌面" : "地面";
     root.append(el("div", { class: "readout" }, [
       el("div", { text: `X / Z：${obj.x.toFixed(3)}, ${obj.z.toFixed(3)} m` }),
-      el("div", { text: `放置面：${obj.surface}` }),
+      el("div", { text: `放置面：${surfaceLabel}` }),
     ]));
     root.append(textField("備註", obj.note ?? "", (v) => app.updateSelectedObject({ note: v })));
   }

@@ -165,7 +165,7 @@ export class Store {
    * UI to explain what happened.
    */
   static loadAutosaveWithRecovery(): { project: Project | null; recovered: boolean } {
-    let raw: string | null = null;
+    let raw: string | null;
     try {
       raw = localStorage.getItem(AUTOSAVE_KEY);
     } catch {

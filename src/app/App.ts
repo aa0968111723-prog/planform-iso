@@ -238,6 +238,8 @@ export class App {
 
   readonly quickAgent: QuickAgent;
   notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
+  /** UI hook: open the AI sheet with the 幫我改善 request (set by UI). */
+  onImprove: (() => void) | null = null;
 
   /** Live catalog (builtins + project custom extras). */
   getCatalog(): AssetCatalog {
@@ -1393,7 +1395,14 @@ export class App {
     canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
     window.addEventListener("pointerup", (e) => this.onPointerUp(e));
-    window.addEventListener("pointercancel", (e) => this.onPointerUp(e));
+    // A cancelled pointer (system gesture, palm rejection, tab switch) must
+    // roll the drag back, not commit a half-finished move.
+    window.addEventListener("pointercancel", (e) => {
+      this.pointers.delete(e.pointerId);
+      this.abortDrag();
+      this.scene.setControlsEnabled(true);
+      this.render();
+    });
     canvas.addEventListener("contextmenu", (e) => { if (this.session.mode === "place") { e.preventDefault(); this.cancelPlacement(); } });
   }
 

@@ -48,9 +48,13 @@ export function buildVenueCaptureFlow(app: App): HTMLElement {
       }, () => {
         // cycle kind lightly for review
         const order: VenueDetection["kind"][] = ["door", "screen", "table", "chair", "regTable", "obstacle", "tile-hint"];
+        const kindLabel: Record<VenueDetection["kind"], string> = {
+          door: "門", screen: "投影幕", table: "桌子", chair: "椅子",
+          regTable: "報到桌", obstacle: "障礙物", "tile-hint": "地磚參考",
+        };
         const i = order.indexOf(d.kind);
         d.kind = order[(i + 1) % order.length];
-        d.label = d.kind;
+        d.label = kindLabel[d.kind] ?? d.kind;
         d.needsReview = true;
         render();
       }));

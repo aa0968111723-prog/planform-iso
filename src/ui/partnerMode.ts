@@ -14,7 +14,7 @@ import type { App } from "../app/App";
 import { PARTNER_ROLES, type PartnerRole } from "../core/partner";
 import { formatDuration, type RehearsalEvent } from "../core/rehearsal";
 import { renderConstructionPlan } from "../export/constructionPlan";
-import { downloadPng } from "../export/exporters";
+import { pngFilename, sharePng } from "../export/exporters";
 import { button, el } from "./dom";
 
 export type PartnerSheet = "none" | "steps" | "timeline" | "suggest" | "marks";
@@ -67,10 +67,11 @@ export function buildPartnerMode(
       openSheet("suggest");
     }, "btn partneraction partneraction--accent"),
     button("🖼 存成圖", () => {
-      downloadPng(
-        renderConstructionPlan(app.store.getState(), { preset: "full", simplify: true, dims: false, inventory: false }),
-        "planform-partner.png",
-      );
+      const state = app.store.getState();
+      const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false, inventory: false });
+      void sharePng(dataUrl, pngFilename(state.name, "夥伴觀看圖")).then((how) => {
+        app.notifyToast?.(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+      });
     }, "btn partneraction"),
   ]);
   const dock = el("div", { class: "partnerdock" }, [brief, actions]);
@@ -218,7 +219,7 @@ export function buildPartnerMode(
       return;
     }
     const shot = (project: Parameters<typeof renderConstructionPlan>[0]) =>
-      renderConstructionPlan(project, { preset: "full", simplify: true, dims: false, inventory: false });
+      renderConstructionPlan(project, { preset: "full", simplify: true, dims: false, inventory: false, scale: 1 });
 
     sheetBody.append(
       el("div", { class: "beforeafter" }, [

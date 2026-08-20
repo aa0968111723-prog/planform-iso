@@ -23,7 +23,7 @@ import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewp
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
-  { id: "top", label: "俯視" }, { id: "iso", label: "等角(3D)" }, { id: "front", label: "正視" },
+  { id: "top", label: "俯視" }, { id: "iso", label: "立體" }, { id: "front", label: "正視" },
   { id: "left", label: "左視" }, { id: "right", label: "右視" },
 ];
 const SNAPS: { id: SnapMode; label: string }[] = [
@@ -80,7 +80,31 @@ export class UI {
       this.box, this.toast, this.ctxbar, this.menu.root,
       this.partner.top, this.partner.dock, this.partner.sheet,
     );
-    this.agentSheet = buildQuickAgentSheet(app);
+    this.agentSheet = buildQuickAgentSheet(app, {
+      openMatArranger: () => {
+        this.app.setWorkflow("layout");
+        this.setSheet("workflow");
+        this.app.session.matCandidates = this.app.computeMatCandidates(this.app.session.participants);
+        this.update();
+      },
+      startEntryRoute: () => {
+        this.app.setWorkflow("route");
+        this.app.newRoutePreset("entry");
+        if (this.compact) this.setSheet("none");
+        this.showToast("點畫面新增動線節點，畫完按「完成繪製」");
+      },
+      openCheck: () => {
+        this.app.setWorkflow("check");
+        this.setSheet("workflow");
+      },
+      sharePartnerImage: () => {
+        const state = this.app.store.getState();
+        const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false });
+        void sharePng(dataUrl, pngFilename(state.name, "夥伴觀看圖")).then((how) => {
+          this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+        });
+      },
+    });
     root.append(this.agentSheet.root);
 
     this.viewport = new WorkspaceViewport(root, app.scene.domElement);
@@ -106,6 +130,7 @@ export class UI {
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.onImprove = () => this.agentSheet.runPreset("幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門");
     this.app.onChange(() => this.update());
     this.bindKeys();
     this.bindSheetGestures();

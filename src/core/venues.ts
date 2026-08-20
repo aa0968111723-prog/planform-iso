@@ -180,8 +180,20 @@ export function venuePresetFromProject(project: Project, name: string): VenuePre
       });
     }
   }
-  const { id: _c, ...classroom } = project.classroom;
-  const { id: _k, ...corridor } = project.corridor;
+  const classroom: VenueAreaSpec = {
+    name: project.classroom.name,
+    length: project.classroom.length,
+    width: project.classroom.width,
+    x: project.classroom.x,
+    z: project.classroom.z,
+  };
+  const corridor: VenueAreaSpec = {
+    name: project.corridor.name,
+    length: project.corridor.length,
+    width: project.corridor.width,
+    x: project.corridor.x,
+    z: project.corridor.z,
+  };
   return {
     id: uid("venue"),
     name,

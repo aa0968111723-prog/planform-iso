@@ -12,6 +12,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  MOUSE,
   Object3D,
   OrthographicCamera,
   Plane,
@@ -20,6 +21,7 @@ import {
   Scene,
   Sprite,
   SpriteMaterial,
+  TOUCH,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -191,6 +193,16 @@ export class SceneManager {
       case "front": this.camera.position.set(t.x, 4, t.z + d); this.controls.enableRotate = true; break;
       case "left": this.camera.position.set(t.x - d, 4, t.z); this.controls.enableRotate = true; break;
       case "right": this.camera.position.set(t.x + d, 4, t.z); this.controls.enableRotate = true; break;
+    }
+    // With rotate disabled (俯視) a one-finger drag on empty canvas would map
+    // to the dead ROTATE gesture — remap it to PAN so the plan can be moved
+    // with one finger. Rotating views keep the Three.js defaults.
+    if (this.controls.enableRotate) {
+      this.controls.touches.ONE = TOUCH.ROTATE;
+      this.controls.mouseButtons.LEFT = MOUSE.ROTATE;
+    } else {
+      this.controls.touches.ONE = TOUCH.PAN;
+      this.controls.mouseButtons.LEFT = MOUSE.PAN;
     }
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(t);

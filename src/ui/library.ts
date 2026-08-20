@@ -1,11 +1,28 @@
 import type { App } from "../app/App";
 import { CATALOG_CATEGORIES } from "../core/assets";
 import type { AssetCatalogEntry, CatalogCategory } from "../core/catalog";
+import { planSymbolForEntry, renderPlanThumbDataUrl } from "../core/planSymbol";
 import { ZONE_DEFAULTS, type ZoneType } from "../core/model";
 import { metersToCm } from "../core/units";
 import { button, card, el } from "./dom";
 
 const PLACEMENT_LABEL: Record<string, string> = { floor: "地面", wall: "牆面", tabletop: "桌面" };
+const ROLE_LABEL: Record<string, string> = { checkin: "報到", payment: "收費", guidance: "引導", storage: "收納" };
+
+/** 常用物資 — the supplies a zen-club event actually uses, front and center. */
+const COMMON_SUPPLY_IDS = [
+  "builtin:mat",
+  "builtin:chair",
+  "builtin:table",
+  "builtin:regTable",
+  "builtin:payment-desk",
+  "builtin:computer",
+  "builtin:door",
+  "builtin:screen",
+  "builtin:shoe-rack",
+  "builtin:signage-stand",
+  "builtin:queue-barrier",
+];
 
 export interface LibraryOptions {
   categories?: CatalogCategory[];
@@ -26,11 +43,13 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   const panels: { label: string; body: HTMLElement }[] = [];
   const pick = (run: () => void) => () => { run(); opts.onPick?.(); };
 
-  const recent = catalog.listRecent();
-  if (recent.length) {
+  const common = COMMON_SUPPLY_IDS
+    .map((id) => catalog.get(id))
+    .filter((e): e is AssetCatalogEntry => !!e);
+  if (common.length) {
     panels.push({
-      label: "常用",
-      body: el("div", { class: "cardgrid" }, recent.map((e) => catalogCard(app, e, opts))),
+      label: "常用物資",
+      body: el("div", { class: "cardgrid" }, common.map((e) => catalogCard(app, e, opts))),
     });
   }
 
@@ -38,7 +57,15 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     panels.push({
       label: "區域",
       body: el("div", { class: "cardgrid" }, (Object.keys(ZONE_DEFAULTS) as ZoneType[]).map((z) =>
-        card(ZONE_DEFAULTS[z].icon, ZONE_DEFAULTS[z].label, "區域", pick(() => app.addZone(z))))),
+        card(ZONE_DEFAULTS[z].icon, ZONE_DEFAULTS[z].label, "點畫面放置", pick(() => app.beginZonePlacement(z))))),
+    });
+  }
+
+  const recent = catalog.listRecent().filter((e) => !COMMON_SUPPLY_IDS.includes(e.id));
+  if (recent.length) {
+    panels.push({
+      label: "最近",
+      body: el("div", { class: "cardgrid" }, recent.map((e) => catalogCard(app, e, opts))),
     });
   }
 
@@ -77,16 +104,36 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   return root;
 }
 
+/** 2D plan-symbol thumbnail; falls back to the emoji glyph when unavailable. */
+function thumbFor(d: AssetCatalogEntry): string | null {
+  if (d.placementType !== "floor") return null;
+  try {
+    return renderPlanThumbDataUrl(planSymbolForEntry(d), 64);
+  } catch {
+    return null;
+  }
+}
+
 function catalogCard(app: App, d: AssetCatalogEntry, opts: LibraryOptions = {}): HTMLButtonElement {
   const w = Math.round(metersToCm(d.dimensions.width));
   const dep = Math.round(metersToCm(d.dimensions.depth));
-  const role = d.serviceRole && d.serviceRole !== "none" ? ` · ${d.serviceRole}` : "";
+  const role = d.serviceRole && d.serviceRole !== "none" && ROLE_LABEL[d.serviceRole]
+    ? ` · ${ROLE_LABEL[d.serviceRole]}`
+    : "";
   const c = card(
     d.icon,
     d.name,
     `${w}×${dep}cm · ${PLACEMENT_LABEL[d.placementType] ?? ""}${role}`,
     () => { app.beginPlacementByAssetId(d.id); opts.onPick?.(); },
   );
+  const thumb = thumbFor(d);
+  if (thumb) {
+    const iconSpan = c.querySelector(".card__icon");
+    if (iconSpan) {
+      iconSpan.textContent = "";
+      iconSpan.append(el("img", { class: "card__thumb", src: thumb, alt: d.name }));
+    }
+  }
   c.dataset.name = d.name.toLowerCase();
   return c;
 }

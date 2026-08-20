@@ -1,5 +1,10 @@
 /**
- * Agent provider abstraction — Mock (deterministic) + optional NVIDIA NIM BYOK.
+ * Agent provider abstraction.
+ *
+ * The shipping provider is the local deterministic phrase → intent planner —
+ * no network, no credential, same result every time. A cloud LLM provider can
+ * implement AgentProvider later; the tool layer, preview and commit gates stay
+ * identical either way.
  */
 
 import type { AgentIntent, AgentRequest, AgentResponse, AgentToolCall } from "./types";
@@ -7,25 +12,6 @@ import type { AgentIntent, AgentRequest, AgentResponse, AgentToolCall } from "./
 export interface AgentProvider {
   readonly id: string;
   complete(request: AgentRequest): Promise<AgentResponse>;
-}
-
-const NIM_KEY = "planform-iso:nvidia-nim-key";
-
-export function getNimApiKey(): string | null {
-  try {
-    return localStorage.getItem(NIM_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setNimApiKey(key: string | null): void {
-  try {
-    if (!key) localStorage.removeItem(NIM_KEY);
-    else localStorage.setItem(NIM_KEY, key);
-  } catch {
-    /* ignore */
-  }
 }
 
 /** Deterministic phrase → intent mapper for tests and offline use. */
@@ -59,7 +45,7 @@ export class MockProvider implements AgentProvider {
           height: 0.74,
         },
       });
-      messages.push("已建立簡化素材，可立即排場。");
+      messages.push("已建立簡化素材，可立即放進場佈。");
     }
 
     if (/放\s*([兩三四五六七八九十\d]+)\s*.*報到|兩個報到|2\s*個報到|報到桌/.test(text) && /放|擺|這裡/.test(text)) {
@@ -91,7 +77,7 @@ export class MockProvider implements AgentProvider {
         tool: "placeAsset",
         args: { assetId: "builtin:payment-desk", target: "near-entrance", index: 1, offsetX: 3 },
       });
-      messages.push("預覽：報到與收費分開摆放。");
+      messages.push("預覽：報到與收費分開擺放。");
     }
 
     if (/1\s*公尺|不要擋門|入口旁邊|留\s*1/.test(text)) {
@@ -129,7 +115,7 @@ export class MockProvider implements AgentProvider {
 
     if (/動線圖|給夥伴|整理成/.test(text)) {
       intents.push({ type: "prepare-team-view" });
-      messages.push("請用匯出 → 施工圖／動線圖分享給夥伴。");
+      messages.push("到「分享」頁可以直接輸出動線圖或夥伴觀看圖。");
     }
 
     // Filter unknown tool names that Mock accidentally emitted
@@ -164,55 +150,6 @@ export class MockProvider implements AgentProvider {
   }
 }
 
-/**
- * Optional NVIDIA NIM BYOK adapter. Falls back to MockProvider on failure.
- * Does NOT perform geometry — only intent extraction via chat completions JSON.
- */
-export class NvidiaNimProvider implements AgentProvider {
-  readonly id = "nvidia-nim";
-  constructor(
-    private apiKey: string,
-    private fallback: AgentProvider = new MockProvider(),
-    private endpoint = "https://integrate.api.nvidia.com/v1/chat/completions",
-  ) {}
-
-  async complete(request: AgentRequest): Promise<AgentResponse> {
-    if (!this.apiKey) return this.fallback.complete(request);
-    try {
-      const res = await fetch(this.endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "meta/llama-3.1-8b-instruct",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You extract Planform layout intents as JSON {intents:[{type,...}], message}. Types: create-custom-asset, place-assets, separate-service-flow, simulate, optimize-layout, explain-bottleneck, prepare-team-view. No coordinates math.",
-            },
-            { role: "user", content: request.text },
-          ],
-          temperature: 0.2,
-          max_tokens: 400,
-        }),
-      });
-      if (!res.ok) return this.fallback.complete(request);
-      // Prefer mock tool planning for safety even if NIM returns text.
-      const mock = await this.fallback.complete(request);
-      mock.provider = this.id;
-      mock.message = `${mock.message}（NIM 已連線，仍由本地工具執行）`;
-      return mock;
-    } catch {
-      return this.fallback.complete(request);
-    }
-  }
-}
-
 export function createDefaultProvider(): AgentProvider {
-  const key = typeof localStorage !== "undefined" ? getNimApiKey() : null;
-  if (key) return new NvidiaNimProvider(key, new MockProvider());
   return new MockProvider();
 }
