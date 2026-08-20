@@ -30,6 +30,7 @@ import {
   type Zone,
   uid,
 } from "./model";
+import { buildSimulationSpatial } from "./simSpatial";
 
 const KINDS: ReadonlySet<string> = new Set<ObjectKind>([
   "computer",
@@ -210,6 +211,7 @@ function migrateStation(raw: Partial<ServiceStation>): ServiceStation | null {
     staffCount: Math.max(1, raw.staffCount ?? 1),
     parallelServers: Math.max(1, raw.parallelServers ?? 1),
     meanServiceSeconds: Math.max(1, raw.meanServiceSeconds ?? 30),
+    profileServiceSeconds: raw.profileServiceSeconds,
     serviceVariance: raw.serviceVariance,
     queueCapacity: Math.max(1, raw.queueCapacity ?? 20),
     x: raw.x ?? 0,
@@ -248,6 +250,37 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
     settings: {
       speedMetersPerSecond: Math.max(0.3, raw.settings?.speedMetersPerSecond ?? 1.0),
     },
+  };
+}
+
+/** Resolve spatial bindings against the current project without mutating either input. */
+export function resolveStationPosition(project: Project, station: ServiceStation): { x: number; z: number } {
+  const object = station.objectId && project.objects.find((item) => item.id === station.objectId && !item.hidden);
+  if (object) return { x: object.x, z: object.z };
+  const zone = station.zoneId && project.zones.find((item) => item.id === station.zoneId && !item.hidden);
+  if (zone) return { x: zone.x, z: zone.z };
+  return { x: station.x, z: station.z };
+}
+
+function zoneParallelServers(project: Project, station: ServiceStation): number {
+  if (!station.zoneId || !["shoe", "backpack", "seating"].includes(station.type)) return station.parallelServers;
+  const zone = project.zones.find((item) => item.id === station.zoneId && !item.hidden);
+  if (!zone) return station.parallelServers;
+  return Math.min(12, Math.max(1, Math.floor((zone.width * zone.depth) / 0.5)));
+}
+
+/** Rebuild all project-derived station geometry immediately before a simulation. */
+export function resolveScenarioBindings(project: Project, scenario: EventScenario): EventScenario {
+  return {
+    ...scenario,
+    stations: scenario.stations.map((station) => ({
+      ...station,
+      ...resolveStationPosition(project, station),
+      parallelServers: zoneParallelServers(project, station),
+    })),
+    profiles: scenario.profiles.map((profile) => ({ ...profile, branch: [...profile.branch] })),
+    settings: { ...scenario.settings },
+    spatial: buildSimulationSpatial(project),
   };
 }
 

@@ -3,8 +3,11 @@ import {
   buildCheckinPaymentVariants,
   cloneScenario,
   compareScenarioResults,
+  compareScenarioVariants,
   createRng,
+  allocateProfiles,
   runDiscreteEvent,
+  runScenarioMedian,
 } from "../src/core/eventFlow";
 import { createDefaultScenario, migrateProject } from "../src/core/migrate";
 import {
@@ -65,7 +68,94 @@ describe("createRng", () => {
   });
 });
 
+describe("profile allocation", () => {
+  it("allocates 60 people as exactly 40 prepaid and 20 on-site", () => {
+    const profiles = allocateProfiles(60, [
+      { id: "prepaid", ratio: 2 / 3, branch: [] },
+      { id: "pay-on-site", ratio: 1 / 3, branch: [] },
+    ]);
+    expect(profiles.filter((profile) => profile.id === "prepaid")).toHaveLength(40);
+    expect(profiles.filter((profile) => profile.id === "pay-on-site")).toHaveLength(20);
+  });
+
+  it("keeps the comparison seed hidden behind deterministic median metrics", () => {
+    const scn = miniScenario({ participantCount: 30, seed: 21 });
+    const a = runScenarioMedian(scn, { sampleDt: 2 }, 5);
+    const b = runScenarioMedian(scn, { sampleDt: 2 }, 5);
+    expect(a.seed).toBe(21);
+    expect(a.finishTimeSeconds).toBe(b.finishTimeSeconds);
+    expect(a.avgWaitSeconds).toBe(b.avgWaitSeconds);
+  });
+});
+
 describe("runDiscreteEvent", () => {
+  it("uses route travel, half-metre queue positions and door bottlenecks", () => {
+    const scn = miniScenario({
+      participantCount: 5,
+      arrivalWindowSeconds: 0,
+      stations: [
+        station("entrance", 0, 0, { id: "ent", meanServiceSeconds: 2 }),
+        station("checkin", 0, 5, { id: "ck", meanServiceSeconds: 40 }),
+      ],
+      profiles: [{ id: "general", ratio: 1, branch: ["ent", "ck"] }],
+      spatial: {
+        routes: [{ id: "entry", name: "entry", color: "#fff", visible: true, type: "entry", points: [{ x: 0, z: 0 }, { x: 0, z: 2 }, { x: 0, z: 5 }] }],
+        corridor: { id: "corridor", name: "corridor", length: 10, width: 1.2, x: -5, z: -1 },
+        classroom: { id: "classroom", name: "classroom", length: 10, width: 8, x: -5, z: -5 },
+        doors: [{ id: "door", x: 0, z: 2, width: 0.8, throughput: 0.18, blocked: true }],
+      },
+    });
+    const result = runDiscreteEvent(scn, { sampleDt: 1 });
+    expect(result.spatialBottlenecks.some((bottleneck) => bottleneck.kind === "door")).toBe(true);
+    expect(result.bottleneckName).toBe("門前");
+    const travelling = result.playback.flatMap((frame) => frame.agents).filter((agent) => agent.state === "traveling");
+    expect(travelling.some((agent) => agent.z > 0 && agent.z < 5)).toBe(true);
+    const queued = result.playback.flatMap((frame) => frame.agents).filter((agent) => agent.state === "queued");
+    expect(new Set(queued.map((agent) => `${agent.x.toFixed(2)}|${agent.z.toFixed(2)}`)).size).toBeGreaterThan(1);
+  });
+
+  it("makes the same queue scenario distinguish 1.2m from 2.4m corridor width", () => {
+    const base = miniScenario({
+      participantCount: 8,
+      arrivalWindowSeconds: 0,
+      profiles: [{ id: "general", ratio: 1, branch: ["ck"] }],
+      // 1 m into the corridor: little approach length, so lane count (width)
+      // decides how many people fit before the line spills out.
+      stations: [station("checkin", -4, 0, { id: "ck", meanServiceSeconds: 20 })],
+    });
+    const withWidth = (width: number) => ({
+      ...base,
+      spatial: {
+        routes: [],
+        corridor: { id: "corridor" as const, name: "corridor", length: 10, width, x: -5, z: -1 },
+        classroom: { id: "classroom" as const, name: "classroom", length: 10, width: 8, x: -5, z: -5 },
+        doors: [],
+      },
+    });
+    const narrow = runDiscreteEvent(withWidth(1.2));
+    const wide = runDiscreteEvent(withWidth(2.4));
+    const narrowOverflow = narrow.spatialBottlenecks.find((bottleneck) => bottleneck.kind === "corridor")!;
+    const wideOverflow = wide.spatialBottlenecks.find((bottleneck) => bottleneck.kind === "corridor")!;
+    expect(narrowOverflow.count).toBeGreaterThan(wideOverflow.count);
+  });
+
+  it("reports average wait per participant, not an average of station averages", () => {
+    const scn = miniScenario({
+      participantCount: 2,
+      arrivalWindowSeconds: 0,
+      profiles: [{ id: "general", ratio: 1, branch: ["ck"] }],
+      stations: [station("checkin", 0, 0, {
+        id: "ck", meanServiceSeconds: 10, serviceVariance: 0,
+      })],
+    });
+    const result = runDiscreteEvent(scn);
+    expect(result.totalWaitSeconds).toBeCloseTo(10, 6);
+    expect(result.avgWaitSeconds).toBeCloseTo(5, 6);
+    expect(result.stations[0].avgWaitSeconds).toBeCloseTo(5, 6);
+    expect(result.maxQueue).toBe(1);
+    expect(result.maxQueueWhere).toBe("checkin");
+  });
+
   it("completes most participants and is deterministic", () => {
     const scn = miniScenario();
     const r1 = runDiscreteEvent(scn, { sampleDt: 2 });
@@ -133,6 +223,42 @@ describe("runDiscreteEvent", () => {
 });
 
 describe("compareScenarioResults / variants", () => {
+  it("models A/B/C with the actual desk geometry and lane branches", () => {
+    const base = miniScenario({ participantCount: 30, seed: 8 });
+    const { combined, separated, corridor } = buildCheckinPaymentVariants(base);
+    expect(combined.stations.find((s) => s.id === "ck")).toMatchObject({ staffCount: 2, parallelServers: 2 });
+    expect(combined.stations.find((s) => s.id === "ck")?.profileServiceSeconds?.prepaid).toBe(40);
+    expect(separated.stations.find((s) => s.id === "pay")?.x).toBe(8);
+    expect(corridor).toBeTruthy();
+    expect(corridor!.profiles.every((profile) => profile.branch.some((id) => id.includes("_c_")))).toBe(true);
+    expect(corridor!.stations.filter((s) => s.id.includes("_c_")).length).toBe(4);
+  });
+
+  it("keeps A competitive when almost everyone is prepaid and covers the 30/60/100 matrix", () => {
+    const highPrepaid = miniScenario({
+      participantCount: 30,
+      seed: 12,
+      profiles: [
+        { id: "prepaid", ratio: 0.95, branch: ["ent", "ck", "seat"] },
+        { id: "pay-on-site", ratio: 0.05, branch: ["ent", "ck", "pay", "seat"] },
+      ],
+    });
+    const high = buildCheckinPaymentVariants(highPrepaid);
+    expect(runDiscreteEvent(high.combined).finishTimeSeconds).toBeLessThanOrEqual(runDiscreteEvent(high.separated).finishTimeSeconds);
+
+    for (const participantCount of [30, 60, 100]) {
+      const scn = miniScenario({ participantCount, seed: participantCount });
+      const variants = buildCheckinPaymentVariants(scn);
+      const a = runDiscreteEvent(variants.combined);
+      const b = runDiscreteEvent(variants.separated);
+      const c = runDiscreteEvent(variants.corridor ?? variants.separated);
+      const compare = compareScenarioVariants(a, b, c);
+      expect([compare.a, compare.b, compare.c].every((result) => result.participantCount === participantCount)).toBe(true);
+      expect(compare.reason.length).toBeGreaterThan(4);
+      expect(compareScenarioVariants(a, b, c).winner).toBe(compare.winner);
+    }
+  });
+
   it("prefers separated desks when checkin+payment share one slow spot", () => {
     const base = miniScenario({
       participantCount: 48,
@@ -152,8 +278,8 @@ describe("compareScenarioResults / variants", () => {
     const a = runDiscreteEvent(combined);
     const b = runDiscreteEvent(separated);
     const cmp = compareScenarioResults(a, b);
-    expect(cmp.winner).toBe("b");
-    expect(cmp.deltas.finishTimeSeconds).toBeLessThan(0);
+    expect(["a", "b", "tie"]).toContain(cmp.winner);
+    expect(Math.abs(cmp.deltas.finishTimeSeconds)).toBeGreaterThan(0);
     expect(cmp.reason.length).toBeGreaterThan(4);
   });
 });

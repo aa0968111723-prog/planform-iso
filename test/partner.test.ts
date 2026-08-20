@@ -62,7 +62,9 @@ function station(over: Partial<StationStats> & { stationId: string; name: string
 function simResult(over: Partial<SimulationResult> = {}): SimulationResult {
   return {
     scenarioId: "s1", seed: 1, participantCount: 60, completed: 60, unfinished: 0,
-    avgJourneySeconds: 300, maxJourneySeconds: 900, finishTimeSeconds: 1200,
+    avgJourneySeconds: 300, maxJourneySeconds: 900, totalWaitSeconds: 7200, avgWaitSeconds: 120,
+    maxQueue: 8, maxQueueWhere: "", finishTimeSeconds: 1200,
+    spatialBottlenecks: [],
     stations: [
       station({ stationId: "checkin", name: "報到", maxQueue: 8, avgWaitSeconds: 120 }),
       station({ stationId: "payment", name: "收費", type: "payment", maxQueue: 3, avgWaitSeconds: 40 }),
@@ -267,6 +269,7 @@ describe("plain-language comparison", () => {
   it("calls out a genuinely better suggestion", () => {
     const before = plainMetrics(simResult());
     const after = plainMetrics(simResult({
+      maxQueue: 3, maxQueueWhere: "", avgWaitSeconds: 30,
       finishTimeSeconds: 900,
       stations: [
         station({ stationId: "checkin", name: "報到", maxQueue: 3, avgWaitSeconds: 40 }),

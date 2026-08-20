@@ -98,12 +98,10 @@ function render(app: App): HTMLElement {
   }
 
   if (result) {
-    const maxQueue = Math.max(0, ...result.stations.map((s) => s.maxQueue));
-    const worst = result.stations.find((s) => s.stationId === result.bottleneckStationId);
-    const avgWait =
-      result.stations.length > 0
-        ? result.stations.reduce((sum, s) => sum + s.avgWaitSeconds, 0) / result.stations.length
-        : 0;
+    const maxQueue = result.maxQueue;
+    const avgWait = result.avgWaitSeconds;
+    const worst = result.stations.find((s) => s.stationId === result.bottleneckStationId) ??
+      (result.bottleneckName ? { name: result.bottleneckName } : undefined);
     const lines = [
       `最多排隊：${maxQueue} 人`,
       `平均等待：${fmtDuration(avgWait)}`,
@@ -135,6 +133,10 @@ function render(app: App): HTMLElement {
             class: "card__sub",
             text: `分桌：約 ${fmtDuration(cmp.b.finishTimeSeconds)} 完成 · 最多排 ${Math.max(0, ...cmp.b.stations.map((s: { maxQueue: number }) => s.maxQueue))} 人`,
           }),
+          el("span", {
+            class: "card__sub",
+            text: `C 走廊分流：共 ${fmtDuration(cmp.c.finishTimeSeconds)} 完成・最多排 ${cmp.c.maxQueue} 人`,
+          }),
           el("span", { class: "card__sub", text: cmp.reason }),
         ]),
       ]),
@@ -153,6 +155,15 @@ function render(app: App): HTMLElement {
       }, "btn btn--ghost"),
     ]),
   ];
+  advancedBody.push(
+    el("div", { class: "row wrap" }, [
+      button(
+        `到場節奏：${q.arrivalProfile === "uniform" ? "陸續到" : "快開始才到"}`,
+        () => app.updateSimQuick({ arrivalProfile: q.arrivalProfile === "uniform" ? "front-loaded" : "uniform" }),
+        "btn btn--ghost",
+      ),
+    ]),
+  );
   if (result) {
     const top = [...result.stations].sort((a, b) => b.maxQueue - a.maxQueue).slice(0, 6);
     advancedBody.push(

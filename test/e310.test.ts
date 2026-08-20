@@ -7,6 +7,7 @@ import { validateProject } from "../src/core/validation";
 import { generateLayouts } from "../src/core/smartLayout";
 import { calibrationFooterText } from "../src/export/constructionPlan";
 import { runDiscreteEvent } from "../src/core/eventFlow";
+import { resolveScenarioBindings } from "../src/core/migrate";
 import { createProjectFromVenuePreset, venuePresetById } from "../src/core/venues";
 
 const e310 = venuePresetById("venue:tku-e310")!;
@@ -88,6 +89,21 @@ describe("E310 golden venue", () => {
     const p = buildE310GoldenProject(e310);
     const issues = validateProject(p);
     expect(issues.filter((issue) => issue.severity === "error")).toEqual([]);
+  });
+
+  it("reports a table moved in front of the door as a worse door-front bottleneck", () => {
+    const p = buildE310GoldenProject(e310);
+    const scenario = p.scenarios[0];
+    const before = runDiscreteEvent(resolveScenarioBindings(p, scenario), { sampleDt: 5 });
+    const door = p.objects.find((object) => object.kind === "door");
+    const checkin = p.objects.find((object) => object.serviceRole === "checkin" || object.kind === "regTable");
+    expect(door).toBeTruthy();
+    expect(checkin).toBeTruthy();
+    checkin!.x = door!.x;
+    checkin!.z = door!.z + 0.2;
+    const after = runDiscreteEvent(resolveScenarioBindings(p, scenario), { sampleDt: 5 });
+    expect(after.bottleneckName).toBe("門前");
+    expect(after.finishTimeSeconds).toBeGreaterThanOrEqual(before.finishTimeSeconds);
   });
 
   it("each field calibration path updates its field and clears its badge", () => {

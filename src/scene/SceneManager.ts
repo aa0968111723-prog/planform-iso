@@ -69,7 +69,7 @@ interface SessionView {
   focusRouteId?: string | null;
   simplify?: boolean;
   simPositions?: { x: number; z: number; routeId?: string; state?: string }[];
-  bottlenecks?: { x: number; z: number; count: number }[];
+  bottlenecks?: { x: number; z: number; count: number; name?: string; kind?: "door" | "corridor" | "route" }[];
   simQueues?: Record<string, number>;
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
   /** Non-null in Partner Mode: emphasis per entity plus red/orange/green marks. */
@@ -131,6 +131,7 @@ export class SceneManager {
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
   private stationLabels = new Map<string, TextLabel>();
+  private bottleneckLabels = new Map<string, TextLabel>();
   private arrayNodes = new Map<string, { mesh: InstancedMesh; sig: string }>();
   private zoneNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
@@ -848,11 +849,30 @@ export class SceneManager {
       }
     }
     if (session.bottlenecks && session.bottlenecks.length) {
+      const seenBottleneckLabels = new Set<string>();
       for (const bn of session.bottlenecks) {
         const ring = new Mesh(new BoxGeometry(1.2, 0.05, 1.2), new MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.4, depthWrite: false }));
         ring.position.set(bn.x, 0.6, bn.z);
         this.overlayGroup.add(ring);
+        if (bn.name) {
+          const key = `${bn.kind ?? "route"}|${bn.x.toFixed(2)}|${bn.z.toFixed(2)}`;
+          seenBottleneckLabels.add(key);
+          const label = this.bottleneckLabels.get(key) ?? new TextLabel();
+          this.bottleneckLabels.set(key, label);
+          this.overlayGroup.add(label.sprite);
+          label.set(`${bn.name} ${bn.count}`, "#fecaca");
+          label.sprite.position.set(bn.x, 1.15, bn.z);
+        }
       }
+      for (const [key, label] of this.bottleneckLabels) {
+        if (!seenBottleneckLabels.has(key)) {
+          label.dispose();
+          this.bottleneckLabels.delete(key);
+        }
+      }
+    } else {
+      for (const label of this.bottleneckLabels.values()) label.dispose();
+      this.bottleneckLabels.clear();
     }
 
     for (const o of project.objects) {
