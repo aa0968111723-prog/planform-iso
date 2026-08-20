@@ -125,9 +125,9 @@ test.describe("tablet portrait working loop (768x1024)", () => {
     await page.locator('.navbtn[data-nav="site"]').click();
     await expect(app).toHaveAttribute("data-sheet", "workflow");
     await expect(page.locator(".left .sheet-handle")).toBeVisible();
-    // The site panel's first level is the four field-facing sections.
+    // The site panel's first level is the five field-facing sections.
     const titles = await page.locator(".left > .section > .section__title").allInnerTexts();
-    expect(titles.slice(0, 4)).toEqual(["教室尺寸", "地磚", "現場校正", "固定設施"]);
+    expect(titles.slice(0, 5)).toEqual(["場地模板", "教室尺寸", "地磚", "現場校正", "固定設施"]);
     expect(titles).toContain("進階設定");
     // Engineering parameters are behind 進階設定, not on the first level.
     await expect(page.locator(".left .field", { hasText: "原點 X (m)" })).toBeHidden();

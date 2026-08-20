@@ -144,11 +144,15 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   if (needs.mats && config.participants > 0) {
     const bounds = areaBounds(c);
     const inset = 0.4;
+    // Reserve a strip for the entrance-side zones, and a deeper front strip
+    // only when a teacher zone actually needs the stage area.
+    const entranceReserve = needs.checkin || needs.payment || needs.shoe || needs.backpack ? 1.9 : 0.6;
+    const frontReserve = needs.teacher ? 3.0 : inset;
     const matArea = {
       minX: bounds.minX + inset,
       maxX: bounds.maxX - inset,
-      minZ: bounds.minZ + 1.2,
-      maxZ: bounds.maxZ - 2.2, // keep the entrance strip free for zones
+      minZ: bounds.minZ + frontReserve,
+      maxZ: bounds.maxZ - entranceReserve,
     };
     const candidates = generateLayouts({
       participants: config.participants,
@@ -188,13 +192,17 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
     }
   }
 
-  // Starter entry route: door → check-in → toward the mats.
+  // Starter entry route: door → check-in → shoe → to the front edge of the
+  // seating area (never straight across the mats).
   const routeStops: { x: number; z: number }[] = [{ x: entry.x, z: inZ(backWallZ - 0.4, 0) }];
   const checkinZone = project.zones.find((z) => z.type === "registration");
   if (checkinZone) routeStops.push({ x: checkinZone.x, z: checkinZone.z });
   const shoeZone = project.zones.find((z) => z.type === "shoe");
   if (shoeZone) routeStops.push({ x: shoeZone.x, z: shoeZone.z });
-  routeStops.push({ x: c.x + c.length / 2, z: c.z + c.width / 2 });
+  const seatingEdgeZ = needs.mats
+    ? c.z + c.width - ((needs.checkin || needs.payment || needs.shoe || needs.backpack ? 1.9 : 0.6) + 0.4)
+    : c.z + c.width / 2;
+  routeStops.push({ x: c.x + c.length / 2, z: inZ(seatingEdgeZ, 0) });
   if (routeStops.length >= 2) {
     const preset = routePreset("entry");
     project.routes.push({

@@ -91,7 +91,7 @@ export function generateLayouts(input: LayoutInput): LayoutCandidate[] {
     const cols = Math.min(colsMax, targetCols);
     const rows = Math.min(rowsMax, Math.ceil(n / cols));
     const a = centeredAnchor(cols, rows);
-    out.push(mk("balanced", `整齊方格 ${rows} × ${cols}`, [{ rows, cols, itemWidth: w, itemDepth: d, gapX: gap, gapZ: gap, rotationDeg: rot, ...a }]));
+    out.push(mk("balanced", `A 整齊排列 ${rows} × ${cols}`, [{ rows, cols, itemWidth: w, itemDepth: d, gapX: gap, gapZ: gap, rotationDeg: rot, ...a }]));
   }
 
   // Candidate 2 — central aisle (two blocks split by an aisle).
@@ -105,7 +105,7 @@ export function generateLayouts(input: LayoutInput): LayoutCandidate[] {
       const startX = cx - totalW / 2;
       const anchorZ = cz - blockDepth(rows, d, gap) / 2;
       const g: Omit<GroupSpec, "anchorX"> = { rows, cols: colsPerSide, itemWidth: w, itemDepth: d, gapX: gap, gapZ: gap, rotationDeg: rot, anchorZ };
-      out.push(mk("aisle", `中央走道 ${rows} × ${colsPerSide}＋${colsPerSide}（走道 ${Math.round(aisleWidth * 100)}cm）`, [
+      out.push(mk("aisle", `B 中央走道 ${rows} × ${colsPerSide}＋${colsPerSide}（走道 ${Math.round(aisleWidth * 100)}cm）`, [
         { ...g, anchorX: startX },
         { ...g, anchorX: startX + leftW + aisleWidth },
       ]));
@@ -118,7 +118,7 @@ export function generateLayouts(input: LayoutInput): LayoutCandidate[] {
     const rows = Math.min(rowsMax, Math.ceil(n / cols));
     if (cols >= 1 && (out.length === 0 || rows !== out[0].groups[0].rows || cols !== out[0].groups[0].cols)) {
       const a = centeredAnchor(cols, rows);
-      out.push(mk("wide", `寬排 ${rows} × ${cols}`, [{ rows, cols, itemWidth: w, itemDepth: d, gapX: gap, gapZ: gap, rotationDeg: rot, ...a }]));
+      out.push(mk("wide", `C 較寬鬆 ${rows} × ${cols}`, [{ rows, cols, itemWidth: w, itemDepth: d, gapX: gap, gapZ: gap, rotationDeg: rot, ...a }]));
     }
   }
 

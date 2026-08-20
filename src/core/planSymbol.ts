@@ -187,11 +187,16 @@ export function drawPlanSymbolOverlay(
 
   if (spec.icon || spec.label) {
     const text = spec.icon ?? spec.label ?? "";
+    ctx.save();
+    // Counter-rotate so the label stays upright no matter how the object faces
+    // (a 180° desk otherwise prints its name upside down on the export).
+    ctx.rotate((rotationDeg * Math.PI) / 180);
     ctx.fillStyle = "#f8fafc";
-    ctx.font = `600 ${Math.max(9, Math.min(14, wPx * 0.28))}px system-ui, sans-serif`;
+    ctx.font = `600 ${Math.max(9, Math.min(14, wPx * 0.28))}px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(text, 0, 0);
+    ctx.restore();
   }
 
   ctx.restore();

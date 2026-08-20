@@ -9,3 +9,6 @@ test-results/
 playwright-report/
 baseline_gates.log
 _audit_grok.md
+_smoke/
+_review_grok.md
+test-results/

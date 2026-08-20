@@ -599,12 +599,19 @@ export class UI {
   }
 
   private smartLayoutSection(): HTMLElement {
-    const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input" }) as HTMLInputElement;
+    const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input", inputmode: "numeric" }) as HTMLInputElement;
     pIn.addEventListener("change", () => { this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0)); });
-    return section("人數場佈（地墊排列器）", [
-      el("p", { class: "hint", text: "輸入人數，系統依空間與走道自動產生地墊方案。先選一個小區域可排在區域內。" }),
+    const quick = el("div", { class: "row wrap" }, [20, 30, 40, 60].map((n) =>
+      button(String(n), () => {
+        this.participants = n;
+        pIn.value = String(n);
+        this.app.computeMatCandidates(n);
+      }, "chip chip--sm")));
+    return section("排地墊", [
+      el("p", { class: "hint", text: "選人數就出方案，地墊朝向投影幕。先選一個區域可只排在區域內。" }),
+      quick,
       el("div", { class: "row" }, [
-        el("label", { class: "field" }, [el("span", { class: "field__label", text: "人數" }), pIn]),
+        el("label", { class: "field" }, [el("span", { class: "field__label", text: "自訂人數" }), pIn]),
         button("產生方案", () => this.app.computeMatCandidates(this.participants)),
       ]),
       this.smartBox,
