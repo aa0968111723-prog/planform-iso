@@ -48,3 +48,23 @@ Grok 原始輸出落在 repo 外 scratch；由 Claude 整理進本檔並派工 C
 | R2-11 | P2 | 標籤互蓋、入口名切字 | → WP-E #4 |
 | R2-12 | P2 | 雙 tab 共用一份 autosave | 記錄為 known limitation（PR 列明） |
 | R2-13 | P2 | 分享頁點一張後按鈕列收合 | 待重現（open attr 恆真，疑捲動誤判）；R3 追 |
+
+## Round 3（2026-08-21，RC 6c08d72，修復驗證輪；完整報告：`_grok_round3/FINDINGS.md`）
+
+**11/13 FIXED、1 STILL-BROKEN、0 新 P0、console/pageerror 全 0。**
+Grok 總評：「敢拿這份當施工討論稿和現場校正工具。」
+實測亮點：量 58cm 地磚／88cm 門真的改模型與面板；範例開場即見格線＋「已排好 96 片／可坐 64」；
+報到 2 人力 → 38 分 31 秒收完、瓶頸轉收費——數字可拿去排班。
+
+本輪新問題與處置（全部已修，commit `1c67a0f`）：
+
+| 級 | 問題 | 修法 |
+|---|---|------|
+| P1 | 「套用到教室長」無兩點量測時把 120cm 當教室全長（教室變 1.2m） | 無有效量測即拒絕＋提示；只保留等比縮放 |
+| P1 | 生活組被派到講師禪定區（zoneTypes 含 meditation 被 find 先撞） | life 只綁 life zone |
+| P2 | 播放中左欄凍在「0 秒 0 人」 | 播放迴圈 5Hz 同步面板 |
+| P2 | 模擬預設報到人力 1（範例是 2 人編制） | simQuick 由 scenario stations 種入人力 |
+| P2 | 地磚顯示 57.99999999 | metersToCm 去浮點塵 |
+
+Round 3 剩餘未修 P2（列 PR limitations）：編輯器巧拼標籤與區名重疊、3D 圖無手機版、
+「全部」流程第 8 步文案繞回走廊排隊、分享頁綠點與待校正黃點並存語意。
