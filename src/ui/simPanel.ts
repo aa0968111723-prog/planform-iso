@@ -77,13 +77,11 @@ function render(app: App): HTMLElement {
       : button("▶ 模擬", () => app.startSimulation(), "btn btn--primary"),
     button("重開", () => app.restartSimulation(), "chip chip--sm"),
     button("停止", () => app.stopSimulation(), "chip chip--sm"),
-    ...([1, 2, 5] as const).map((s) =>
-      button(
-        `${s}×`,
-        () => app.setSimSpeed(s),
-        app.session.simSpeed === s ? "chip chip--sm chip--primary" : "chip chip--sm",
-      ),
-    ),
+    ...([["慢", 90], ["正常", 45], ["快", 20]] as [string, number][]).map(([label, secs]) => {
+      const target = Math.max(1, (app.session.simResult?.finishTimeSeconds ?? 600) / secs);
+      const active = Math.abs(app.session.simSpeed - target) < 0.01;
+      return button(label, () => app.setSimSpeed(target), active ? "chip chip--sm chip--primary" : "chip chip--sm");
+    }),
   ]);
 
   const body: HTMLElement[] = [setup, transport];
@@ -97,7 +95,8 @@ function render(app: App): HTMLElement {
     body.push(el("div", { class: "readout" }, lines.map((t) => el("div", { text: t }))));
   }
 
-  if (result) {
+  // Finished results and animated playback are separate states.
+  if (result && !playing) {
     const maxQueue = result.maxQueue;
     const avgWait = result.avgWaitSeconds;
     const worst = result.stations.find((s) => s.stationId === result.bottleneckStationId) ??
@@ -108,9 +107,14 @@ function render(app: App): HTMLElement {
       worst ? `最塞：${worst.name}` : "沒有明顯塞車點 ✅",
       `全部完成：約 ${fmtDuration(result.finishTimeSeconds)}`,
     ];
+    for (const b of result.spatialBottlenecks) {
+      lines.push(b.kind === "corridor"
+        ? `走廊出現排隊溢出：多出 ${b.count} 人，請提早分流或增加人手`
+        : `門口通行受阻：約 ${b.count} 人受到影響`);
+    }
     body.push(
       el("div", {
-        class: `readout ${result.bottleneckStationId ? "readout--warn" : ""}`,
+        class: `readout sim-result ${result.bottleneckStationId || result.spatialBottlenecks.length ? "readout--warn" : ""}`,
       }, lines.map((t) => el("div", { text: t }))),
     );
     body.push(
@@ -120,6 +124,9 @@ function render(app: App): HTMLElement {
     );
   }
 
+    if (result && !playing) body.push(el("div", { class: "row wrap" }, [
+      button("▶ 播放走位", () => app.replaySimulation(), "btn btn--ghost"),
+    ]));
   if (cmp) {
     body.push(
       el("div", { class: "card smart" }, [

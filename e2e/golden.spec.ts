@@ -162,8 +162,8 @@ test.describe("Golden Flow 2 — 60 人＋收費（平板）", () => {
     // ✦ 幫我改善 routes into the AI sheet with a preview to accept.
     await page.locator(".left button", { hasText: "幫我改善" }).click();
     await expect(page.locator(".agent-sheet")).toBeVisible();
-    await expect(page.locator(".agent-sheet__preview")).toBeVisible({ timeout: 20_000 });
-    await page.locator(".agent-sheet__preview button", { hasText: "套用" }).click();
+    await expect(page.locator(".agent-preview-bar")).toBeVisible({ timeout: 20_000 });
+    await page.locator(".agent-preview-bar button", { hasText: "套用" }).click();
     await page.locator(".agent-sheet button", { hasText: "關閉" }).click();
 
     // Export the route map.

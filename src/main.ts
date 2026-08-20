@@ -3,6 +3,7 @@ import { App } from "./app/App";
 import { UI } from "./ui/UI";
 import { Store } from "./state/store";
 import { createDefaultProject } from "./core/model";
+import { exportProjectJson } from "./export/exporters";
 
 const canvas = document.getElementById("scene");
 const root = document.getElementById("app");
@@ -18,8 +19,23 @@ const ui = new UI(app, root);
 if (recovered) {
   app.notifyToast?.("無法讀取上次專案，已建立安全備份並開新專案", false);
 }
+let autosaveBanner: HTMLElement | null = null;
 store.onStorageError = () => {
-  app.notifyToast?.("儲存空間不足，最近的變更可能沒有存下來", false);
+  if (autosaveBanner) return;
+  autosaveBanner = document.createElement("div");
+  autosaveBanner.className = "update-banner autosave-error";
+  const label = document.createElement("span");
+  label.textContent = "自動儲存失敗，最近的修改可能尚未保存";
+  const exportBtn = document.createElement("button");
+  exportBtn.className = "chip chip--accent";
+  exportBtn.textContent = "匯出 JSON";
+  exportBtn.addEventListener("click", () => exportProjectJson(store.getState()));
+  autosaveBanner.append(label, exportBtn);
+  root.append(autosaveBanner);
+};
+store.onStorageRecovered = () => {
+  autosaveBanner?.remove();
+  autosaveBanner = null;
 };
 
 // Flush the debounced autosave when the tab is backgrounded or closed so the
@@ -29,8 +45,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") store.flushAutosave();
 });
 
-// Dev-only handle for automated/browser testing (not bundled in production).
-if (import.meta.env.DEV) {
+// Browser-test handle: always on in dev (dev builds never ship, and the
+// whole e2e suite depends on it), opt-in via ?e2e on a production bundle.
+const e2eEnabled =
+  import.meta.env.DEV ||
+  new URLSearchParams(location.search).has("e2e") ||
+  import.meta.env.VITE_E2E === "true";
+if (e2eEnabled) {
   (window as unknown as { planform?: unknown }).planform = {
     app,
     ui,
@@ -38,6 +59,7 @@ if (import.meta.env.DEV) {
     workspace: () => ui.workspace,
     catalog: () => app.getCatalog(),
     agent: app.quickAgent,
+    showUpdateBanner: () => showUpdateBanner(() => undefined),
   };
 }
 
@@ -48,6 +70,14 @@ if (import.meta.env.PROD) {
     const updateSW = registerSW({
       onNeedRefresh() {
         showUpdateBanner(() => void updateSW(true));
+      },
+      onRegisteredSW(_swUrl, registration) {
+        if (!registration) return;
+        const check = () => void registration.update();
+        window.setInterval(check, 60 * 60 * 1000);
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") check();
+        });
       },
     });
   });

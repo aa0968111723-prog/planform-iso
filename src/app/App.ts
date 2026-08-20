@@ -268,6 +268,7 @@ export class App {
   private simState: SimState | null = null;
   private simRaf: number | null = null;
   private simLast = 0;
+  private partnerReturnView: ViewName | null = null;
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
 
@@ -366,6 +367,7 @@ export class App {
   redo(): void { this.store.redo(); }
 
   setWorkflow(w: Workflow): void {
+    if (w !== "site" && this.session.mode === "calibrate") this.cancelCalibration();
     this.session.workflow = w;
     if (w !== "route") { this.session.activeRouteId = null; if (this.session.mode === "route") this.session.mode = "select"; }
     if (w === "check") this.runValidation();
@@ -399,6 +401,7 @@ export class App {
 
   cancelPlacement(): void {
     if (this.session.mode === "place") this.session.mode = "select";
+    this.session.zonePlace = null;
     this.session.placingKind = null;
     this.session.placingAssetId = null;
     this.session.ghost = null;
@@ -518,6 +521,7 @@ export class App {
   /** Arm one canvas tap to drop a zone of the given type where the user taps. */
   beginZonePlacement(type: ZoneType): void {
     this.session.zonePlace = type;
+    this.notifyUi();
     this.toast(`點畫面放「${ZONE_DEFAULTS[type].label}」`);
   }
 
@@ -546,8 +550,8 @@ export class App {
 
   /** Load a Quick Start generated project and land the user in 場佈. */
   startFromQuickStart(project: Project): void {
-    // loadProject resets history, so no undo chip here — the wizard confirms
-    // before replacing a non-empty plan instead.
+    // The store keeps an undo checkpoint when replacing a non-empty plan; the
+    // wizard still confirms so the replacement is explicit.
     this.store.loadProject(project);
     const scenario = project.activeScenarioId
       ? project.scenarios.find((s) => s.id === project.activeScenarioId)
@@ -844,6 +848,7 @@ export class App {
    * editor state is left exactly as it was so leaving returns you to your work.
    */
   enterPartnerMode(role: PartnerRole = "all"): void {
+    this.partnerReturnView = this.state.view;
     this.session.partner = { role, timeline: [], suggestion: null, busy: false };
     this.session.selection = new Set();
     this.cancelPlacement();
@@ -858,7 +863,10 @@ export class App {
 
   exitPartnerMode(): void {
     if (this.session.partner?.suggestion) this.dismissPartnerSuggestion();
+    const restoreView = this.partnerReturnView;
+    this.partnerReturnView = null;
     this.session.partner = null;
+    if (restoreView) this.setView(restoreView);
     this.render();
   }
 
@@ -1035,7 +1043,10 @@ export class App {
     const cand = this.session.matCandidates.find((c) => c.id === id);
     if (!cand) return;
     const newIds: string[] = [];
+    let replaced = 0;
     this.store.mutate((p) => {
+      replaced = p.groups.filter((g) => g.sourceKind === "mat").length;
+      p.groups = p.groups.filter((g) => g.sourceKind !== "mat");
       cand.groups.forEach((g, i) => {
         const gid = uid("grp");
         newIds.push(gid);
@@ -1048,7 +1059,12 @@ export class App {
       });
     });
     this.session.matCandidates = [];
-    this.toast(cand.mode === "field" ? `已套用巧拼座區（可坐 ${cand.count} 人）` : `已套用 ${cand.count} 張地墊`, true);
+    this.toast(
+      replaced
+        ? `已取代原有 ${replaced} 組地墊，可按「復原」回到上一版`
+        : (cand.mode === "field" ? `已套用巧拼座區（可坐 ${cand.count} 人）` : `已套用 ${cand.count} 張地墊`),
+      true,
+    );
     if (newIds.length) this.setSelection(newIds);
   }
 
@@ -1192,7 +1208,29 @@ export class App {
   }
 
   startEventPlayback(): void {
+    // ▶ 模擬 shows the numbers immediately; the animated walk-through is the
+    // separate opt-in ▶ 播放走位 (replaySimulation).
     const result = this.runEventSimulation();
+    this.stopSimLoopOnly();
+    this.session.simMode = "event-flow";
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simTime = result.finishTimeSeconds;
+    this.session.simPositions = [];
+    this.session.bottlenecks = [];
+    this.notifyUi();
+  }
+
+  /** Replay the already computed frames without running the engine again. */
+  replaySimulation(): void {
+    const result = this.session.simResult;
+    if (!result) return;
+    // Whole-event replay in about 45 s of wall time regardless of length.
+    this.session.simSpeed = Math.max(1, result.finishTimeSeconds / 45);
+    this.playEventResult(result);
+  }
+
+  private playEventResult(result: SimulationResult): void {
     this.stopSimLoopOnly();
     this.session.simMode = "event-flow";
     this.focusSimulation();
@@ -1236,7 +1274,9 @@ export class App {
   }
 
   setSimSpeed(speed: number): void {
-    this.session.simSpeed = Math.max(0.5, Math.min(10, speed));
+    // Replays compress an hour-long event into tens of seconds, so the cap is
+    // generous; the floor still guards against a frozen-looking playback.
+    this.session.simSpeed = Math.max(0.5, Math.min(600, speed));
     this.notifyUi();
   }
 
@@ -1304,12 +1344,17 @@ export class App {
       const result = this.session.simResult;
       const nextT = this.session.simTime + dt;
       if (nextT >= result.finishTimeSeconds) {
-        // Loop
-        this.session.simTime = 0;
-        this.applyDesFrame(0, result);
-      } else {
-        this.applyDesFrame(nextT, result);
+        // Replay finished — hand the screen back to the results readout.
+        this.stopSimLoopOnly();
+        this.session.simPlaying = false;
+        this.session.simPaused = false;
+        this.session.simTime = result.finishTimeSeconds;
+        this.session.simPositions = [];
+        this.session.bottlenecks = [];
+        this.notifyUi();
+        return;
       }
+      this.applyDesFrame(nextT, result);
       this.simRaf = requestAnimationFrame(() => this.simLoop());
       return;
     }

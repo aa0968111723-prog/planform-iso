@@ -80,6 +80,11 @@ describe("chrome insets", () => {
     expect(insets.bottom).toBe(0);
   });
 
+  it("reserves the partner dock on desktop", () => {
+    const insets = persistentInsets("desktop", chrome({ partnerDockHeight: 48 }));
+    expect(insets.bottom).toBe(48);
+  });
+
   it("layers the workspace budget, the visible rect and the focus rect", () => {
     const m = chrome({ bottomSheetHeight: 300, bottomBarHeight: 60 });
     // The permanent budget is what the canvas-first target is measured against.

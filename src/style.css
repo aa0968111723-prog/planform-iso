@@ -113,6 +113,7 @@ html, body {
   background: rgba(30, 41, 59, 0.4);
 }
 .group--flows .chip { font-weight: 600; }
+.topbar .chip, .topbar .field__input--inline { min-height: 44px; }
 
 /* --- buttons ------------------------------------------------------------ */
 .btn, .chip {
@@ -465,6 +466,7 @@ html, body {
   font-size: 12px; font-weight: 600; white-space: nowrap;
   padding: 5px 9px; border-radius: 999px;
   border: 1px solid var(--border); background: rgba(30, 41, 59, 0.7);
+  min-width: 44px; min-height: 44px;
 }
 .partnerbar__light { cursor: pointer; font-family: inherit; }
 .light--bad { border-color: var(--danger); color: #fecdd3; }
@@ -473,8 +475,9 @@ html, body {
 .partnerbar__exit { flex: 0 0 auto; }
 
 .partnerroles {
-  display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px;
+  display: flex; gap: 6px; overflow-x: auto; padding: 0 24px 2px 0;
   scrollbar-width: none;
+  mask-image: linear-gradient(to right, #000 0 calc(100% - 24px), transparent 100%);
 }
 .partnerroles::-webkit-scrollbar { display: none; }
 .rolechip {
@@ -506,6 +509,7 @@ html, body {
   background: rgba(30, 41, 59, 0.55); color: var(--text); font: inherit; font-size: 14px;
 }
 .partnerbrief__line { display: inline-flex; align-items: center; gap: 6px; }
+.partnerbrief__journey { flex: 1 1 100%; color: #bae6fd; font-size: 13px; }
 .partnerbrief__icon { font-size: 15px; }
 .partnerbrief__more { margin-left: auto; font-size: 12px; color: var(--accent); }
 .partneractions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -634,11 +638,16 @@ html, body {
 
 /* --- sim panel ---------------------------------------------------------- */
 .sim-panel-host { display: flex; flex-direction: column; gap: 8px; }
+.section:has(.sim-panel-host) .sim-panel-host { order: -1; }
 .sim-transport { margin: 6px 0; }
 .sim-panel .readout { margin-top: 6px; }
+.sim-result { position: sticky; top: 0; z-index: 2; background: var(--panel-solid); }
 .chip--accent { border-color: #38bdf8; color: #bae6fd; }
 
 /* --- quick agent sheet -------------------------------------------------- */
+.agent-sheet-host {
+  position: static;
+}
 .agent-sheet {
   position: absolute;
   left: 12px; right: 12px;
@@ -673,6 +682,23 @@ html, body {
   border-radius: 10px;
 }
 .agent-sheet__preview-label { font-size: 12px; color: #bae6fd; margin-right: auto; }
+.agent-preview-bar {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--ws-header-h, 0px) + 12px);
+  transform: translateX(-50%);
+  z-index: 61;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, calc(100vw - 24px));
+  padding: 8px 10px;
+  border: 1px solid rgba(56, 189, 248, .65);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, .96);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
+}
+.agent-preview-bar .agent-sheet__preview-label { margin-right: 8px; }
 #app[data-ws-mode="tablet"] .agent-sheet {
   left: 50%; right: auto; transform: translateX(-50%); width: min(680px, 94vw);
 }
@@ -725,5 +751,45 @@ html, body {
   padding: 10px 14px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
 }
+.calibration-banner {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--ws-header-h, 0px) + 8px);
+  transform: translateX(-50%);
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: rgba(69, 39, 12, .96);
+  color: #fef3c7;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .3);
+}
+.calibration-banner .chip { min-height: 40px; }
+.status-badge {
+  flex: 0 0 auto;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.status-badge--bad { color: #fecdd3; border-color: #fb7185; background: rgba(127, 29, 29, .35); }
+.status-badge--warn { color: #fed7aa; border-color: #f59e0b; background: rgba(120, 53, 15, .35); }
+.status-badge--ok { color: #bbf7d0; border-color: #22c55e; background: rgba(20, 83, 45, .35); }
+.checklist-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px; background: rgba(30, 41, 59, .55); }
 .quickstart__card { max-height: 88dvh; overflow-y: auto; overscroll-behavior: contain; }
 .card__thumb { width: 34px; height: 34px; border-radius: 6px; background: #fff; object-fit: contain; }
+.mat-candidate-thumb {
+  flex: 0 0 120px;
+  width: 120px;
+  height: 72px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+}

@@ -25,11 +25,30 @@ export default defineConfig({
       args: ["--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader"],
     },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "npm run dev -- --port 5183 --strictPort",
-    url: "http://127.0.0.1:5183",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  projects: [
+    {
+      name: "chromium",
+      testIgnore: "**/production.spec.ts",
+      use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:5183" },
+    },
+    {
+      name: "production",
+      testMatch: "**/production.spec.ts",
+      use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4180" },
+    },
+  ],
+  webServer: [
+    {
+      command: "npm run dev -- --port 5183 --strictPort",
+      url: "http://127.0.0.1:5183",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command: "npm run build && npm run preview -- --port 4180 --strictPort",
+      url: "http://127.0.0.1:4180",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 });

@@ -63,7 +63,7 @@ export function buildPartnerMode(
       openSheet("timeline");
     }, "btn partneraction"),
     button("✦ 更順的排法", () => {
-      void app.requestPartnerSuggestion().then(() => openSheet("suggest"));
+      void app.requestPartnerSuggestion();
       openSheet("suggest");
     }, "btn partneraction partneraction--accent"),
     button("🖼 存成圖", () => {
@@ -141,6 +141,10 @@ export function buildPartnerMode(
       ]));
     }
     brief.append(el("span", { class: "partnerbrief__more", text: sheetKind === "steps" ? "收起 ▾" : "看步驟 ▸" }));
+    brief.append(el("span", {
+      class: "partnerbrief__journey",
+      text: `上一站：${b.peopleComeFrom ?? "入口"} → 你：${b.youAre ?? "目前沒有指定站點"} → 下一站：${b.nextStop ?? "座區結束"}`,
+    }));
   }
 
   function renderSteps(): void {
