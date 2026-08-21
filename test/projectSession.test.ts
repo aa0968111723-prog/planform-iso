@@ -197,7 +197,7 @@ describe("ProjectSession", () => {
     expect(second.bootstrap().screen).toBe("editor");
   });
 
-  it("blocked storage 不會讓 bootstrap 丟例外", () => {
+  it("blocked storage 不會讓 bootstrap 丟例外，而且會誠實回報存不起來", () => {
     (globalThis as { localStorage?: unknown }).localStorage = {
       getItem: () => null,
       setItem: () => {
@@ -215,12 +215,74 @@ describe("ProjectSession", () => {
     }).not.toThrow();
     expect(result!.screen).toBe("editor");
 
-    // The editor is still usable and the failure is reported exactly once.
+    // The editor stays usable, and 自動儲存失敗 fires exactly once. A silent
+    // no-op sink here would be worse than the crash it replaced: the user
+    // would keep editing while nothing was ever written.
     let errors = 0;
+    let recovered = 0;
     blockedStore.onStorageError = () => errors++;
+    blockedStore.onStorageRecovered = () => recovered++;
     blockedStore.saveAutosave();
     blockedStore.saveAutosave();
-    expect(errors).toBe(0); // NULL_PERSISTENCE never throws — nothing to report
+    expect(errors).toBe(1);
+    expect(recovered).toBe(0);
+  });
+
+  it("連續刪兩個專案，兩個都還原得回來", () => {
+    const a = session.createProject({ project: plan("A"), open: true });
+    store.mutate((p) => void p.zones.push(zone("只在A")));
+    session.flush();
+    const b = session.createProject({ project: plan("B"), open: true });
+    store.mutate((p) => void p.zones.push(zone("只在B")));
+    session.flush();
+
+    const bodyA = backing.get(projectBodyKey(a.id))!;
+    const bodyB = backing.get(projectBodyKey(b.id))!;
+
+    // No undo in between — exactly the "clear out two old projects" case.
+    expect(session.deleteProject(a.id)).toBe(true);
+    expect(session.deleteProject(b.id)).toBe(true);
+    expect(session.listProjects()).toHaveLength(0);
+
+    // The chip on each toast undoes the delete it belongs to.
+    expect(session.undoDelete(a.id)).toBe(true);
+    expect(backing.get(projectBodyKey(a.id))).toBe(bodyA);
+    expect(session.undoDelete(b.id)).toBe(true);
+    expect(backing.get(projectBodyKey(b.id))).toBe(bodyB);
+    expect(session.listProjects().map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("index 條目掉了但 body 還在時，開機會把它接回來", () => {
+    const a = session.createProject({ project: plan("A"), open: true });
+    const b = session.createProject({ project: plan("B"), open: true });
+    session.flush();
+
+    // Exactly what a failed index write, or a concurrent tab's flush, leaves
+    // behind: B's body is on disk, but the index has never heard of it.
+    const index = JSON.parse(backing.get("planform-iso:projects:index")!) as { id: string }[];
+    backing.set(
+      "planform-iso:projects:index",
+      JSON.stringify(index.filter((m) => m.id !== b.id)),
+    );
+
+    // The four-method stub cannot be enumerated, so give this one a real walk.
+    const enumerable = {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => void backing.set(k, v),
+      removeItem: (k: string) => void backing.delete(k),
+      clear: () => backing.clear(),
+      get length() {
+        return backing.size;
+      },
+      key: (i: number) => [...backing.keys()][i] ?? null,
+    };
+    (globalThis as { localStorage?: unknown }).localStorage = enumerable;
+
+    const store2 = new Store(createDefaultProject());
+    const second = new ProjectSession(store2, new ProjectRepository());
+    second.bootstrap();
+
+    expect(second.listProjects().map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
   });
 
   it("開一份壞掉的專案會留在原地，不會清空目前的畫面", () => {

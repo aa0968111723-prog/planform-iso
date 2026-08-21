@@ -34,6 +34,10 @@ async function completeWizard(page, participants) {
 }
 
 const browser = await chromium.launch({
+  // Same escape hatch playwright.config.ts and exportPlans.cjs already offer:
+  // CI boxes keep a preinstalled browser that may not match this project's
+  // pinned Playwright build.
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
   args: ["--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader"],
 });
 

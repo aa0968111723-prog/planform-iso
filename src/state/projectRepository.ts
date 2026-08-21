@@ -103,6 +103,35 @@ export const NULL_PERSISTENCE: StorePersistence = {
   deleteLayout() {},
 };
 
+/**
+ * The sink for "a project is open but the library could not be reached at all"
+ * — blocked or full storage at boot.
+ *
+ * It THROWS on every write, deliberately. `NULL_PERSISTENCE` would be the
+ * silent-data-loss version of the same situation: the editor would look
+ * completely healthy, every autosave would "succeed" into a no-op, and the
+ * 自動儲存失敗 banner (with its 匯出 JSON escape hatch) would never appear.
+ * Before the project library existed, a blocked `localStorage.setItem` threw
+ * and the banner did appear; this keeps that promise.
+ */
+export const UNAVAILABLE_PERSISTENCE: StorePersistence = {
+  saveProject() {
+    throw new Error("storage unavailable");
+  },
+  listLayouts() {
+    return [];
+  },
+  readLayout() {
+    return null;
+  },
+  writeLayout() {
+    throw new Error("storage unavailable");
+  },
+  deleteLayout() {
+    throw new Error("storage unavailable");
+  },
+};
+
 export const DEFAULT_PROJECT_NAME = "未命名平面圖";
 
 /** How long the index may lag behind the bodies before a save forces a write. */
@@ -117,6 +146,16 @@ function clone<T>(v: T): T {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Every project id with bytes on disk, from `planform-iso:project:<id>[:…]`. */
+function scanBodyIds(ls: Storage): Set<string> {
+  const ids = new Set<string>();
+  for (const key of listPlanformKeys(ls)) {
+    const parts = key.split(":");
+    if (parts.length >= 3 && parts[1] === "project" && parts[2]) ids.add(parts[2]);
+  }
+  return ids;
 }
 
 /**
@@ -420,6 +459,36 @@ export class ProjectRepository {
   }
 
   /**
+   * Add back any project whose body is on disk but absent from the index.
+   *
+   * Called once per app load, never on a render path. Two things put a project
+   * in that state, and neither is theoretical: an index write that failed on a
+   * full disk while the body write succeeded, and two tabs flushing the index
+   * at the same moment (both read, both merge, the slower write wins and the
+   * faster tab's new entry is gone). The body is still there in both cases, so
+   * the next boot can simply put the entry back.
+   *
+   * @returns how many entries were recovered.
+   */
+  reconcile(): number {
+    const ls = safeStorage();
+    if (!ls || !canEnumerate(ls)) return 0;
+
+    const known = new Set(this.listProjects().map((m) => m.id));
+    const now = Date.now();
+    let added = 0;
+    for (const id of scanBodyIds(ls)) {
+      if (known.has(id) || this.deletedIds.has(id)) continue;
+      const meta = this.metaFromDisk(id, now);
+      if (!meta) continue;
+      this.remember(meta);
+      added += 1;
+    }
+    if (added > 0) this.flushIndex();
+    return added;
+  }
+
+  /**
    * Index a project whose body could not be read, with no body key at all.
    * Used by the legacy migration, which must never drop bytes it cannot parse.
    */
@@ -616,40 +685,42 @@ export class ProjectRepository {
     const ls = safeStorage();
     if (!ls || !canEnumerate(ls)) return [];
 
-    const ids = new Set<string>();
-    for (const key of listPlanformKeys(ls)) {
-      const parts = key.split(":");
-      if (parts.length >= 3 && parts[1] === "project" && parts[2]) ids.add(parts[2]);
-    }
-    if (ids.size === 0) return [];
-
     const now = Date.now();
     const out: ProjectMeta[] = [];
-    for (const id of ids) {
+    for (const id of scanBodyIds(ls)) {
       if (this.deletedIds.has(id)) continue;
-      const raw = readRaw(projectBodyKey(id));
-      if (raw) {
-        try {
-          const parsed: unknown = JSON.parse(raw);
-          if (isRecord(parsed)) {
-            const project = migrateProject(parsed as Partial<Project>);
-            project.id = id;
-            // The real timestamps died with the index. "Now" keeps recovered
-            // projects at the top of 我的專案, which is where someone looking
-            // for them will look first.
-            out.push(deriveMeta(project, { createdAt: now, updatedAt: now }));
-            continue;
-          }
-        } catch {
-          // Falls through to the broken card below; the bytes stay put. This
-          // is a read, so it must not quarantine anything on its own.
-        }
-      }
-      if (raw || readRaw(projectBackupKey(id)) !== null) {
-        out.push({ id, name: "需要復原的專案", createdAt: now, updatedAt: now, broken: true });
-      }
+      const meta = this.metaFromDisk(id, now);
+      if (meta) out.push(meta);
     }
     return out;
+  }
+
+  /**
+   * One project's meta, read straight from its body key. A body that will not
+   * parse becomes a broken card; the bytes stay exactly where they are,
+   * because this is a read and a read must not quarantine anything.
+   */
+  private metaFromDisk(id: string, now: number): ProjectMeta | null {
+    const raw = readRaw(projectBodyKey(id));
+    if (raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (isRecord(parsed)) {
+          const project = migrateProject(parsed as Partial<Project>);
+          project.id = id;
+          // The real timestamps died with the index. "Now" keeps recovered
+          // projects at the top of 我的專案, which is where someone looking
+          // for them will look first.
+          return deriveMeta(project, { createdAt: now, updatedAt: now });
+        }
+      } catch {
+        /* falls through to the broken card below */
+      }
+    }
+    if (raw || readRaw(projectBackupKey(id)) !== null) {
+      return { id, name: "需要復原的專案", createdAt: now, updatedAt: now, broken: true };
+    }
+    return null;
   }
 
   /**

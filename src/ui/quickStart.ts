@@ -67,6 +67,21 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
     onDone();
   };
 
+  /**
+   * One wizard run creates exactly one project. Without this, a double tap on
+   * 建立場佈 lands twice: the first call fills the pristine boot project, the
+   * second no longer can (the id is spent) and mints a second, so the user
+   * gets an extra card they never asked for.
+   */
+  let creating = false;
+  const createOnce = (make: () => void): void => {
+    if (creating) return;
+    creating = true;
+    make();
+    app.notifyToast?.("場佈起點已建立，直接拖曳調整即可", false);
+    close(true);
+  };
+
   const renderVenueStep = (): void => {
     card.innerHTML = "";
     card.append(el("div", { class: "quickstart__title", text: "今天要排什麼？" }));
@@ -79,7 +94,7 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
       card.append(
         button(`🎤 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
         el("p", { class: "hint", text: e310.note }),
-        button("⚡ E310 演講範例（60 人）", () => {
+        button("⚡ E310 演講範例（60 人）", () => createOnce(() => {
           // `name` is deliberately omitted: the builder already names it, and
           // `createProject` falls back to the body's own name.
           session.createProject({
@@ -87,9 +102,7 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
             open: true,
             adoptPristineActive: true,
           });
-          app.notifyToast?.("場佈起點已建立，直接拖曳調整即可", false);
-          close(true);
-        }, "btn btn--big btn--primary"),
+        }), "btn btn--big btn--primary"),
       );
     }
     card.append(
@@ -188,7 +201,7 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
     card.append(el("div", { class: "row" }, [aisleChip, el("span", { class: "hint", text: "地墊之間留 90cm 走道" })]));
 
     card.append(
-      button("建立場佈", () => {
+      button("建立場佈", () => createOnce(() => {
         const participants = Math.max(1, Math.min(300, Number(countInput.value) || 30));
         const project = buildQuickStartProject({
           venue,
@@ -203,9 +216,7 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
           open: true,
           adoptPristineActive: true,
         });
-        app.notifyToast?.("場佈起點已建立，直接拖曳調整即可", false);
-        close(true);
-      }, "btn btn--big btn--primary"),
+      }), "btn btn--big btn--primary"),
       el("div", { class: "quickstart__foot" }, [
         button("← 返回", () => renderVenueStep(), "chip chip--sm"),
       ]),

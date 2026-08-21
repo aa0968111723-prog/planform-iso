@@ -15,6 +15,7 @@ import {
   DEFAULT_PROJECT_NAME,
   NULL_PERSISTENCE,
   ProjectRepository,
+  UNAVAILABLE_PERSISTENCE,
   type DeletedProject,
 } from "./projectRepository";
 import { runLegacyMigration } from "./legacyMigration";
@@ -50,10 +51,26 @@ export interface CreateOptions {
   adoptPristineActive?: boolean;
 }
 
+/**
+ * How many deleted projects stay undoable at once.
+ *
+ * A tombstone holds the project's raw bytes, so this is a memory budget, not a
+ * storage one — the whole point of deleting is to free storage. Ten covers
+ * "I just cleared out last term's projects and want two of them back"; past
+ * that the oldest stops being recoverable, which the copy never promises.
+ */
+const MAX_TOMBSTONES = 10;
+
 export class ProjectSession {
   private screenValue: Screen = "editor";
   private activeIdValue: string | null = null;
-  private tombstone: DeletedProject | null = null;
+  /**
+   * Deleted projects, oldest first. A single slot would be actively
+   * destructive: deleting A and then B — an entirely ordinary "clean up two
+   * old projects" — would drop A's only surviving copy on the floor, with A's
+   * keys already removed from disk and no error anywhere.
+   */
+  private tombstones: DeletedProject[] = [];
 
   /**
    * The id boot minted on a genuinely empty first run — the ONLY project the
@@ -109,6 +126,9 @@ export class ProjectSession {
     try {
       const migration = runLegacyMigration(this.repo);
       let recovered = migration.quarantined > 0;
+      // Once per load: put back any project whose body is on disk but whose
+      // index entry was lost to a failed write or a concurrent tab.
+      this.repo.reconcile();
       const metas = this.repo.listProjects();
 
       if (metas.length === 0) {
@@ -145,7 +165,12 @@ export class ProjectSession {
       this.screenValue = screen;
       return { screen, recovered, migrated: migration.created };
     } catch {
-      this.store.setPersistence(NULL_PERSISTENCE);
+      // The library could not be reached at all (blocked or full storage).
+      // UNAVAILABLE_PERSISTENCE, not NULL: the editor stays usable, but every
+      // autosave throws, so the 自動儲存失敗 banner and its 匯出 JSON escape
+      // hatch fire exactly once instead of the app pretending it saved.
+      this.store.setPersistence(UNAVAILABLE_PERSISTENCE);
+      this.activeIdValue = null;
       this.screenValue = "editor";
       return { screen: "editor", recovered: false, migrated: 0 };
     }
@@ -312,7 +337,8 @@ export class ProjectSession {
     const tomb = this.repo.deleteProject(id);
     if (!tomb) return false;
 
-    this.tombstone = tomb;
+    this.tombstones.push(tomb);
+    if (this.tombstones.length > MAX_TOMBSTONES) this.tombstones.shift();
     if (id === this.activeIdValue) {
       this.store.setPersistence(NULL_PERSISTENCE);
       this.activeIdValue = null;
@@ -324,19 +350,26 @@ export class ProjectSession {
     this.onLibraryChange?.();
     this.onToast?.(`已刪除「${tomb.meta.name}」`, {
       label: "復原",
-      onSelect: () => void this.undoDelete(),
+      // Captures THIS delete's id, so a second delete before the toast expires
+      // still undoes the one the chip belongs to.
+      onSelect: () => void this.undoDelete(id),
     });
     return true;
   }
 
-  undoDelete(): boolean {
-    const tomb = this.tombstone;
-    if (!tomb) return false;
+  /** Undo a delete. Without an id, the most recent one. */
+  undoDelete(id?: string): boolean {
+    const at = id
+      ? this.tombstones.findIndex((t) => t.meta.id === id)
+      : this.tombstones.length - 1;
+    if (at < 0) return false;
+
+    const tomb = this.tombstones[at];
     if (!this.repo.restoreProject(tomb)) {
       this.onToast?.("復原失敗，儲存空間可能已滿");
       return false;
     }
-    this.tombstone = null;
+    this.tombstones.splice(at, 1);
     this.onLibraryChange?.();
     this.onToast?.(`已復原「${tomb.meta.name}」`);
     return true;
