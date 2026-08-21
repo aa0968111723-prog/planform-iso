@@ -7,7 +7,18 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * `PLAYWRIGHT_CHROMIUM_EXECUTABLE` lets CI point at a preinstalled browser; on
  * a normal machine Playwright's own download is used.
+ *
+ * The browser is launched under a UTF-8 locale. Planform names its exports in
+ * Chinese (場佈總覽, 動線圖 …) because that is what a volunteer wants to see in
+ * their LINE gallery, and Chromium running under a POSIX/C locale silently
+ * sanitises those filenames down to a bare "download". That turns a real,
+ * passing export into a confusing test failure on any box that has not set a
+ * locale — so we set one here rather than weaken the assertion.
  */
+const utf8Locale = {
+  LC_ALL: process.env.LC_ALL || "C.utf8",
+  LANG: process.env.LANG || "C.utf8",
+};
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
 
 export default defineConfig({
@@ -21,6 +32,7 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:5183",
     launchOptions: {
       executablePath,
+      env: utf8Locale,
       // Software GL so the WebGL scene renders on a headless CI box.
       args: ["--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader"],
     },

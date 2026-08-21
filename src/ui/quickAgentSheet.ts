@@ -52,6 +52,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     rows: "2",
   }) as HTMLTextAreaElement;
   const cards = el("div", { class: "agent-sheet__cards" });
+  const compare = el("div", { class: "agent-compare", style: "display:none" });
   const previewBar = el("div", { class: "agent-preview-bar", style: "display:none" });
 
   // Shortcut chips keep the canonical 幫我◯◯ names (spec §6); honesty about
@@ -65,7 +66,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
 
   const actions = el("div", { class: "agent-sheet__actions" }, [
     button("🪑 幫我排場佈", () => void previewQuickStart(), "chip"),
-    button("🟪 幫我排地墊", jump(hooks.openMatArranger, "已打開排地墊：選人數就出 A/B/C 方案"), "chip"),
+    button("🧩 幫我排地墊", jump(hooks.openMatArranger, "已打開排地墊：選人數就出 A/B/C 方案"), "chip"),
     button("🚶 幫我畫動線", jump(hooks.startEntryRoute), "chip"),
     button("🔍 幫我檢查", jump(hooks.openCheck, "檢查結果在「分享」頁最上面"), "chip"),
     button("✨ 幫我改善", () => {
@@ -85,6 +86,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
       app.quickAgent.commit();
       app.applyAgentPreview(null);
       previewBar.style.display = "none";
+      compare.style.display = "none";
       cards.append(el("div", { class: "agent-card", text: "已套用（可復原）" }));
       app.notifyToast?.("已套用 AI 變更", true);
     }, "chip chip--primary"),
@@ -92,6 +94,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
       app.quickAgent.rollback();
       app.applyAgentPreview(null);
       previewBar.style.display = "none";
+      compare.style.display = "none";
       cards.append(el("div", { class: "agent-card", text: "已取消，場佈維持原樣" }));
     }, "chip"),
   );
@@ -102,6 +105,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     actions,
     input,
     el("div", { class: "row wrap", style: "gap:6px;margin-top:8px" }, [runBtn, closeBtn]),
+    compare,
     previewBar,
     cards,
   );
@@ -128,6 +132,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
         );
       }
       if (last.previewActive) {
+        renderComparison(last.summary);
         previewBar.style.display = "flex";
         app.applyAgentPreview(app.quickAgent.getDraftProject());
       }
@@ -140,6 +145,65 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
         }),
       );
     }
+  }
+
+  /**
+   * Before / After for the change being previewed. The numbers were already
+   * computed for the diff summary but only ever surfaced inside a sentence,
+   * and only when something changed — so "套用" was a leap of faith. This
+   * shows the same four numbers as a plain 改變前 → 改變後 table.
+   */
+  function renderComparison(summary: QuickAgentResult["summary"]): void {
+    const before = summary.validationBefore;
+    const after = summary.validationAfter;
+    const rows: { label: string; before: string; after: string; delta: "better" | "worse" | "same" }[] = [];
+
+    const rank = (n: number, m: number): "better" | "worse" | "same" =>
+      m < n ? "better" : m > n ? "worse" : "same";
+    if (before && after) {
+      rows.push({
+        label: "擋到人 / 放不下",
+        before: `${before.errors} 個`,
+        after: `${after.errors} 個`,
+        delta: rank(before.errors, after.errors),
+      });
+      rows.push({
+        label: "要注意的地方",
+        before: `${before.warnings} 個`,
+        after: `${after.warnings} 個`,
+        delta: rank(before.warnings, after.warnings),
+      });
+    }
+    const moved = summary.movedObjectIds.length;
+    const added = summary.addedObjectIds.length;
+    const removed = summary.removedObjectIds.length;
+    if (added || moved || removed) {
+      rows.push({
+        label: "東西的變動",
+        before: "原本的擺法",
+        after: [added && `新增 ${added}`, moved && `移動 ${moved}`, removed && `移走 ${removed}`]
+          .filter(Boolean).join("、"),
+        delta: "same",
+      });
+    }
+
+    compare.innerHTML = "";
+    if (!rows.length) {
+      compare.style.display = "none";
+      return;
+    }
+    compare.append(
+      el("div", { class: "agent-compare__title", text: "改變前 → 改變後" }),
+      el("div", { class: "comparerows" }, rows.map((row) =>
+        el("div", { class: `comparerow comparerow--${row.delta}` }, [
+          el("span", { class: "comparerow__label", text: row.label }),
+          el("span", { class: "comparerow__before", text: row.before }),
+          el("span", { class: "comparerow__arrow", text: "→" }),
+          el("span", { class: "comparerow__after", text: row.after }),
+        ]),
+      )),
+    );
+    compare.style.display = "block";
   }
 
   function humanizeCardTitle(title: string): string {
@@ -170,6 +234,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
       app.quickAgent.rollback();
       app.applyAgentPreview(null);
       previewBar.style.display = "none";
+      compare.style.display = "none";
     }
     sheet.style.display = "none";
   }

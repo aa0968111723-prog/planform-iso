@@ -152,3 +152,37 @@ describe("quick agent mock provider", () => {
     expect(data.comparison.reason.length).toBeGreaterThan(4);
   });
 });
+
+describe("✦ 幫我改善 shows a real before / after", () => {
+  it("the diff summary carries both validation snapshots, not just a sentence", () => {
+    const store = new Store(createDefaultProject());
+    const tx = new AgentTransaction();
+    const draft = tx.start(store.getState());
+    // Park a table right in the doorway so the draft is measurably worse.
+    draft.objects.push({
+      id: "blocker", kind: "table", x: 5, z: 8, rotationDeg: 0,
+      width: 1.8, depth: 0.6, height: 0.74, locked: false, hidden: false,
+      surface: "floor", elevation: 0, assetId: "builtin:table",
+    });
+    const summary = tx.summarize();
+    expect(summary.validationBefore).toBeDefined();
+    expect(summary.validationAfter).toBeDefined();
+    // Both snapshots must be plain numbers the UI can put in a 改變前 → 改變後 row.
+    for (const snap of [summary.validationBefore!, summary.validationAfter!]) {
+      expect(typeof snap.errors).toBe("number");
+      expect(typeof snap.warnings).toBe("number");
+    }
+    expect(summary.addedObjectIds).toContain("blocker");
+  });
+
+  it("reports an unchanged plan as unchanged rather than inventing a delta", () => {
+    const store = new Store(createDefaultProject());
+    const tx = new AgentTransaction();
+    tx.start(store.getState());
+    const summary = tx.summarize();
+    expect(summary.addedObjectIds).toHaveLength(0);
+    expect(summary.movedObjectIds).toHaveLength(0);
+    expect(summary.removedObjectIds).toHaveLength(0);
+    expect(summary.validationBefore).toEqual(summary.validationAfter);
+  });
+});
