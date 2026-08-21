@@ -1,6 +1,6 @@
 # CURRENT_STATE（Claude Lead checkpoint）
 
-更新：2026-08-21 11:1x
+更新：2026-08-21 12:1x
 
 ## 0. ⚠ 環境 — 接手者必讀
 
@@ -90,11 +90,26 @@ planform-iso:layouts            舊版 named layouts（保留）
 ```
 npm run lint       ✅
 npm run typecheck  ✅
-npm run test       ✅ 278 → 281（+38 多專案）
+npm run test       ✅ 286/286（242 + 44 多專案）
 npm run build      ✅
-npm run test:e2e   （執行中）
-production smoke   ❌ 不可達
+npm run test:e2e   ✅ 89/89（74 + 15）
+prodSmoke（本機 preview）✅ 16/16
+prodSmoke（zeabur）      ❌ 網域不可達
 ```
+
+⚠ **prodSmoke 本機是跑得動的，別再當成「不可達」跳過。**
+CI 的 `gates` job 用的是 `node scripts/prodSmoke.mjs http://localhost:4173`，
+只有指向 zeabur 的那一次才受 egress 影響。本容器跑法：
+
+```
+npm run build
+npx vite preview --port 4173 --strictPort &
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
+  node scripts/prodSmoke.mjs http://localhost:4173
+```
+
+我第一次推 PR #18 就是因為漏跑它而讓 CI 紅了一次（`73b664a`）——
+`prodSmoke` 還在點舊精靈的「淡江教室模板」第一步。已於 `14a6053` 修好。
 
 新測試：`test/projectRepository.test.ts`（35）、`test/storeRecovery.test.ts` +4、
 `e2e/projects.spec.ts`（12）。最重要的一條是
@@ -107,7 +122,7 @@ production smoke   ❌ 不可達
 
 ## 6. 待辦
 
-1. e2e 全綠 → push `feat/multi-project` → 開 PR（#17 已 merge，不能重用）
+1. ~~e2e 全綠 → push → 開 PR~~ 完成：**PR #18**（draft），head `14a6053`
 2. **使用者端**：`audit-local-references.ps1`、放行 production 網域或本機跑 prodSmoke、
    Grok/Codex CLI 登入
 3. 1.1 候選：project-scoped snapshots、thumbnail 產生、eventDate 的 UI、
