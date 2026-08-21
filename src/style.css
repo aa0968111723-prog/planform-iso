@@ -889,3 +889,102 @@ html, body {
   background: var(--panel-solid);
 }
 .comparerow--same { border-color: var(--border); }
+
+/* --- Project Home（我的專案） -------------------------------------------
+ *
+ * The first level of the app. Cards only — a 場務組 volunteer opens this on a
+ * phone the evening of an event, so one column is the base case and wider
+ * screens simply fit more cards, never a sidebar or a table.
+ */
+.projhome {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  padding: max(16px, env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+}
+.projhome__inner { max-width: 1100px; margin: 0 auto; }
+.projhome__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 16px;
+}
+.projhome__title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: .01em; }
+.projhome__new { margin-left: auto; min-height: var(--tap); }
+.projhome__count { margin: 0 0 10px; }
+
+.projhome__grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+#app[data-ws-mode="tablet"] .projhome__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#app[data-ws-mode="desktop"] .projhome__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.projcard {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  grid-template-areas: "thumb open" "actions actions";
+  gap: 10px 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-solid);
+  box-shadow: 0 1px 3px var(--shadow);
+}
+.projcard--broken { border-color: #f59e0b; }
+.projcard__thumb {
+  grid-area: thumb;
+  width: 56px; height: 56px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--surface-1);
+}
+.projcard__thumb--empty {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: var(--text-dim);
+}
+.projcard__open {
+  grid-area: open;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+  padding: 4px 0;
+  text-align: left;
+  background: none; border: 0; color: inherit;
+  font: inherit; cursor: pointer;
+}
+.projcard__name {
+  font-size: 16px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.projcard__sub, .projcard__time { font-size: 13px; color: var(--text-dim); }
+.projcard--broken .projcard__sub { color: var(--warn-text); font-weight: 600; }
+.projcard__actions {
+  grid-area: actions;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.projcard__actions .chip { min-height: 36px; }
+
+.projhome__undo {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-1);
+  font-size: 14px;
+}
+.projhome__undo .chip { margin-left: auto; }
+
+.projhome__empty { text-align: center; padding: 32px 12px 16px; }
+.projhome__empty-icon { font-size: 44px; }
+.projhome__empty-title { margin: 10px 0 4px; font-size: 17px; font-weight: 700; }
+.projhome__empty .btn { margin-top: 14px; }
+
+/* Wizard step counter, so 3 steps never feel open-ended on a phone. */
+.quickstart__step { font-size: 12px; color: var(--text-dim); letter-spacing: .04em; }
+.quickstart__name { font-size: 17px; min-height: var(--tap); }
+
+/* The way back to 我的專案 is a real control on every size, not a menu item. */
+.topbar__home { flex: 0 0 auto; font-weight: 700; }

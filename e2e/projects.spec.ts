@@ -1,0 +1,354 @@
+import { expect, test, type Page } from "@playwright/test";
+import { openProjectHome, openWorkspace, PROJECT_KEYS } from "./helpers";
+
+/**
+ * The multi-project system, driven the way the brief describes it: three real
+ * plans that must stay independent through switching, reload and reopen.
+ *
+ * The assertion this whole file exists for is the one in §20 —
+ * **creating a project must never replace another one.**
+ */
+
+/** Create a project through the real wizard UI. */
+async function createProject(page: Page, name: string, venue: RegExp | string): Promise<void> {
+  const wizard = page.locator(".quickstart");
+  if (!(await wizard.count())) {
+    await page.getByRole("button", { name: /新建專案/ }).first().click();
+  }
+  await wizard.waitFor({ state: "visible" });
+
+  // Step 1 — name.
+  const nameInput = wizard.locator(".quickstart__name");
+  await nameInput.fill(name);
+  await wizard.getByRole("button", { name: /下一步：選場地/ }).click();
+
+  // Step 2 — venue.
+  await wizard.getByRole("button", { name: venue }).first().click();
+
+  // Step 3 — create.
+  const create = wizard.getByRole("button", { name: "建立專案" });
+  if (await create.count()) await create.click();
+  await wizard.waitFor({ state: "detached" });
+  await page.waitForSelector(".projhome", { state: "hidden" });
+}
+
+async function goHome(page: Page): Promise<void> {
+  await page.locator(".topbar__home").first().click();
+  await page.waitForSelector(".projhome", { state: "visible" });
+}
+
+async function cardNames(page: Page): Promise<string[]> {
+  return page.locator(".projcard__name").allTextContents();
+}
+
+async function openCard(page: Page, name: string): Promise<void> {
+  await page.locator(".projcard", { hasText: name }).getByRole("button", { name: "開啟" }).click();
+  await page.waitForSelector(".projhome", { state: "hidden" });
+}
+
+/** Object count of the plan currently open in the editor. */
+async function objectCount(page: Page): Promise<number> {
+  return page.evaluate(() =>
+    (window as unknown as { planform: { store: { getState(): { objects: unknown[] } } } })
+      .planform.store.getState().objects.length);
+}
+
+async function currentName(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    (window as unknown as { planform: { store: { getState(): { name: string } } } })
+      .planform.store.getState().name);
+}
+
+/** Add a distinguishing object so each project has its own fingerprint. */
+async function addMarkerObjects(page: Page, count: number): Promise<void> {
+  await page.evaluate((n) => {
+    const app = (window as unknown as {
+      planform: { app: { store: { mutate(fn: (p: Record<string, unknown>) => void): void } } };
+    }).planform.app;
+    app.store.mutate((p) => {
+      const objects = p.objects as Record<string, unknown>[];
+      for (let i = 0; i < n; i++) {
+        objects.push({
+          id: `e2e_${Date.now()}_${i}`,
+          kind: "table",
+          assetId: "builtin:table",
+          x: 1 + i * 0.1,
+          z: 1,
+          rotationDeg: 0,
+          width: 1.2,
+          depth: 0.6,
+          height: 0.74,
+          locked: false,
+          surface: "floor",
+          elevation: 0,
+        });
+      }
+    });
+  }, count);
+  await page.evaluate(() =>
+    (window as unknown as { planform: { store: { flushAutosave(): void } } }).planform.store.flushAutosave());
+}
+
+test.describe("multi-project system", () => {
+  test("a new project never replaces the one before it", async ({ page }) => {
+    await openProjectHome(page);
+
+    await createProject(page, "E310 30 人社課", /E310/);
+    await addMarkerObjects(page, 3);
+    await goHome(page);
+
+    await createProject(page, "E310 60 人演講", /E310/);
+    await addMarkerObjects(page, 7);
+    await goHome(page);
+
+    await createProject(page, "空白測試場地", /空白/);
+    await goHome(page);
+
+    // All three are listed — the first two did not get overwritten.
+    expect(await cardNames(page)).toEqual(
+      expect.arrayContaining(["E310 30 人社課", "E310 60 人演講", "空白測試場地"]),
+    );
+    expect(await page.locator(".projcard").count()).toBe(3);
+  });
+
+  test("editing A, switching to B and back leaves A untouched", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "A 社課", /E310/);
+    const aBase = await objectCount(page);
+    await addMarkerObjects(page, 4);
+    expect(await objectCount(page)).toBe(aBase + 4);
+    await goHome(page);
+
+    await createProject(page, "B 演講", /E310/);
+    await addMarkerObjects(page, 1);
+    await goHome(page);
+
+    await openCard(page, "A 社課");
+    expect(await currentName(page)).toBe("A 社課");
+    // A is exactly as it was left — B's edit did not leak into it.
+    expect(await objectCount(page)).toBe(aBase + 4);
+
+    await goHome(page);
+    await openCard(page, "B 演講");
+    expect(await objectCount(page)).toBe(aBase + 1);
+  });
+
+  test("all three survive a reload and a fresh page open", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "A 社課", /E310/);
+    await addMarkerObjects(page, 2);
+    await goHome(page);
+    await createProject(page, "B 演講", /E310/);
+    await addMarkerObjects(page, 5);
+    await goHome(page);
+    await createProject(page, "C 空白", /空白/);
+    await goHome(page);
+
+    await page.reload();
+    await page.waitForSelector(".projhome", { state: "visible" });
+    expect(await page.locator(".projcard").count()).toBe(3);
+
+    // "Close the browser and open it again": a brand new page on the same origin.
+    const fresh = await page.context().newPage();
+    await fresh.goto("/");
+    await fresh.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
+    await fresh.waitForSelector(".projhome", { state: "visible" });
+    expect(await fresh.locator(".projcard").count()).toBe(3);
+    // And the plans themselves, not just the cards.
+    await openCard(fresh, "B 演講");
+    expect(await objectCount(fresh)).toBeGreaterThanOrEqual(5);
+    await fresh.close();
+  });
+
+  test("reload resumes the project that was open", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "9/24 禪學社社課", /E310/);
+    await addMarkerObjects(page, 2);
+
+    await page.reload();
+    await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
+    // Straight back into the editor, on the same plan — a volunteer mid-setup
+    // in E310 must not be sent back to a list.
+    await expect(page.locator(".projhome")).toBeHidden();
+    expect(await currentName(page)).toBe("9/24 禪學社社課");
+  });
+});
+
+test.describe("project management", () => {
+  test("duplicate copies the whole plan into an independent project", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "8/25 社課", /E310/);
+    await addMarkerObjects(page, 6);
+    const original = await objectCount(page);
+    await goHome(page);
+
+    await page.locator(".projcard", { hasText: "8/25 社課" }).getByRole("button", { name: "複製" }).click();
+    expect(await page.locator(".projcard").count()).toBe(2);
+
+    await openCard(page, "8/25 社課 複本");
+    expect(await objectCount(page)).toBe(original);
+    // Editing the copy leaves the original alone.
+    await addMarkerObjects(page, 3);
+    await goHome(page);
+    await openCard(page, "8/25 社課");
+    expect(await objectCount(page)).toBe(original);
+  });
+
+  test("rename updates the card and the plan", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "舊名字", /空白/);
+    await goHome(page);
+
+    page.once("dialog", (d) => void d.accept("9/1 社課"));
+    await page.locator(".projcard", { hasText: "舊名字" }).getByRole("button", { name: "重新命名" }).click();
+    await expect(page.locator(".projcard__name")).toHaveText("9/1 社課");
+
+    await openCard(page, "9/1 社課");
+    expect(await currentName(page)).toBe("9/1 社課");
+  });
+
+  test("delete asks first, and can be undone", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "會被刪掉的", /空白/);
+    await goHome(page);
+    await createProject(page, "留下來的", /空白/);
+    await goHome(page);
+
+    // Dismissing the confirm must keep the project.
+    page.once("dialog", (d) => void d.dismiss());
+    await page.locator(".projcard", { hasText: "會被刪掉的" }).getByRole("button", { name: "刪除" }).click();
+    expect(await page.locator(".projcard").count()).toBe(2);
+
+    page.once("dialog", (d) => void d.accept());
+    await page.locator(".projcard", { hasText: "會被刪掉的" }).getByRole("button", { name: "刪除" }).click();
+    expect(await page.locator(".projcard").count()).toBe(1);
+
+    await page.locator(".projhome__undo").getByRole("button", { name: "復原" }).click();
+    expect(await page.locator(".projcard").count()).toBe(2);
+    expect(await cardNames(page)).toEqual(expect.arrayContaining(["會被刪掉的", "留下來的"]));
+  });
+
+  test("＋ 新建專案 from inside the editor does not overwrite the open project", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "原本這個", /E310/);
+    await addMarkerObjects(page, 4);
+    const before = await objectCount(page);
+
+    await page.locator(".topbar__more").first().click();
+    await page.getByRole("menuitem", { name: /新建專案/ }).click();
+    await createProject(page, "另外開的", /空白/);
+
+    expect(await currentName(page)).toBe("另外開的");
+    await goHome(page);
+    await openCard(page, "原本這個");
+    expect(await objectCount(page)).toBe(before);
+  });
+});
+
+test.describe("migration and recovery", () => {
+  test("a legacy single autosave becomes a real project instead of vanishing", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.clear();
+      // The pre-multi-project world: one global autosave, no library.
+      localStorage.setItem("planform-iso:autosave", JSON.stringify({ name: "去年的場佈" }));
+    });
+    await page.goto("/");
+    await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
+    await page.waitForSelector(".projhome", { state: "visible" });
+
+    expect(await cardNames(page)).toContain("去年的場佈");
+    // The legacy key is preserved, not deleted.
+    expect(await page.evaluate(() => localStorage.getItem("planform-iso:autosave"))).toBeTruthy();
+  });
+
+  test("one corrupt project does not take the library down", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "好的專案", /空白/);
+    await goHome(page);
+    await createProject(page, "壞掉的專案", /空白/);
+    await goHome(page);
+
+    await page.evaluate((keys) => {
+      const index = JSON.parse(localStorage.getItem(keys.index)!);
+      const bad = index.entries.find((e: { name: string }) => e.name === "壞掉的專案");
+      localStorage.setItem(`planform-iso:projects:${bad.id}`, "<<not json>>");
+    }, PROJECT_KEYS);
+
+    await page.reload();
+    await page.waitForSelector(".projhome", { state: "visible" });
+
+    // Project Home still opens and still lists both.
+    expect(await page.locator(".projcard").count()).toBe(2);
+    await expect(page.locator(".projcard--broken")).toHaveCount(1);
+    await expect(page.locator(".projcard--broken .projcard__sub")).toHaveText("這份專案需要復原");
+    // The healthy one still opens normally.
+    await openCard(page, "好的專案");
+    expect(await currentName(page)).toBe("好的專案");
+  });
+});
+
+test.describe("Project Home on a phone and a tablet", () => {
+  test("phone shows a single column of cards, no sidebar", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openProjectHome(page);
+    await createProject(page, "9/24 禪學社社課", /E310/);
+    await goHome(page);
+
+    const grid = page.locator(".projhome__grid");
+    await expect(grid).toBeVisible();
+    expect(await page.evaluate(() =>
+      getComputedStyle(document.querySelector(".projhome__grid")!).gridTemplateColumns.split(" ").length)).toBe(1);
+
+    // The card must not overflow the phone, and 新建專案 stays reachable.
+    const box = (await page.locator(".projcard").first().boundingBox())!;
+    expect(box.width).toBeLessThanOrEqual(390);
+    await expect(page.locator(".projhome__new")).toBeVisible();
+    // No docked rails on Project Home.
+    for (const sel of [".left", ".right"]) {
+      const visible = await page.evaluate((s) => {
+        const n = document.querySelector(s);
+        if (!n) return false;
+        const r = n.getBoundingClientRect();
+        return r.width > 0 && r.left < window.innerWidth - 1 && r.right > 1;
+      }, sel);
+      expect(visible).toBe(false);
+    }
+  });
+
+  test("tablet lays cards out in two columns", async ({ page }) => {
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await openProjectHome(page);
+    await createProject(page, "A", /空白/);
+    await goHome(page);
+    await createProject(page, "B", /空白/);
+    await goHome(page);
+    expect(await page.evaluate(() =>
+      getComputedStyle(document.querySelector(".projhome__grid")!).gridTemplateColumns.split(" ").length)).toBe(2);
+  });
+});
+
+test.describe("editor still reaches Project Home", () => {
+  test("the back control is present on every size and flushes first", async ({ page }) => {
+    for (const size of [{ width: 390, height: 844 }, { width: 820, height: 1180 }, { width: 1366, height: 900 }]) {
+      await page.setViewportSize(size);
+      await openWorkspace(page);
+      await expect(page.locator(".topbar__home").first()).toBeVisible();
+
+      await page.evaluate(() => {
+        const app = (window as unknown as {
+          planform: { app: { store: { mutate(fn: (p: { description: string }) => void, o: { history: boolean }): void } } };
+        }).planform.app;
+        app.store.mutate((p) => (p.description = "離開前寫進去"), { history: false });
+      });
+      await page.locator(".topbar__home").first().click();
+      await page.waitForSelector(".projhome", { state: "visible" });
+
+      // Leaving flushed the pending autosave rather than dropping it.
+      const saved = await page.evaluate(() => {
+        const id = localStorage.getItem("planform-iso:active-project") ?? "prj_e2e_seed";
+        return localStorage.getItem(`planform-iso:projects:${id}`) ?? "";
+      });
+      expect(saved).toContain("離開前寫進去");
+    }
+  });
+});

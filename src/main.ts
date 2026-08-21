@@ -2,6 +2,7 @@ import "./style.css";
 import { App } from "./app/App";
 import { UI } from "./ui/UI";
 import { Store } from "./state/store";
+import { ProjectRepository } from "./state/projectRepository";
 import { createDefaultProject } from "./core/model";
 import { exportProjectJson } from "./export/exporters";
 
@@ -11,13 +12,27 @@ if (!(canvas instanceof HTMLCanvasElement) || !root) {
   throw new Error("app root not found");
 }
 
-const { project: restored, recovered } = Store.loadAutosaveWithRecovery();
-const store = new Store(restored ?? createDefaultProject());
+// One-time import of the pre-multi-project world: the old single autosave
+// becomes a real project so nobody opens the app to an empty list. The legacy
+// keys are read, never deleted.
+const migrated = ProjectRepository.migrateLegacyIfNeeded();
+
+// Resume the project that was open, if it still opens. A body that has gone
+// corrupt must land the user on Project Home with an explanation rather than
+// on a white screen.
+const activeId = ProjectRepository.getActiveProjectId();
+const opened = activeId ? ProjectRepository.openProject(activeId) : null;
+const store = new Store(opened?.ok ? opened.project : createDefaultProject());
+if (opened?.ok && activeId) store.bindProject(activeId);
+else ProjectRepository.setActiveProjectId(null);
+
 const app = new App(canvas, store);
 const ui = new UI(app, root);
 
-if (recovered) {
-  app.notifyToast?.("無法讀取上次專案，已建立安全備份並開新專案", false);
+if (opened && !opened.ok) {
+  app.notifyToast?.("上次開著的專案讀不出來，已回到「我的專案」", false);
+} else if (migrated) {
+  app.notifyToast?.(`舊的場佈已存成專案「${migrated.name}」`, false);
 }
 let autosaveBanner: HTMLElement | null = null;
 store.onStorageError = () => {
