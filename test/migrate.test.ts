@@ -86,9 +86,29 @@ describe("project migration", () => {
 
   it("upgrades older projects with scenarios and calibration state", () => {
     const p = migrateProject({ version: 5, name: "v5" } as never);
-    expect(p.version).toBe(7);
+    expect(p.version).toBe(8);
     expect(p.scenarios).toEqual([]);
     expect(p.activeScenarioId).toBeNull();
     expect(p.calibration.confirmed).toEqual({});
+  });
+
+  it("兩次 migrateProject({}) 產生不同的 id", () => {
+    // The single most dangerous failure mode in the whole project library: the
+    // migration blind-spreads over a fresh `createDefaultProject()` base, so a
+    // constant or memoised default id would collapse every legacy document
+    // onto one `planform-iso:project:<id>` key and destroy the library in one
+    // migration pass.
+    const a = migrateProject({} as never);
+    const b = migrateProject({} as never);
+    expect(a.id).toBeTruthy();
+    expect(b.id).toBeTruthy();
+    expect(a.id).not.toBe(b.id);
+  });
+
+  it("migrateProject({ id: \"proj_keep\" }) 保留原本的 id", () => {
+    expect(migrateProject({ id: "proj_keep" } as never).id).toBe("proj_keep");
+    // "" and non-strings from hand-edited or foreign JSON get a fresh one.
+    expect(migrateProject({ id: "" } as never).id).toBeTruthy();
+    expect(migrateProject({ id: 7 } as never).id).toBeTruthy();
   });
 });

@@ -298,7 +298,10 @@ html, body {
   appearance: none; cursor: pointer; text-align: left;
   display: flex; align-items: center; gap: 8px;
   padding: 9px; border-radius: 10px;
-  border: 1px solid var(--border); background: rgba(30, 41, 59, 0.6); color: var(--text);
+  /* var(--surface-2), not a hard-coded slate: the literal below was a
+     leftover from when dark was the default and renders as a dark
+     translucent tile on the light theme every card-heavy screen uses. */
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
   transition: background 0.15s, border-color 0.15s, transform 0.05s;
 }
 .card:hover { background: var(--surface-hover); border-color: var(--accent); }
@@ -889,3 +892,88 @@ html, body {
   background: var(--panel-solid);
 }
 .comparerow--same { border-color: var(--border); }
+
+/* --- 我的專案 (Project Home) --------------------------------------------- */
+/*
+ * Like Partner Mode above, a different application surface rather than a skin:
+ * the editor chrome is removed outright, so the card grid is never sharing a
+ * screen with an inspector, a bottom nav or a half-open sheet.
+ *
+ * The canvas is display:none and not merely covered: SceneManager runs a
+ * permanent animation loop and App binds pointer handlers straight to the
+ * canvas, so an overlay alone would leave both live behind the cards.
+ * Hiding it is safe for mode detection — WorkspaceViewport falls back to
+ * window.innerWidth/innerHeight when the canvas rect is zero, so data-ws-mode
+ * still resolves and the columns below still pick the right count.
+ */
+.projecthome { display: none; }
+#app[data-screen="home"] .topbar,
+#app[data-screen="home"] .left,
+#app[data-screen="home"] .right,
+#app[data-screen="home"] .bottomnav,
+#app[data-screen="home"] .ctxbar,
+#app[data-screen="home"] .placebar-wrap,
+#app[data-screen="home"] .measurebar,
+/* The host, not just `.agent-sheet`: `quickAgentSheet` MOVES the 預覽就緒 bar
+   out of the sheet and into the host, so it is a sibling and a rule naming
+   only `.agent-sheet` never reaches it. */
+#app[data-screen="home"] .agent-sheet-host,
+#app[data-screen="home"] .agent-sheet,
+#app[data-screen="home"] .calibration-banner,
+#app[data-screen="home"] #scene { display: none !important; }
+
+/*
+ * z-index 35: above the topbar (25), the rails (18), the compact sheet (26)
+ * and the partner strips (30/32); BELOW the toast (40) so the 復原 chip after
+ * a delete is visible and tappable, below the wizard (50) so ＋建立新專案
+ * opens on top, and below the menu sheet (60) so a card's ⋯ does too.
+ */
+#app[data-screen="home"] .projecthome {
+  display: flex; flex-direction: column; gap: 12px;
+  position: absolute; inset: 0; z-index: 35;
+  background: var(--bg); overflow-y: auto;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+}
+/* --ws-header-h collapses to 0 with the topbar hidden, so the toast would
+   otherwise sit flush against the top edge. */
+#app[data-screen="home"] .toast { top: calc(16px + env(safe-area-inset-top)); }
+
+.projecthome__top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.projecthome__title { font-size: 20px; font-weight: 700; margin: 0; flex: 1 1 auto; }
+.projecthome__new { flex: 0 0 auto; }
+.projecthome__hint { margin: 0; }
+.projecthome__empty { margin: 0; }
+
+/* No @media queries: columns come off the measured-canvas attribute, the same
+   channel every other responsive rule in this file uses. */
+.projecthome__grid { display: grid; gap: 12px; }
+#app[data-ws-mode="phone"] .projecthome__grid { grid-template-columns: 1fr; }
+#app[data-ws-mode="tablet"] .projecthome__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#app[data-ws-mode="desktop"] .projecthome__grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 1100px; width: 100%;
+}
+.projectcard { position: relative; padding-right: 44px; min-height: var(--tap); }
+.projectcard .card__title { font-size: 14px; }
+/* `all: unset` clears the focus ring, and inset:0 covers ⋯'s hit area
+   entirely — hence the explicit ring and the stacking order below. */
+.projectcard__open { all: unset; position: absolute; inset: 0; cursor: pointer; }
+.projectcard__open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.projectcard__open[disabled] { cursor: default; }
+.projectcard__more {
+  position: absolute; right: 4px; top: 4px; z-index: 1;
+  min-width: var(--tap); min-height: var(--tap);
+}
+.projectcard--broken { border-color: var(--danger); }
+
+/* Compact-header elasticity. `.topbar--compact .chip` is flex:0 0 auto, so a
+   chip in slot 1 would leave NOTHING in the row shrinkable and the header
+   would overflow at 360/390/412/600. The glyph never shrinks; the project
+   name absorbs the ellipsis. */
+.topbar__home { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.topbar--compact .topbar__home { flex: 0 1 auto; overflow: hidden; }
+.topbar__home-glyph { flex: 0 0 auto; }
+.topbar__home-name {
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}

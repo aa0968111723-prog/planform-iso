@@ -7,6 +7,7 @@
  */
 
 import type { App } from "../app/App";
+import type { ProjectSession } from "../state/projectSession";
 import { buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
 import { BUILTIN_VENUE_PRESETS, listUserVenuePresets, type VenuePreset } from "../core/venues";
 import { button, el } from "./dom";
@@ -46,8 +47,16 @@ const NEED_OPTIONS: NeedOption[] = [
   { key: "staffRoute", label: "🦺 工作人員動線" },
 ];
 
-/** Show the Quick Start overlay. Returns the overlay element. */
-export function showQuickStart(app: App, onDone: () => void): HTMLElement {
+/**
+ * Show the Quick Start overlay. Returns the overlay element.
+ *
+ * Everything this wizard produces is a NEW project. It used to replace the
+ * open plan behind a confirm, which is the behaviour this whole change exists
+ * to remove — and that confirm was also unsound: it only looked at zones,
+ * objects, groups and routes, so a plan holding nothing but measurements and
+ * scenarios was wiped with no prompt and no undo.
+ */
+export function showQuickStart(app: App, session: ProjectSession, onDone: () => void): HTMLElement {
   const overlay = el("div", { class: "quickstart" });
   const card = el("div", { class: "quickstart__card" });
   overlay.append(card);
@@ -58,12 +67,19 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
     onDone();
   };
 
-  /** Loading a wizard result replaces the current plan — ask when it has content. */
-  const confirmReplace = (): boolean => {
-    const p = app.store.getState();
-    const hasContent = p.objects.length > 0 || p.zones.length > 0 || p.groups.length > 0 || p.routes.length > 0;
-    if (!hasContent) return true;
-    return window.confirm("目前的場佈會被新的取代（建議先到「分享」把它存成平面圖）。確定繼續？");
+  /**
+   * One wizard run creates exactly one project. Without this, a double tap on
+   * 建立場佈 lands twice: the first call fills the pristine boot project, the
+   * second no longer can (the id is spent) and mints a second, so the user
+   * gets an extra card they never asked for.
+   */
+  let creating = false;
+  const createOnce = (make: () => void): void => {
+    if (creating) return;
+    creating = true;
+    make();
+    app.notifyToast?.("場佈起點已建立，直接拖曳調整即可", false);
+    close(true);
   };
 
   const renderVenueStep = (): void => {
@@ -78,11 +94,15 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       card.append(
         button(`🎤 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
         el("p", { class: "hint", text: e310.note }),
-        button("⚡ E310 演講範例（60 人）", () => {
-          if (!confirmReplace()) return;
-          app.startFromQuickStart(buildE310GoldenProject(e310));
-          close(true);
-        }, "btn btn--big btn--primary"),
+        button("⚡ E310 演講範例（60 人）", () => createOnce(() => {
+          // `name` is deliberately omitted: the builder already names it, and
+          // `createProject` falls back to the body's own name.
+          session.createProject({
+            project: buildE310GoldenProject(e310),
+            open: true,
+            adoptPristineActive: true,
+          });
+        }), "btn btn--big btn--primary"),
       );
     }
     card.append(
@@ -90,35 +110,29 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       el("p", { class: "hint", text: tku.note }),
     );
     const saved = [...listUserVenuePresets()];
-    const layouts = app.store.listLayouts();
-    if (saved.length || layouts.length) {
-      card.append(button("📁 使用我之前的場地", () => renderMineStep(saved, layouts), "btn btn--big btn--ghost"));
+    if (saved.length) {
+      card.append(button("📁 我的場地模板", () => renderMineStep(saved), "btn btn--big btn--ghost"));
     }
     card.append(
       button(`▭ ${rect.name}`, () => renderNeedsStep(rect), "btn btn--big btn--ghost"),
       button(`⬜ ${blank.name}`, () => renderNeedsStep(blank), "btn btn--big btn--ghost"),
       el("div", { class: "quickstart__foot" }, [
         button("直接進編輯器", () => close(true), "chip chip--sm"),
+        button("🗂 我的專案", () => {
+          close(true);
+          session.goHome();
+        }, "chip chip--sm"),
       ]),
     );
   };
 
-  const renderMineStep = (venues: VenuePreset[], layouts: string[]): void => {
+  const renderMineStep = (venues: VenuePreset[]): void => {
     card.innerHTML = "";
-    card.append(el("div", { class: "quickstart__title", text: "我的場地" }));
-    if (layouts.length) {
-      card.append(el("div", { class: "subhead", text: "已存的平面圖（直接載入整份場佈）" }));
-      for (const name of layouts) {
-        card.append(button(`📄 ${name}`, () => {
-          if (!confirmReplace()) return;
-          app.store.loadNamedLayout(name);
-          app.recenterView();
-          close(true);
-        }, "btn btn--ghost"));
-      }
-    }
+    card.append(el("div", { class: "quickstart__title", text: "我的場地模板" }));
+    card.append(el("p", { class: "hint", text: "只存場地和固定設施，不含場佈。" }));
+    // Saved whole plans used to be offered here as 「已存的平面圖」. They are
+    // projects now, promoted by the migration, and live in 我的專案.
     if (venues.length) {
-      card.append(el("div", { class: "subhead", text: "我的場地模板（只有場地，重新排場佈）" }));
       for (const v of venues) {
         card.append(button(`🏫 ${v.name}`, () => renderNeedsStep(v), "btn btn--ghost"));
       }
@@ -187,8 +201,7 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
     card.append(el("div", { class: "row" }, [aisleChip, el("span", { class: "hint", text: "地墊之間留 90cm 走道" })]));
 
     card.append(
-      button("建立場佈", () => {
-        if (!confirmReplace()) return;
+      button("建立場佈", () => createOnce(() => {
         const participants = Math.max(1, Math.min(300, Number(countInput.value) || 30));
         const project = buildQuickStartProject({
           venue,
@@ -197,9 +210,13 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
           needs,
           centralAisle,
         });
-        app.startFromQuickStart(project);
-        close(true);
-      }, "btn btn--big btn--primary"),
+        session.createProject({
+          project,
+          name: project.name,
+          open: true,
+          adoptPristineActive: true,
+        });
+      }), "btn btn--big btn--primary"),
       el("div", { class: "quickstart__foot" }, [
         button("← 返回", () => renderVenueStep(), "chip chip--sm"),
       ]),

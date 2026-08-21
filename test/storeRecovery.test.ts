@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../src/state/store";
+import { ProjectRepository } from "../src/state/projectRepository";
+import { projectBodyKey, readLegacyCorruptBackup } from "../src/state/projectStorage";
 import { createDefaultProject } from "../src/core/model";
 
 function installLocalStorage(): Map<string, string> {
@@ -19,29 +21,10 @@ describe("autosave recovery", () => {
     backing = installLocalStorage();
   });
 
-  it("loads a healthy autosave without flagging recovery", () => {
-    const p = createDefaultProject();
-    p.name = "健康專案";
-    backing.set("planform-iso:autosave", JSON.stringify(p));
-    const { project, recovered } = Store.loadAutosaveWithRecovery();
-    expect(recovered).toBe(false);
-    expect(project?.name).toBe("健康專案");
-  });
-
-  it("corrupt autosave → backup kept, recovery flagged, no throw", () => {
-    backing.set("planform-iso:autosave", "{broken json!!");
-    const { project, recovered } = Store.loadAutosaveWithRecovery();
-    expect(project).toBeNull();
-    expect(recovered).toBe(true);
-    expect(Store.corruptBackup()).toBe("{broken json!!");
-    // The broken blob no longer shadows the next healthy autosave.
-    expect(backing.get("planform-iso:autosave")).toBeUndefined();
-  });
-
-  it("empty storage is a normal first run, not a recovery", () => {
-    const { project, recovered } = Store.loadAutosaveWithRecovery();
-    expect(project).toBeNull();
-    expect(recovered).toBe(false);
+  it("舊版存檔的損壞備份仍然拿得到（更多 → 下載損壞前的備份）", () => {
+    expect(readLegacyCorruptBackup()).toBeNull();
+    backing.set("planform-iso:autosave-backup", "{broken json!!");
+    expect(readLegacyCorruptBackup()).toBe("{broken json!!");
   });
 
   it("flushAutosave writes immediately", () => {
@@ -103,5 +86,60 @@ describe("autosave recovery", () => {
     storage.setItem = () => undefined;
     store.saveAutosave();
     expect(recovered).toBe(1);
+  });
+
+  it("setPersistence 後，autosave 寫到專案 key，舊的 autosave key 不再被寫", () => {
+    const repo = new ProjectRepository();
+    const meta = repo.createProject({ name: "A 活動" });
+    const store = new Store(createDefaultProject());
+    store.setPersistence(repo.persistenceFor(meta.id));
+
+    store.mutate((p) => (p.name = "改過的名字"), { history: false });
+    store.flushAutosave();
+
+    expect(backing.get(projectBodyKey(meta.id))).toContain("改過的名字");
+    expect(backing.has("planform-iso:autosave")).toBe(false);
+  });
+
+  it("setPersistence 後儲存場佈不會改掉專案名稱；legacy 模式仍會", () => {
+    const repo = new ProjectRepository();
+    const meta = repo.createProject({ name: "A 活動" });
+    const store = new Store(createDefaultProject());
+    store.setPersistence(repo.persistenceFor(meta.id));
+    store.mutate((p) => (p.name = "A 活動"), { history: false });
+
+    expect(store.saveNamedLayout("晚宴版")).toBe(true);
+    expect(store.getState().name).toBe("A 活動");
+    expect(store.listLayouts()).toEqual(["晚宴版"]);
+
+    // The legacy branch keeps its old behaviour, and is still exercised, so it
+    // cannot rot behind the branch production actually takes.
+    const legacy = new Store(createDefaultProject());
+    expect(legacy.saveNamedLayout("晚宴版")).toBe(true);
+    expect(legacy.getState().name).toBe("晚宴版");
+  });
+
+  it("配額爆掉只回報一次，且 index 失敗不會謊稱已恢復", () => {
+    let errors = 0;
+    let recovered = 0;
+    const store = new Store(createDefaultProject());
+    // A sink whose body write always fails. The index write beside it may well
+    // succeed — it must never be allowed to clear the banner.
+    store.setPersistence({
+      saveProject: () => {
+        throw new Error("QuotaExceededError");
+      },
+      listLayouts: () => [],
+      readLayout: () => null,
+      writeLayout: () => undefined,
+      deleteLayout: () => undefined,
+    });
+    store.onStorageError = () => errors++;
+    store.onStorageRecovered = () => recovered++;
+
+    store.saveAutosave();
+    store.saveAutosave();
+    expect(errors).toBe(1);
+    expect(recovered).toBe(0);
   });
 });
