@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { openProjectHome, openWorkspace, PROJECT_KEYS } from "./helpers";
+import { isOnScreen, openProjectHome, openWorkspace, PROJECT_KEYS } from "./helpers";
 
 /**
  * The multi-project system, driven the way the brief describes it: three real
@@ -41,8 +41,15 @@ async function cardNames(page: Page): Promise<string[]> {
   return page.locator(".projcard__name").allTextContents();
 }
 
+/** A card matched on its exact name — 「8/25 社課」 also substring-matches 「8/25 社課 複本」. */
+function card(page: Page, name: string) {
+  return page.locator(".projcard").filter({
+    has: page.locator(".projcard__name", { hasText: new RegExp(`^${name}$`) }),
+  });
+}
+
 async function openCard(page: Page, name: string): Promise<void> {
-  await page.locator(".projcard", { hasText: name }).getByRole("button", { name: "開啟" }).click();
+  await card(page, name).getByRole("button", { name: "開啟" }).click();
   await page.waitForSelector(".projhome", { state: "hidden" });
 }
 
@@ -90,6 +97,23 @@ async function addMarkerObjects(page: Page, count: number): Promise<void> {
 }
 
 test.describe("multi-project system", () => {
+  test("the wizard is clickable on a first run, not buried under Project Home", async ({ page }) => {
+    // Regression: Project Home is a full-screen overlay. With the wizard below
+    // it in the stack, every button on a brand new install was dead.
+    await openProjectHome(page, { keepWizard: true });
+    const wizard = page.locator(".quickstart");
+    await expect(wizard).toBeVisible();
+    const stacked = await page.evaluate(() => ({
+      wizard: Number(getComputedStyle(document.querySelector(".quickstart")!).zIndex),
+      home: Number(getComputedStyle(document.querySelector(".projhome")!).zIndex),
+    }));
+    expect(stacked.wizard).toBeGreaterThan(stacked.home);
+    // And it really takes the click, rather than merely looking on top.
+    await wizard.locator(".quickstart__name").fill("第一個專案");
+    await wizard.getByRole("button", { name: /下一步：選場地/ }).click();
+    await expect(wizard.locator(".quickstart__title")).toHaveText("在哪裡辦？");
+  });
+
   test("a new project never replaces the one before it", async ({ page }) => {
     await openProjectHome(page);
 
@@ -160,6 +184,16 @@ test.describe("multi-project system", () => {
     await fresh.close();
   });
 
+  test("reload while on 我的專案 stays on 我的專案", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "已經離開的專案", /空白/);
+    await goHome(page);
+    await page.reload();
+    // Walking back to the list is a decision; a reload must not undo it.
+    await page.waitForSelector(".projhome", { state: "visible" });
+    expect(await page.locator(".projcard").count()).toBe(1);
+  });
+
   test("reload resumes the project that was open", async ({ page }) => {
     await openProjectHome(page);
     await createProject(page, "9/24 禪學社社課", /E310/);
@@ -182,7 +216,7 @@ test.describe("project management", () => {
     const original = await objectCount(page);
     await goHome(page);
 
-    await page.locator(".projcard", { hasText: "8/25 社課" }).getByRole("button", { name: "複製" }).click();
+    await card(page, "8/25 社課").getByRole("button", { name: "複製" }).click();
     expect(await page.locator(".projcard").count()).toBe(2);
 
     await openCard(page, "8/25 社課 複本");
@@ -200,7 +234,7 @@ test.describe("project management", () => {
     await goHome(page);
 
     page.once("dialog", (d) => void d.accept("9/1 社課"));
-    await page.locator(".projcard", { hasText: "舊名字" }).getByRole("button", { name: "重新命名" }).click();
+    await card(page, "舊名字").getByRole("button", { name: "重新命名" }).click();
     await expect(page.locator(".projcard__name")).toHaveText("9/1 社課");
 
     await openCard(page, "9/1 社課");
@@ -216,11 +250,11 @@ test.describe("project management", () => {
 
     // Dismissing the confirm must keep the project.
     page.once("dialog", (d) => void d.dismiss());
-    await page.locator(".projcard", { hasText: "會被刪掉的" }).getByRole("button", { name: "刪除" }).click();
+    await card(page, "會被刪掉的").getByRole("button", { name: "刪除" }).click();
     expect(await page.locator(".projcard").count()).toBe(2);
 
     page.once("dialog", (d) => void d.accept());
-    await page.locator(".projcard", { hasText: "會被刪掉的" }).getByRole("button", { name: "刪除" }).click();
+    await card(page, "會被刪掉的").getByRole("button", { name: "刪除" }).click();
     expect(await page.locator(".projcard").count()).toBe(1);
 
     await page.locator(".projhome__undo").getByRole("button", { name: "復原" }).click();
@@ -268,11 +302,11 @@ test.describe("migration and recovery", () => {
     await createProject(page, "壞掉的專案", /空白/);
     await goHome(page);
 
-    await page.evaluate((keys) => {
-      const index = JSON.parse(localStorage.getItem(keys.index)!);
+    await page.evaluate((indexKey) => {
+      const index = JSON.parse(localStorage.getItem(indexKey)!);
       const bad = index.entries.find((e: { name: string }) => e.name === "壞掉的專案");
       localStorage.setItem(`planform-iso:projects:${bad.id}`, "<<not json>>");
-    }, PROJECT_KEYS);
+    }, PROJECT_KEYS.index);
 
     await page.reload();
     await page.waitForSelector(".projhome", { state: "visible" });
@@ -303,16 +337,11 @@ test.describe("Project Home on a phone and a tablet", () => {
     const box = (await page.locator(".projcard").first().boundingBox())!;
     expect(box.width).toBeLessThanOrEqual(390);
     await expect(page.locator(".projhome__new")).toBeVisible();
-    // No docked rails on Project Home.
+    // No docked rails on Project Home, and Home owns no rail of its own.
     for (const sel of [".left", ".right"]) {
-      const visible = await page.evaluate((s) => {
-        const n = document.querySelector(s);
-        if (!n) return false;
-        const r = n.getBoundingClientRect();
-        return r.width > 0 && r.left < window.innerWidth - 1 && r.right > 1;
-      }, sel);
-      expect(visible).toBe(false);
+      expect(await isOnScreen(page, sel)).toBe(false);
     }
+    expect(await page.locator(".projhome .left, .projhome .right").count()).toBe(0);
   });
 
   test("tablet lays cards out in two columns", async ({ page }) => {

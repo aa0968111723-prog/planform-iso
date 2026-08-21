@@ -12,7 +12,7 @@ export interface WorkspaceProbe {
 /** Storage keys owned by the multi-project library. */
 export const PROJECT_KEYS = {
   index: "planform-iso:projects:index",
-  body: (id: string) => `planform-iso:projects:${id}`,
+  bodyPrefix: "planform-iso:projects:",
   active: "planform-iso:active-project",
   migrated: "planform-iso:projects:migrated",
 } as const;
@@ -63,8 +63,14 @@ export async function openWorkspace(page: Page): Promise<void> {
  */
 export async function openProjectHome(page: Page, opts: { keepWizard?: boolean } = {}): Promise<void> {
   await page.addInitScript(() => {
-    localStorage.clear();
-    localStorage.setItem("planform-iso:projects:migrated", "1");
+    // Only wipe on the FIRST load. addInitScript runs on every navigation, so
+    // an unguarded clear() would also wipe on reload — and then "everything
+    // survives a reload" would be testing the wipe, not the product.
+    if (!sessionStorage.getItem("e2e-home-cleared")) {
+      sessionStorage.setItem("e2e-home-cleared", "1");
+      localStorage.clear();
+      localStorage.setItem("planform-iso:projects:migrated", "1");
+    }
   });
   await page.goto("/");
   await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);

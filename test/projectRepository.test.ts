@@ -441,3 +441,35 @@ describe("card metadata stays true to the plan", () => {
     expect(ids.size).toBe(200);
   });
 });
+
+describe("the stored body is the source of truth for the name", () => {
+  it("stamps the project name over a template's own name", () => {
+    // Regression: buildE310GoldenProject names itself 「E310 演講活動（範例）」.
+    // The wizard's name must win, and — critically — the body that gets STORED
+    // must already carry it, or the editor opens under the template name and
+    // the next autosave writes that name back over the user's.
+    const e310 = venuePresetById("venue:tku-e310")!;
+    const template = buildE310GoldenProject(e310);
+    expect(template.name).toBe("E310 演講活動（範例）");
+
+    const meta = ProjectRepository.createProject({
+      name: "9/24 禪學社社課",
+      project: template,
+      venuePresetId: e310.id,
+    });
+    expect(meta.name).toBe("9/24 禪學社社課");
+    const opened = ProjectRepository.openProject(meta.id);
+    expect(opened.ok && opened.project.name).toBe("9/24 禪學社社課");
+  });
+
+  it("does not mutate the caller's object", () => {
+    const source = plan("原本的名字");
+    ProjectRepository.createProject({ name: "新名字", project: source });
+    expect(source.name).toBe("原本的名字");
+  });
+
+  it("falls back to the plan's own name when none is given", () => {
+    const meta = ProjectRepository.createProject({ name: "", project: plan("計畫自己的名字") });
+    expect(meta.name).toBe("計畫自己的名字");
+  });
+});

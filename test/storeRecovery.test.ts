@@ -178,3 +178,39 @@ describe("per-project autosave isolation", () => {
     expect(errors).toBe(1);
   });
 });
+
+describe("leaving a project stops it being written to", () => {
+  beforeEach(() => {
+    installLocalStorage();
+    ProjectRepository._resetForTests();
+  });
+
+  it("unbinding means a later flush cannot rewrite the project you left", () => {
+    const a = ProjectRepository.createProject({ name: "離開的專案", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "編輯過"), { history: false });
+    store.flushAutosave();
+
+    // Leave: flush, then unbind (what App.leaveProject does).
+    store.flushAutosave();
+    store.bindProject(null);
+
+    // Something external changes the stored body — a corrupt blob, or another
+    // tab. The pagehide flush must NOT put the stale in-memory copy back.
+    localStorage.setItem(`planform-iso:projects:${a.id}`, "<<not json>>");
+    store.flushAutosave();
+    expect(localStorage.getItem(`planform-iso:projects:${a.id}`)).toBe("<<not json>>");
+  });
+
+  it("the last edit before leaving is still committed", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "離開前最後一筆"), { history: false });
+    // No explicit flush: bindProject(null) must flush the pending write itself.
+    store.bindProject(null);
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok && opened.project.description).toBe("離開前最後一筆");
+  });
+});

@@ -221,11 +221,15 @@ export class UI {
    * about to look at already shows the work they just did.
    */
   goHome(): void {
-    this.app.leaveProject();
+    // Close the editor chrome FIRST, then flush. Doing it the other way round
+    // let the teardown (sheet close -> update -> view mutation) schedule an
+    // autosave that landed after the flush, so the last write to storage was
+    // not the one we thought we had committed.
     this.menu.close();
     this.setSheet("none");
-    this.home.show();
     this.root.setAttribute("data-route", "home");
+    this.app.leaveProject();
+    this.home.show();
   }
 
   private enterEditor(): void {

@@ -347,8 +347,11 @@ html, body {
 
 /* --- toast / undo snackbar --------------------------------------------- */
 .toast {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  top: calc(var(--ws-header-h) + 10px); z-index: 40;
+  /* Above Project Home (70) and the wizard (80): confirmations like
+     「已複製成…」 are fired from those screens, and at z-index 40 they were
+     painted underneath the very surface that triggered them. */
+  position: fixed; left: 50%; transform: translateX(-50%);
+  top: calc(var(--ws-header-h) + 10px); z-index: 90;
   display: flex; gap: 10px; align-items: center;
   padding: 8px 14px; font-size: 13px;
   background: var(--panel-solid); color: var(--text);
@@ -694,7 +697,9 @@ html, body {
 
 /* --- quick start -------------------------------------------------------- */
 .quickstart {
-  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  /* Above Project Home (z-index 70): the new-project wizard opens on top of
+     我的專案, and at z-index 50 the Home overlay swallowed every click on it. */
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
   background: var(--scrim-strong); backdrop-filter: blur(3px); padding: 16px;
 }
 .quickstart__card {

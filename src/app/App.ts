@@ -616,7 +616,13 @@ export class App {
     participants?: number;
   }): ProjectMeta {
     const meta = ProjectRepository.createProject(input);
-    this.store.openBoundProject(meta.id, input.project);
+    // Read the stored body back rather than opening the caller's object: the
+    // repository normalises it (notably stamping the project name over the
+    // template's own). Opening the un-normalised original left the editor
+    // showing 「E310 演講活動（範例）」 while storage held the name the user
+    // typed — and the next autosave wrote the template name back over it.
+    const opened = ProjectRepository.openProject(meta.id);
+    this.store.openBoundProject(meta.id, opened.ok ? opened.project : input.project);
     ProjectRepository.setActiveProjectId(meta.id);
     this.adoptProjectSettings(this.store.getState());
     this.toast("場佈起點已建立，直接拖曳調整即可");
@@ -633,10 +639,25 @@ export class App {
     ProjectRepository.setActiveProjectId(null);
   }
 
-  /** Write pending edits before navigating away from the editor. */
+  /**
+   * Write pending edits and step out of the project.
+   *
+   * Order matters: flush while still bound so the last edit lands in the right
+   * project, then unbind and clear the active pointer.
+   *
+   * Unbinding is not tidiness. The pagehide handler flushes on every reload and
+   * tab close, and a Store still bound to a project the user had already left
+   * would rewrite that project's stored body from stale memory — which is
+   * exactly how a deliberately corrupted body silently repaired itself.
+   *
+   * Clearing the pointer means someone who walked back to 我的專案 and then
+   * reloaded is still on 我的專案, not dragged into what they just left.
+   */
   leaveProject(): void {
     this.stopSimulation();
     this.store.flushAutosave();
+    this.store.bindProject(null);
+    ProjectRepository.setActiveProjectId(null);
   }
 
   /**
