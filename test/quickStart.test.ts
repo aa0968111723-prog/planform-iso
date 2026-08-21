@@ -42,15 +42,34 @@ describe("quick start builder", () => {
     expect(errors).toHaveLength(0);
   });
 
-  it("central aisle keeps two mat blocks", () => {
-    const p = buildQuickStartProject({
+  it("中央走道是留空位，墊子仍是一整片", () => {
+    const withAisle = buildQuickStartProject({
       venue: tku,
       eventName: "x",
       participants: 40,
       needs: { ...DEFAULT_NEEDS, checkin: false, shoe: false, backpack: false },
       centralAisle: true,
     });
-    expect(p.groups.length).toBe(2);
+    // 實照：墊子一路對接成一整片，走道是靠中間那一列不坐人做出來的
+    // （docs/field-research/REFERENCE_MAPPING.md 一、中央走道）。
+    expect(withAisle.groups.length).toBe(1);
+
+    const noAisle = buildQuickStartProject({
+      venue: tku,
+      eventName: "x",
+      participants: 40,
+      needs: { ...DEFAULT_NEEDS, checkin: false, shoe: false, backpack: false },
+      centralAisle: false,
+    });
+    expect(noAisle.groups.length).toBe(1);
+    // 兩種都坐得下這 40 人。差別在於留走道版要鋪更多墊子才辦得到——
+    // 走道的成本是多搬幾片墊子，不是把墊子切成兩塊。
+    const tiles = (p: typeof withAisle) => p.groups.reduce((s, g) => s + g.rows * g.cols, 0);
+    const seats = (p: typeof withAisle) =>
+      p.groups.reduce((s, g) => s + g.cols * Math.floor((g.rows * g.itemDepth + 1e-9) / 0.9), 0);
+    expect(seats(withAisle)).toBeGreaterThanOrEqual(40);
+    expect(seats(noAisle)).toBeGreaterThanOrEqual(40);
+    expect(tiles(withAisle)).toBeGreaterThanOrEqual(tiles(noAisle));
   });
 
   it("nothing ticked → clean empty starting point", () => {

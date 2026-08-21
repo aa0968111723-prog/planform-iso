@@ -28,12 +28,13 @@ describe("E310 golden venue", () => {
     }
   });
 
-  it("Quick Start uses field mats and keeps the stage/front walking strip clear", () => {
+  it("Quick Start 依實照鋪成一整片墊子，鞋子在兩側、背包在課桌椅上", () => {
     const p = buildQuickStartProject({
       venue: e310, eventName: "E310", participants: 60,
       needs: { ...DEFAULT_NEEDS, payment: true, life: true, teacher: true }, centralAisle: true,
     });
-    expect(p.groups.length).toBe(2);
+    // 一整片，不是兩塊：中央走道靠留空位做出來（REFERENCE_MAPPING 一）。
+    expect(p.groups.length).toBe(1);
     const platform = p.objects.find((o) => o.assetId === "builtin:stage-platform")!;
     for (const g of p.groups) {
       expect(g.itemWidth).toBe(0.6);
@@ -47,18 +48,36 @@ describe("E310 golden venue", () => {
         expect(m.z + g.itemDepth / 2).toBeLessThan(p.classroom.width);
       }
     }
-    const fieldCapacity = p.groups.reduce(
-      (sum, g) => sum + g.cols * Math.floor((g.rows * g.itemDepth + 1e-9) / 0.9), 0);
-    expect(fieldCapacity).toBeGreaterThanOrEqual(60);
-    const bagTables = p.objects.filter((o) => o.width === 1.8 && o.depth === 0.6);
-    expect(bagTables).toHaveLength(1);
+    // 墊區不貼牆：四周留一圈裸地板（實照）。
+    const field = p.groups[0];
+    expect(field.anchorX).toBeGreaterThan(0.5);
+    expect(field.anchorX + field.cols * field.itemWidth).toBeLessThan(p.classroom.length - 0.5);
+
+    // 實證容量：E310 這個誠實起點鋪滿後坐 40–50 人，與活動照片一致。
+    // 60 人坐不下是事實，工具要說出來而不是假裝可以。
+    const fieldCapacity = field.cols * Math.floor((field.rows * field.itemDepth + 1e-9) / 0.9);
+    expect(fieldCapacity).toBeGreaterThanOrEqual(40);
+    expect(fieldCapacity).toBeLessThan(60);
+
+    // 鞋子：墊區左右各一條裸地帶（實照三路確認）。
+    const shoes = p.zones.filter((z) => z.type === "shoe");
+    expect(shoes).toHaveLength(2);
+    const fieldMinX = field.anchorX;
+    const fieldMaxX = field.anchorX + field.cols * field.itemWidth;
+    expect(Math.min(...shoes.map((z) => z.x))).toBeLessThan(fieldMinX);
+    expect(Math.max(...shoes.map((z) => z.x))).toBeGreaterThan(fieldMaxX);
+
+    // 背包：側牆課桌椅，不是後牆長桌。
     const bagZone = p.zones.find((z) => z.type === "backpack")!;
-    expect(Math.abs(bagTables[0].x - bagZone.x)).toBeLessThanOrEqual(bagZone.width / 2 - 0.9 + 1e-6);
-    expect(bagZone.z + bagZone.depth / 2).toBeCloseTo(p.classroom.z + p.classroom.width, 6);
-    // E310 does check-in/payment in the corridor, desks facing the walkway.
+    expect(bagZone.x).toBeGreaterThan(fieldMaxX);
+    const deskChairs = p.objects.filter((o) => o.note?.includes("課桌椅"));
+    expect(deskChairs.length).toBeGreaterThanOrEqual(3);
+
+    // 報到／收費在教室內，面向房間（實照：工作人員坐桌後看著門）。
     for (const type of ["registration", "payment"] as const) {
       const zone = p.zones.find((z) => z.type === type)!;
-      expect(zone.z).toBeGreaterThan(p.classroom.z + p.classroom.width);
+      expect(zone.z).toBeLessThan(p.classroom.z + p.classroom.width);
+      expect(zone.z).toBeGreaterThan(p.classroom.z + p.classroom.width / 2);
     }
     const desks = p.objects.filter((o) => o.serviceRole === "checkin" || o.serviceRole === "payment");
     expect(desks).toHaveLength(2);

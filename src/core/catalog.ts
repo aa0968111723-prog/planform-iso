@@ -244,7 +244,7 @@ export const BUILTIN_CATALOG: AssetCatalogEntry[] = [
     // (docs/e310/E310_GOLDEN_SCENARIO.md §1.6, REFERENCE_MAPPING M-01).
     // 🧩 rather than 🟩 so it does not collide with the stage platform icon.
     icon: "🧩",
-    color: "#5fa877",
+    color: "#4fb89a",
     tags: ["floor", "mat"],
     presets: [
       preset("m60180", 0.6, 1.8, 0.04),
