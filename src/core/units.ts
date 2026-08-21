@@ -15,7 +15,8 @@ export function cmToMeters(cm: number): number {
 }
 
 export function metersToCm(meters: number): number {
-  return meters * CM_PER_METER;
+  // Round away float dust (0.58 m must read 58 cm, not 57.99999999999999).
+  return Math.round(meters * CM_PER_METER * 100) / 100;
 }
 
 /** A rectangular floor-tile definition, expressed in meters. */

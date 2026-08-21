@@ -1,10 +1,14 @@
 {
   "name": "planform-iso",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "3D 等角實尺場佈工具 — Vite + TypeScript + Three.js PWA",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",

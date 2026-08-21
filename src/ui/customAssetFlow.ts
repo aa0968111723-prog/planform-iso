@@ -13,7 +13,7 @@ import type { SemanticAssetType, ServiceRole } from "../core/catalog";
 import { button, el, section } from "./dom";
 
 export function buildCustomAssetFlow(app: App): HTMLElement {
-  const status = el("div", { class: "hint", text: "拍照或匯入 GLB，立即得到可排場素材。" });
+  const status = el("div", { class: "hint", text: "拍照或匯入 GLB，立即得到可放進場佈的素材。" });
   const nameInput = el("input", { type: "text", class: "field__input", placeholder: "名稱（如：收費桌）" }) as HTMLInputElement;
   const wInput = el("input", { type: "number", class: "field__input", value: "180", step: "1" }) as HTMLInputElement;
   const dInput = el("input", { type: "number", class: "field__input", value: "60", step: "1" }) as HTMLInputElement;
@@ -67,7 +67,7 @@ export function buildCustomAssetFlow(app: App): HTMLElement {
       sourceMimeType: file.type || "image/jpeg",
     });
     app.upsertCatalogEntry(entry);
-    status.textContent = "精緻模型稍後產生，目前已可用簡化素材排場。";
+    status.textContent = "精緻模型稍後產生，目前可先用簡化素材排場佈。";
     app.notifyToast?.(status.textContent);
     app.beginPlacementByAssetId(entry.id);
 
@@ -131,5 +131,5 @@ export function buildCustomAssetFlow(app: App): HTMLElement {
     ]),
     photoInput,
     glbInput,
-  ]);
+  ], false);
 }

@@ -61,8 +61,9 @@ for (const vp of VIEWPORTS) {
         expect(leftVisible).toBe(false);
         expect(rightVisible).toBe(false);
         expect(navVisible).toBe(true);
-        // All five workflows live in the bottom navigation.
-        await expect(page.locator(".bottomnav .navbtn")).toHaveCount(5);
+        // The four primary workflows live in the bottom navigation
+        // (檢查 folds into 分享 as the pre-export checklist).
+        await expect(page.locator(".bottomnav .navbtn")).toHaveCount(4);
       }
     });
 
@@ -94,9 +95,9 @@ for (const vp of VIEWPORTS) {
 
       if (vp.mode === "desktop") {
         expect(header.compact).toBe(false);
-        // Desktop keeps the full five-view + five-workflow header.
+        // Desktop keeps the five views and the four-step primary flow.
         expect(header.viewChips).toBe(5);
-        expect(header.flowChips).toBe(5);
+        expect(header.flowChips).toBe(4);
       } else {
         expect(header.compact).toBe(true);
         expect(header.wrapped).toBe(false);
@@ -125,9 +126,9 @@ test.describe("tablet portrait working loop (768x1024)", () => {
     await page.locator('.navbtn[data-nav="site"]').click();
     await expect(app).toHaveAttribute("data-sheet", "workflow");
     await expect(page.locator(".left .sheet-handle")).toBeVisible();
-    // The site panel's first level is the four field-facing sections.
+    // The site panel's first level is the five field-facing sections.
     const titles = await page.locator(".left > .section > .section__title").allInnerTexts();
-    expect(titles.slice(0, 4)).toEqual(["教室尺寸", "地磚", "現場校正", "固定設施"]);
+    expect(titles.slice(0, 5)).toEqual(["場地模板", "教室尺寸", "地磚", "現場校正", "固定設施"]);
     expect(titles).toContain("進階設定");
     // Engineering parameters are behind 進階設定, not on the first level.
     await expect(page.locator(".left .field", { hasText: "原點 X (m)" })).toBeHidden();
@@ -300,5 +301,66 @@ test.describe("camera framing uses the visible canvas rect", () => {
       });
     });
     expect(framed).toBe(true);
+  });
+});
+
+/**
+ * Review finding: arming 「點畫面放置」 for a zone and then starting to draw a
+ * route left the zone armed. The armed zone is checked before route points in
+ * the canvas-click chain, so the next tap dropped a zone on the plan instead of
+ * adding a point — in the middle of drawing a 動線, on a phone, in a classroom.
+ */
+test.describe("an armed zone does not hijack the next canvas tap", () => {
+  test("starting a route disarms a pending zone placement", async ({ page }) => {
+    await openWorkspace(page);
+
+    const before = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: {
+          app: { beginZonePlacement(t: string): void; newRoutePreset(t: string): void; session: { zonePlace: string | null } };
+          store: { getState(): { zones: unknown[]; routes: { points: unknown[] }[] } };
+        };
+      }).planform;
+      pf.app.beginZonePlacement("registration");
+      const armed = pf.app.session.zonePlace;
+      pf.app.newRoutePreset("entry");
+      return { armed, stillArmed: pf.app.session.zonePlace, zones: pf.store.getState().zones.length };
+    });
+    expect(before.armed).toBe("registration");
+    expect(before.stillArmed).toBeNull();
+
+    // Tap inside the visible canvas rect — x:200 sits under the desktop left
+    // rail, so the click would be intercepted rather than reaching the scene.
+    const spot = await page.evaluate(() => {
+      const r = (window as unknown as { planform: { workspace: () => WorkspaceProbe } }).planform.workspace().safeRect;
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    });
+    await page.mouse.click(spot.x, spot.y);
+    await page.waitForTimeout(200);
+    const after = await page.evaluate(() => {
+      const s = (window as unknown as {
+        planform: { store: { getState(): { zones: unknown[]; routes: { points: unknown[] }[] } } };
+      }).planform.store.getState();
+      return { zones: s.zones.length, points: Math.max(0, ...s.routes.map((r) => r.points.length)) };
+    });
+    expect(after.zones).toBe(before.zones);
+    expect(after.points).toBeGreaterThan(0);
+  });
+
+  test("Escape and workflow changes still clear it", async ({ page }) => {
+    await openWorkspace(page);
+    const cleared = await page.evaluate(() => {
+      const app = (window as unknown as {
+        planform: { app: { beginZonePlacement(t: string): void; setWorkflow(w: string): void; cancelPlacement(): void; session: { zonePlace: string | null } } };
+      }).planform.app;
+      app.beginZonePlacement("shoe");
+      app.setWorkflow("route");
+      const afterWorkflow = app.session.zonePlace;
+      app.beginZonePlacement("shoe");
+      app.cancelPlacement();
+      return { afterWorkflow, afterCancel: app.session.zonePlace };
+    });
+    expect(cleared.afterWorkflow).toBeNull();
+    expect(cleared.afterCancel).toBeNull();
   });
 });

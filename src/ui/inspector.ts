@@ -139,9 +139,10 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
       num("旋轉 (°)", obj.rotationDeg, 5, (v) => app.updateSelectedObject({ rotationDeg: v })),
       num("離地 (cm)", Math.round(metersToCm(obj.elevation)), 1, (v) => app.updateSelectedObject({ elevation: v / 100 }), 0),
     ]));
+    const surfaceLabel = obj.surface === "wall" ? "牆面" : obj.surface === "tabletop" ? "桌面" : "地面";
     root.append(el("div", { class: "readout" }, [
       el("div", { text: `X / Z：${obj.x.toFixed(3)}, ${obj.z.toFixed(3)} m` }),
-      el("div", { text: `放置面：${obj.surface}` }),
+      el("div", { text: `放置面：${surfaceLabel}` }),
     ]));
     root.append(textField("備註", obj.note ?? "", (v) => app.updateSelectedObject({ note: v })));
   }
@@ -164,7 +165,7 @@ function buildGroupInspector(root: HTMLElement, app: App, g: NonNullable<ReturnT
     num("垂直間距 (cm)", Math.round(metersToCm(g.gapZ)), 1, (v) => app.updateSelectedGroup({ gapZ: v / 100 }), 0),
   ]));
   root.append(nudgePanel(app));
-  root.append(el("div", { class: "subhead", text: "施工編號" }));
+  root.append(el("div", { class: "subhead", text: "編號" }));
   root.append(
     textField("編號前綴", g.numberPrefix, (v) => app.updateSelectedGroup({ numberPrefix: v || "A" })),
     el("div", { class: "grid2" }, [

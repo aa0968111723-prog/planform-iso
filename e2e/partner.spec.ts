@@ -54,8 +54,10 @@ for (const vp of VIEWPORTS) {
       // strips, so the usable canvas keeps the full window width.
       expect(Math.round(state.baseRect.width)).toBe(Math.round(state.canvas.width));
       expect(Math.round(state.baseRect.x)).toBe(Math.round(state.canvas.x));
-      // The plan, not the chrome, owns the screen.
-      expect(state.coverage, `coverage ${(state.coverage * 100).toFixed(1)}%`).toBeGreaterThanOrEqual(0.7);
+      // The plan, not the chrome, owns the screen. Partner mode counts its
+      // dock as real chrome now (so framing never hides the plan behind it),
+      // which honestly leaves ~2/3 of the window to the canvas.
+      expect(state.coverage, `coverage ${(state.coverage * 100).toFixed(1)}%`).toBeGreaterThanOrEqual(0.6);
     });
 
     test("shows the five role views and a one-glance briefing", async ({ page }) => {

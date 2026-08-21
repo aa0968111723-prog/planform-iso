@@ -2,6 +2,7 @@ import {
   uid,
   ZONE_DEFAULTS,
   type ArrayGroup,
+  type ArrivalProfile,
   type EventScenario,
   type MeasurementAnnotation,
   type MeasurementType,
@@ -17,7 +18,7 @@ import {
 } from "../core/model";
 import { assetDef } from "../core/assets";
 import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
-import { catalogFromProject, createDefaultScenario } from "../core/migrate";
+import { catalogFromProject, createDefaultScenario, resolveScenarioBindings } from "../core/migrate";
 import { applySnap, type SnapMode } from "../core/units";
 import {
   findParentTable,
@@ -53,8 +54,10 @@ import {
   type FieldInfo,
   type SnappedPoint,
 } from "../core/measure";
+import { applyCalibrationPath, type CalibrationPath } from "../core/calibration";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
+import { applyVenuePreset, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
 import {
   agentPositions,
   detectBottlenecks,
@@ -67,11 +70,12 @@ import {
 } from "../core/simulation";
 import {
   buildCheckinPaymentVariants,
-  compareScenarioResults,
+  compareScenarioVariants,
   frameAt,
   runDiscreteEvent,
+  runScenarioMedian,
   type PlaybackAgent,
-  type ScenarioCompareResult,
+  type ScenarioVariantCompareResult,
   type SimulationResult,
 } from "../core/eventFlow";
 import {
@@ -80,6 +84,7 @@ import {
 } from "../assets/venueCapture";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
+import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
 import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
@@ -115,7 +120,9 @@ export interface Session {
   focusRouteId: string | null;
   participants: number;
   matCandidates: LayoutCandidate[];
-  simPositions: { x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
+  /** Zone type waiting for a canvas tap ("點畫面放區域"). */
+  zonePlace: ZoneType | null;
+  simPositions: { id?: number; x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
   bottlenecks: Bottleneck[];
   simPlaying: boolean;
   /** DES playback (preferred over route-walk when a scenario exists). */
@@ -125,12 +132,13 @@ export interface Session {
   simTime: number;
   simResult: SimulationResult | null;
   simQueues: Record<string, number>;
-  simCompare: ScenarioCompareResult | null;
+  simCompare: ScenarioVariantCompareResult | null;
   simQuick: {
     participants: number;
     arrivalWindowSeconds: number;
     prepaidRatio: number;
     hasOnsitePayment: boolean;
+    arrivalProfile: ArrivalProfile;
     checkinStaff: number;
     paymentStaff: number;
   };
@@ -212,6 +220,7 @@ export class App {
     focusRouteId: null,
     participants: 30,
     matCandidates: [],
+    zonePlace: null,
     simPositions: [],
     bottlenecks: [],
     simPlaying: false,
@@ -227,6 +236,7 @@ export class App {
       arrivalWindowSeconds: 1200,
       prepaidRatio: 2 / 3,
       hasOnsitePayment: true,
+      arrivalProfile: "uniform",
       checkinStaff: 1,
       paymentStaff: 1,
     },
@@ -234,6 +244,8 @@ export class App {
 
   readonly quickAgent: QuickAgent;
   notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
+  /** UI hook: open the AI sheet with the 幫我改善 request (set by UI). */
+  onImprove: (() => void) | null = null;
 
   /** Live catalog (builtins + project custom extras). */
   getCatalog(): AssetCatalog {
@@ -257,12 +269,17 @@ export class App {
   private simState: SimState | null = null;
   private simRaf: number | null = null;
   private simLast = 0;
+  private lastPanelSync = 0;
+  private partnerReturnView: ViewName | null = null;
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, store: Store) {
     this.store = store;
     this.scene = new SceneManager(canvas);
+    // Light by default; a stored preference wins. Applied before the first
+    // paint so the canvas and the panels never disagree for a frame.
+    this.applyTheme(loadTheme(), false);
     this.quickAgent = new QuickAgent(store, new MockProvider());
     this.store.subscribe(() => {
       this.syncScene();
@@ -355,6 +372,7 @@ export class App {
   redo(): void { this.store.redo(); }
 
   setWorkflow(w: Workflow): void {
+    if (w !== "site" && this.session.mode === "calibrate") this.cancelCalibration();
     this.session.workflow = w;
     if (w !== "route") { this.session.activeRouteId = null; if (this.session.mode === "route") this.session.mode = "select"; }
     if (w === "check") this.runValidation();
@@ -386,8 +404,20 @@ export class App {
     this.notifyUi();
   }
 
+  /**
+   * Enter a drawing / measuring mode, disarming any pending zone tap first.
+   * The armed zone is checked before route points in the canvas-click chain,
+   * so arming 「點畫面放區域」 and then starting a route made the next tap drop
+   * a zone instead of adding a route point.
+   */
+  private enterMode(mode: Mode): void {
+    this.session.zonePlace = null;
+    this.session.mode = mode;
+  }
+
   cancelPlacement(): void {
     if (this.session.mode === "place") this.session.mode = "select";
+    this.session.zonePlace = null;
     this.session.placingKind = null;
     this.session.placingAssetId = null;
     this.session.ghost = null;
@@ -476,6 +506,19 @@ export class App {
       assetId: entry.id,
       serviceRole: entry.serviceRole,
     };
+    if (entry.placementType === "floor") {
+      // A tap near the edge must not leave furniture sticking through a wall
+      // (Grok placed a desk at 距牆 −15 cm) — clamp the footprint into the
+      // room the tap landed in (classroom by default).
+      const rooms = [this.state.classroom, this.state.corridor];
+      const room = rooms.find((r) => g.x >= r.x && g.x <= r.x + r.length && g.z >= r.z && g.z <= r.z + r.width)
+        ?? this.state.classroom;
+      const rad = (g.rotationDeg * Math.PI) / 180;
+      const hx = (Math.abs(Math.cos(rad)) * g.dims.width + Math.abs(Math.sin(rad)) * g.dims.depth) / 2;
+      const hz = (Math.abs(Math.sin(rad)) * g.dims.width + Math.abs(Math.cos(rad)) * g.dims.depth) / 2;
+      obj.x = Math.min(Math.max(g.x, room.x + hx), room.x + Math.max(hx, room.length - hx));
+      obj.z = Math.min(Math.max(g.z, room.z + hz), room.z + Math.max(hz, room.width - hz));
+    }
     if (entry.placementType === "wall") {
       const snap = nearestWallSnap(g.x, g.z, [this.state.classroom, this.state.corridor], g.dims.width);
       if (snap) obj.wallAnchor = { areaId: snap.areaId, edge: snap.edge, offset: snap.offset };
@@ -492,11 +535,83 @@ export class App {
   // --- zones -------------------------------------------------------------
 
   addZone(type: ZoneType): void {
-    const d = ZONE_DEFAULTS[type];
     const c = this.centerOfClassroom();
-    const zone: Zone = { id: uid("zone"), type, name: d.label, x: c.x, z: c.z, width: d.width, depth: d.depth, color: d.color, locked: false, hidden: false, icon: d.icon, capacity: null };
+    this.addZoneAt(type, c.x, c.z);
+  }
+
+  addZoneAt(type: ZoneType, x: number, z: number): void {
+    const d = ZONE_DEFAULTS[type];
+    const zone: Zone = { id: uid("zone"), type, name: d.label, x, z, width: d.width, depth: d.depth, color: d.color, locked: false, hidden: false, icon: d.icon, capacity: null };
     this.store.mutate((p) => p.zones.push(zone));
     this.setSelection([zone.id]);
+    this.toast(`已建立「${d.label}」，拖曳可移動位置`, true);
+  }
+
+  /** Arm one canvas tap to drop a zone of the given type where the user taps. */
+  beginZonePlacement(type: ZoneType): void {
+    this.session.zonePlace = type;
+    this.notifyUi();
+    this.toast(`點畫面放「${ZONE_DEFAULTS[type].label}」`);
+  }
+
+  // --- venue presets & quick start ---------------------------------------
+
+  applyVenuePresetById(id: string): boolean {
+    const preset = venuePresetById(id);
+    if (!preset) return false;
+    this.store.mutate((p) => applyVenuePreset(p, preset, { withFixtures: true }));
+    this.recenterView();
+    this.toast(`已套用「${preset.name}」（可復原）`, true);
+    return true;
+  }
+
+  saveCurrentVenuePreset(name: string): boolean {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      this.toast("請先輸入場地名稱");
+      return false;
+    }
+    const preset = venuePresetFromProject(this.state, trimmed);
+    const ok = saveUserVenuePreset(preset);
+    this.toast(ok ? `已把目前場地存成「${trimmed}」` : "儲存場地失敗（儲存空間可能已滿）");
+    return ok;
+  }
+
+  /** Load a Quick Start generated project and land the user in 場佈. */
+  startFromQuickStart(project: Project): void {
+    // The store keeps an undo checkpoint when replacing a non-empty plan; the
+    // wizard still confirms so the replacement is explicit.
+    this.store.loadProject(project);
+    const scenario = project.activeScenarioId
+      ? project.scenarios.find((s) => s.id === project.activeScenarioId)
+      : project.scenarios[0];
+    if (scenario) {
+      const prepaid = scenario.profiles.find((p) => p.id === "prepaid")?.ratio ?? 1;
+      const staffOf = (type: string) =>
+        scenario.stations.find((st) => st.type === type)?.staffCount;
+      this.session.simQuick = {
+        ...this.session.simQuick,
+        participants: scenario.participantCount,
+        arrivalWindowSeconds: scenario.arrivalWindowSeconds,
+        prepaidRatio: prepaid,
+        hasOnsitePayment: scenario.profiles.some((p) => p.id === "pay-on-site" && p.ratio > 0),
+        // The example ships a 2-person check-in desk — the quick panel must
+        // not quietly simulate a 1-person understaffed version of it.
+        checkinStaff: staffOf("checkin") ?? this.session.simQuick.checkinStaff,
+        paymentStaff: staffOf("payment") ?? this.session.simQuick.paymentStaff,
+      };
+      // One head count everywhere: the mat arranger and the AI read the same
+      // number the event was created with.
+      this.session.participants = scenario.participantCount;
+    }
+    this.setWorkflow("layout");
+    // Two flat purple slabs in a shallow isometric view read as nothing on a
+    // phone — compact devices open the plan top-down.
+    if (typeof window !== "undefined" && window.matchMedia?.("(max-width: 600px)").matches) {
+      this.setView("top");
+    }
+    this.recenterView();
+    this.toast("場佈起點已建立，直接拖曳調整即可");
   }
 
   // --- array groups ------------------------------------------------------
@@ -654,13 +769,13 @@ export class App {
     const colors = ["#f97316", "#22d3ee", "#a78bfa", "#34d399", "#f43f5e"];
     const route: Route = { id: uid("route"), name: `動線 ${this.state.routes.length + 1}`, color: colors[this.state.routes.length % colors.length], points: [], visible: true, type: "custom" };
     this.store.mutate((p) => p.routes.push(route));
-    this.session.mode = "route";
+    this.enterMode("route");
     this.session.activeRouteId = route.id;
     this.setSelection([route.id]);
     this.notifyUi();
   }
   finishRoute(): void { this.session.activeRouteId = null; this.session.mode = "select"; this.notifyUi(); }
-  editRoute(id: string): void { this.session.mode = "route"; this.session.activeRouteId = id; this.setSelection([id]); this.notifyUi(); }
+  editRoute(id: string): void { this.enterMode("route"); this.session.activeRouteId = id; this.setSelection([id]); this.notifyUi(); }
   updateRoute(id: string, patch: Partial<Route>): void { this.store.mutate((p) => { const r = p.routes.find((x) => x.id === id); if (r) Object.assign(r, patch); }); }
 
   // --- measure -----------------------------------------------------------
@@ -668,7 +783,7 @@ export class App {
   setMeasureType(t: MeasurementType): void { this.session.measureType = t; this.notifyUi(); }
   startMeasure(type: MeasurementType = "free-distance"): void {
     this.session.measureType = type;
-    this.session.mode = "measure";
+    this.enterMode("measure");
     this.session.measure = { a: null, b: null };
     this.notifyUi();
   }
@@ -696,19 +811,32 @@ export class App {
 
   // --- calibration wizard ------------------------------------------------
 
-  startCalibration(): void { this.session.mode = "calibrate"; this.session.calibrate = { a: null, b: null }; this.notifyUi(); }
+  startCalibration(): void { this.enterMode("calibrate"); this.session.calibrate = { a: null, b: null }; this.notifyUi(); }
   cancelCalibration(): void { this.session.mode = "select"; this.session.calibrate = null; this.render(); }
   getCalibrationDistance(): number | null {
     const c = this.session.calibrate;
     if (!c || !c.a || !c.b) return null;
     return Math.hypot(c.b.x - c.a.x, c.b.z - c.a.z);
   }
-  applyCalibration(action: "record" | "tile" | "classroom-length", actualMeters: number, note = ""): void {
+  applyCalibration(action: CalibrationPath, actualMeters: number, note = ""): void {
     if (!actualMeters || actualMeters <= 0) return;
-    if (action === "tile") this.applyCalibrationToTile(actualMeters);
-    else if (action === "classroom-length") this.updateArea("classroom", { length: actualMeters });
-    else this.updateCalibration({ referenceLength: actualMeters, note });
-    this.toast(action === "record" ? "已記錄校正結果" : "已套用校正（可復原）", true);
+    const measured = action === "classroom-length" ? this.getCalibrationDistance() ?? undefined : undefined;
+    if (action === "classroom-length" && (!measured || measured <= 0)) {
+      this.toast("請先在畫布點兩個已知距離的端點，再套用到教室長");
+      return;
+    }
+    this.store.mutate((p) => applyCalibrationPath(p, action, actualMeters, measured, note));
+    // Concrete numbers in the toast — a 60→58 cm tile change is invisible on
+    // screen, so say exactly what the model now believes.
+    const cm = Math.round(actualMeters * 100);
+    const after = this.state;
+    const msg =
+      action === "tile" ? `地磚已設為 ${cm}×${cm} cm（可復原）`
+      : action === "door" ? `門寬已設為 ${cm} cm（可復原）`
+      : action === "classroom-length"
+        ? `教室已修正為 ${after.classroom.length.toFixed(1)}×${after.classroom.width.toFixed(1)} m（可復原）`
+        : "已記錄量測（尚未套用到圖上）";
+    this.toast(msg, action !== "record");
     this.cancelCalibration();
   }
 
@@ -777,6 +905,7 @@ export class App {
    * editor state is left exactly as it was so leaving returns you to your work.
    */
   enterPartnerMode(role: PartnerRole = "all"): void {
+    this.partnerReturnView = this.state.view;
     this.session.partner = { role, timeline: [], suggestion: null, busy: false };
     this.session.selection = new Set();
     this.cancelPlacement();
@@ -791,7 +920,10 @@ export class App {
 
   exitPartnerMode(): void {
     if (this.session.partner?.suggestion) this.dismissPartnerSuggestion();
+    const restoreView = this.partnerReturnView;
+    this.partnerReturnView = null;
     this.session.partner = null;
+    if (restoreView) this.setView(restoreView);
     this.render();
   }
 
@@ -841,9 +973,10 @@ export class App {
       project.scenarios?.[0] ||
       null;
     const q = this.session.simQuick;
-    const scenario: EventScenario = existing
-      ? { ...existing, participantCount: q.participants, arrivalWindowSeconds: q.arrivalWindowSeconds }
+    const baseScenario: EventScenario = existing
+      ? { ...existing, participantCount: q.participants, arrivalWindowSeconds: q.arrivalWindowSeconds, arrivalProfile: q.arrivalProfile }
       : createDefaultScenario(project, { participantCount: q.participants });
+    const scenario = resolveScenarioBindings(project, baseScenario);
     return runDiscreteEvent(scenario, { sampleDt: 2 });
   }
 
@@ -907,6 +1040,19 @@ export class App {
     this.render();
   }
   setSimplify(on: boolean): void { this.session.simplify = on; this.render(); }
+
+  /** Current look: "light" (default) or "dark". */
+  get theme(): ThemeName { return this.scene.getTheme(); }
+
+  toggleTheme(): void { this.applyTheme(otherTheme(this.theme), true); }
+
+  private applyTheme(theme: ThemeName, persist: boolean): void {
+    applyThemeToDocument(theme);
+    this.scene.setTheme(theme);
+    if (persist) saveTheme(theme);
+    this.render();
+  }
+
   setRouteFocus(id: string | null): void {
     this.session.focusRouteId = id;
     if (id) {
@@ -930,7 +1076,7 @@ export class App {
     const pre = routePreset(type);
     const route: Route = { id: uid("route"), name: pre.label, color: pre.color, points: [], visible: true, type };
     this.store.mutate((p) => p.routes.push(route));
-    this.session.mode = "route";
+    this.enterMode("route");
     this.session.activeRouteId = route.id;
     this.setSelection([route.id]);
     this.notifyUi();
@@ -938,7 +1084,7 @@ export class App {
 
   // --- smart layout (participant-driven mats) ---------------------------
 
-  computeMatCandidates(participants: number, opts?: { centralAisleWidth?: number; matWidth?: number; matDepth?: number; gap?: number }): LayoutCandidate[] {
+  computeMatCandidates(participants: number, opts?: { centralAisleWidth?: number; matWidth?: number; matDepth?: number; gap?: number; mode?: "individual" | "field" }): LayoutCandidate[] {
     this.session.participants = participants;
     const vs = this.state.validationSettings;
     const zone = this.getSelectedZone();
@@ -957,6 +1103,7 @@ export class App {
       gap: opts?.gap ?? 0.1,
       aisleWidth: opts?.centralAisleWidth ?? Math.max(vs.minAisleWidth, 0.9),
       bounds,
+      mode: opts?.mode ?? (this.state.venuePresetId === "venue:tku-classroom" || this.state.venuePresetId === "venue:tku-e310" ? "field" : "individual"),
     });
     this.notifyUi();
     return this.session.matCandidates;
@@ -966,7 +1113,10 @@ export class App {
     const cand = this.session.matCandidates.find((c) => c.id === id);
     if (!cand) return;
     const newIds: string[] = [];
+    let replaced = 0;
     this.store.mutate((p) => {
+      replaced = p.groups.filter((g) => g.sourceKind === "mat").length;
+      p.groups = p.groups.filter((g) => g.sourceKind !== "mat");
       cand.groups.forEach((g, i) => {
         const gid = uid("grp");
         newIds.push(gid);
@@ -979,7 +1129,12 @@ export class App {
       });
     });
     this.session.matCandidates = [];
-    this.toast(`已套用 ${cand.count} 張地墊`, true);
+    this.toast(
+      replaced
+        ? `已取代原有 ${replaced} 組地墊，可按「復原」回到上一版`
+        : (cand.mode === "field" ? `已套用巧拼座區（可坐 ${cand.count} 人）` : `已套用 ${cand.count} 張地墊`),
+      true,
+    );
     if (newIds.length) this.setSelection(newIds);
   }
 
@@ -1033,13 +1188,14 @@ export class App {
                 { id: "pay-on-site" as const, ratio: onsite, branch: fullBranch },
               ]
             : [{ id: "prepaid" as const, ratio: 1, branch: prepaidBranch }];
-          return {
+          return resolveScenarioBindings(p, {
             ...s,
             participantCount: q.participants,
             arrivalWindowSeconds: q.arrivalWindowSeconds,
+            arrivalProfile: q.arrivalProfile,
             stations,
             profiles,
-          };
+          });
         });
       });
       return this.activeScenario()!;
@@ -1049,9 +1205,10 @@ export class App {
       participantCount: q.participants,
       name: "進場流程",
     });
-    scn = {
+    scn = resolveScenarioBindings(this.state, {
       ...scn,
       arrivalWindowSeconds: q.arrivalWindowSeconds,
+      arrivalProfile: q.arrivalProfile,
       stations: scn.stations.map((st) => {
         if (st.type === "checkin") {
           return { ...st, staffCount: q.checkinStaff, parallelServers: q.checkinStaff };
@@ -1065,7 +1222,7 @@ export class App {
         }
         return st;
       }),
-    };
+    });
     const prepaid = Math.max(0, Math.min(1, q.prepaidRatio));
     const paymentId = scn.stations.find((s) => s.type === "payment")?.id;
     const prepaidBranch = scn.stations.filter((s) => s.type !== "payment").map((s) => s.id);
@@ -1098,14 +1255,14 @@ export class App {
     return result;
   }
 
-  compareCheckinPayment(): ScenarioCompareResult {
+  compareCheckinPayment(): ScenarioVariantCompareResult {
     const scn = this.ensureEventScenario(false);
-    const { combined, separated } = buildCheckinPaymentVariants(scn);
-    const a = runDiscreteEvent(combined, { sampleDt: 2 });
-    const b = runDiscreteEvent(separated, { sampleDt: 2 });
-    const cmp = compareScenarioResults(a, b);
+    const { combined, separated, corridor } = buildCheckinPaymentVariants(scn);
+    const a = runScenarioMedian(combined, { sampleDt: 2 });
+    const b = runScenarioMedian(separated, { sampleDt: 2 });
+    const c = runScenarioMedian(corridor ?? separated, { sampleDt: 2 });
+    const cmp = compareScenarioVariants(a, b, c);
     this.session.simCompare = cmp;
-    this.session.simResult = cmp.winner === "b" ? b : a;
     this.notifyUi();
     return cmp;
   }
@@ -1121,7 +1278,29 @@ export class App {
   }
 
   startEventPlayback(): void {
+    // ▶ 模擬 shows the numbers immediately; the animated walk-through is the
+    // separate opt-in ▶ 播放走位 (replaySimulation).
     const result = this.runEventSimulation();
+    this.stopSimLoopOnly();
+    this.session.simMode = "event-flow";
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simTime = result.finishTimeSeconds;
+    this.session.simPositions = [];
+    this.session.bottlenecks = [];
+    this.notifyUi();
+  }
+
+  /** Replay the already computed frames without running the engine again. */
+  replaySimulation(): void {
+    const result = this.session.simResult;
+    if (!result) return;
+    // Whole-event replay in about 45 s of wall time regardless of length.
+    this.session.simSpeed = Math.max(1, result.finishTimeSeconds / 45);
+    this.playEventResult(result);
+  }
+
+  private playEventResult(result: SimulationResult): void {
     this.stopSimLoopOnly();
     this.session.simMode = "event-flow";
     this.focusSimulation();
@@ -1165,7 +1344,9 @@ export class App {
   }
 
   setSimSpeed(speed: number): void {
-    this.session.simSpeed = Math.max(0.5, Math.min(10, speed));
+    // Replays compress an hour-long event into tens of seconds, so the cap is
+    // generous; the floor still guards against a frozen-looking playback.
+    this.session.simSpeed = Math.max(0.5, Math.min(600, speed));
     this.notifyUi();
   }
 
@@ -1198,11 +1379,16 @@ export class App {
   private applyDesFrame(t: number, result: SimulationResult): void {
     const frame = frameAt(result, t);
     if (!frame) return;
-    this.session.simTime = frame.t;
+    // Track the CONTINUOUS clock, not the sampled frame time — assigning
+    // frame.t floored progress back to the sample grid, which pinned the
+    // playback at 0 s forever (dt per tick < sampleDt).
+    this.session.simTime = t;
     this.session.simQueues = frame.queues;
     this.session.simPositions = frame.agents
       .filter((a) => a.state !== "pending" && a.state !== "done")
-      .map((a) => ({ x: a.x, z: a.z, state: a.state }));
+      // id travels with the position so the crowd can keep each figure facing
+      // the way it is walking between frames.
+      .map((a) => ({ id: a.id, x: a.x, z: a.z, state: a.state }));
     this.session.bottlenecks = result.stations
       .filter((s) => (frame.queues[s.stationId] ?? 0) >= 3)
       .map((s) => {
@@ -1212,25 +1398,45 @@ export class App {
           z: st?.z ?? 0,
           count: frame.queues[s.stationId] ?? s.maxQueue,
         };
-      });
+      })
+      .concat(result.spatialBottlenecks.map((bottleneck) => ({
+        x: bottleneck.x,
+        z: bottleneck.z,
+        count: bottleneck.count,
+        name: bottleneck.name,
+        kind: bottleneck.kind,
+      })));
     this.syncScene();
   }
 
   private simLoop(): void {
     if (!this.session.simPlaying || this.session.simPaused) return;
     const now = performance.now();
-    const dt = Math.min(0.1, ((now - this.simLast) / 1000) * this.session.simSpeed);
+    // Cap a single tick at ~a quarter second of wall time so hitches don't
+    // teleport agents, while still letting high replay speeds progress.
+    const dt = Math.min(Math.max(0.1, 0.25 * this.session.simSpeed), ((now - this.simLast) / 1000) * this.session.simSpeed);
     this.simLast = now;
 
     if (this.session.simMode === "event-flow" && this.session.simResult) {
       const result = this.session.simResult;
       const nextT = this.session.simTime + dt;
       if (nextT >= result.finishTimeSeconds) {
-        // Loop
-        this.session.simTime = 0;
-        this.applyDesFrame(0, result);
-      } else {
-        this.applyDesFrame(nextT, result);
+        // Replay finished — hand the screen back to the results readout.
+        this.stopSimLoopOnly();
+        this.session.simPlaying = false;
+        this.session.simPaused = false;
+        this.session.simTime = result.finishTimeSeconds;
+        this.session.simPositions = [];
+        this.session.bottlenecks = [];
+        this.notifyUi();
+        return;
+      }
+      this.applyDesFrame(nextT, result);
+      // The scene animates every frame; the side panel only needs a few
+      // updates a second (it was frozen at 0 s / 0 人 before this).
+      if (now - this.lastPanelSync > 200) {
+        this.lastPanelSync = now;
+        this.notifyUi();
       }
       this.simRaf = requestAnimationFrame(() => this.simLoop());
       return;
@@ -1266,7 +1472,11 @@ export class App {
   updateCalibration(patch: Partial<Project["calibration"]>): void { this.store.mutate((p) => Object.assign(p.calibration, patch)); }
 
   applyCalibrationToTile(actualMeters: number): void {
-    this.store.mutate((p) => { p.tile.width = actualMeters; p.tile.depth = actualMeters; p.calibration.referenceLength = actualMeters; });
+    this.store.mutate((p) => applyCalibrationPath(p, "tile", actualMeters));
+  }
+
+  applyCalibrationToDoor(actualMeters: number): void {
+    this.store.mutate((p) => applyCalibrationPath(p, "door", actualMeters));
   }
 
   // --- validation --------------------------------------------------------
@@ -1350,7 +1560,14 @@ export class App {
     canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
     window.addEventListener("pointerup", (e) => this.onPointerUp(e));
-    window.addEventListener("pointercancel", (e) => this.onPointerUp(e));
+    // A cancelled pointer (system gesture, palm rejection, tab switch) must
+    // roll the drag back, not commit a half-finished move.
+    window.addEventListener("pointercancel", (e) => {
+      this.pointers.delete(e.pointerId);
+      this.abortDrag();
+      this.scene.setControlsEnabled(true);
+      this.render();
+    });
     canvas.addEventListener("contextmenu", (e) => { if (this.session.mode === "place") { e.preventDefault(); this.cancelPlacement(); } });
   }
 
@@ -1391,6 +1608,14 @@ export class App {
       if (!c.a || (c.a && c.b)) { c.a = { x: snapped.x, z: snapped.z }; c.b = null; } else { c.b = { x: snapped.x, z: snapped.z }; }
       this.session.calibrate = c;
       this.render();
+      return;
+    }
+
+    if (this.session.zonePlace && ground) {
+      const type = this.session.zonePlace;
+      this.session.zonePlace = null;
+      const snapped = applySnap(ground.x, ground.z, this.state.tile, this.session.snap);
+      this.addZoneAt(type, snapped.x, snapped.z);
       return;
     }
 

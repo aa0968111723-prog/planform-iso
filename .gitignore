@@ -7,3 +7,16 @@ dev-dist/
 docs/FIELD_PRECISION_MOBILE_VALIDATION_PLAN.md
 test-results/
 playwright-report/
+baseline_gates.log
+_audit_grok.md
+_smoke/
+_review_grok.md
+test-results/
+
+# agent working dirs (raw adversarial-test artifacts stay local)
+_grok_round*/
+_lead/
+_lead_wpc/
+
+# local-only reference audit output (may contain photo paths with faces)
+docs/field-research/*.local.md

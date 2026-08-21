@@ -12,6 +12,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  MOUSE,
   Object3D,
   OrthographicCamera,
   Plane,
@@ -20,6 +21,7 @@ import {
   Scene,
   Sprite,
   SpriteMaterial,
+  TOUCH,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -28,10 +30,12 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { AssetCatalog } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
 import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
-import { groupMembers } from "../core/arrays";
+import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
+import { SimCrowd } from "./crowd";
+import { DEFAULT_THEME, EXPORT_PALETTE, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
@@ -66,8 +70,8 @@ interface SessionView {
   showLabels: boolean;
   focusRouteId?: string | null;
   simplify?: boolean;
-  simPositions?: { x: number; z: number; routeId?: string; state?: string }[];
-  bottlenecks?: { x: number; z: number; count: number }[];
+  simPositions?: { id?: number; x: number; z: number; routeId?: string; state?: string }[];
+  bottlenecks?: { x: number; z: number; count: number; name?: string; kind?: "door" | "corridor" | "route" }[];
   simQueues?: Record<string, number>;
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
   /** Non-null in Partner Mode: emphasis per entity plus red/orange/green marks. */
@@ -125,11 +129,16 @@ export class SceneManager {
   private ghostGroup = new Group();
   private measureGroup = new Group(); // persistent dimension lines
   private overlayGroup = new Group(); // selection + live measure/calibrate
+  /** Simulation participants — persistent instanced figures, not per-frame meshes. */
+  private crowd = new SimCrowd();
+  private theme: ThemeName = DEFAULT_THEME;
+  private palette: ScenePalette = scenePalette(DEFAULT_THEME);
   private partnerGroup = new Group(); // partner-mode marks (never in editor mode)
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
   private stationLabels = new Map<string, TextLabel>();
-  private arrayNodes = new Map<string, { mesh: InstancedMesh; sig: string }>();
+  private bottleneckLabels = new Map<string, TextLabel>();
+  private arrayNodes = new Map<string, { mesh: InstancedMesh; overlay: Group; sig: string }>();
   private zoneNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private routeNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
   private measureNodes = new Map<string, { group: Group; label: TextLabel; sig: string }>();
@@ -148,10 +157,11 @@ export class SceneManager {
     applyRendererLook(this.renderer);
 
     this.scene = new Scene();
-    this.scene.background = new Color(0x0b1120);
+    this.scene.background = new Color(this.palette.background);
     this.scene.add(
       this.floorGroup, this.tileGroup, this.zoneGroup, this.objectGroup,
       this.arrayGroupRoot, this.routeGroup, this.ghostGroup, this.measureGroup, this.overlayGroup,
+      this.crowd.group,
       this.partnerGroup,
     );
 
@@ -191,6 +201,16 @@ export class SceneManager {
       case "front": this.camera.position.set(t.x, 4, t.z + d); this.controls.enableRotate = true; break;
       case "left": this.camera.position.set(t.x - d, 4, t.z); this.controls.enableRotate = true; break;
       case "right": this.camera.position.set(t.x + d, 4, t.z); this.controls.enableRotate = true; break;
+    }
+    // With rotate disabled (俯視) a one-finger drag on empty canvas would map
+    // to the dead ROTATE gesture — remap it to PAN so the plan can be moved
+    // with one finger. Rotating views keep the Three.js defaults.
+    if (this.controls.enableRotate) {
+      this.controls.touches.ONE = TOUCH.ROTATE;
+      this.controls.mouseButtons.LEFT = MOUSE.ROTATE;
+    } else {
+      this.controls.touches.ONE = TOUCH.PAN;
+      this.controls.mouseButtons.LEFT = MOUSE.PAN;
     }
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(t);
@@ -404,6 +424,29 @@ export class SceneManager {
     return { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: maxX - minX, h: maxZ - minZ };
   }
 
+  /** Current visual theme. Light is the default; dark is opt-in. */
+  getTheme(): ThemeName {
+    return this.theme;
+  }
+
+  /**
+   * Switch the canvas between the paper-like light look and the dark look.
+   * Floors, walls and area labels are baked into meshes, so the area cache is
+   * invalidated to force a rebuild on the next sync.
+   */
+  setTheme(theme: ThemeName): void {
+    if (theme === this.theme) return;
+    this.theme = theme;
+    this.applyPalette(scenePalette(theme));
+  }
+
+  private applyPalette(palette: ScenePalette): void {
+    this.palette = palette;
+    this.scene.background = new Color(palette.background);
+    // Areas, walls and labels carry palette colours in their materials.
+    this.lastAreaSig = "";
+  }
+
   private syncAreasAndTiles(project: Project, simplify: boolean): void {
     const { tile } = project;
     this.floorGroup.visible = this.layersState.areas;
@@ -415,15 +458,49 @@ export class SceneManager {
     clearGroup(this.floorGroup);
     clearGroup(this.tileGroup);
     for (const area of [project.classroom, project.corridor]) {
+      const areaGroup = new Group();
       const floor = new Mesh(
         new PlaneGeometry(area.length, area.width),
-        new MeshStandardMaterial({ color: area.id === "classroom" ? 0x243040 : 0x1c2734, roughness: 1, side: DoubleSide }),
+        new MeshStandardMaterial({
+          color: area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor,
+          roughness: 1,
+          side: DoubleSide,
+        }),
       );
       floor.rotation.x = -Math.PI / 2;
       floor.position.set(area.x + area.length / 2, 0, area.z + area.width / 2);
-      this.floorGroup.add(floor);
+      areaGroup.add(floor);
+      areaGroup.add(this.buildAreaWalls(area));
+      const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
+      label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
+      label.sprite.scale.set(1.8, 0.42, 1);
+      label.sprite.position.set(area.x + area.length / 2, 0.14, area.z + area.width / 2);
+      areaGroup.add(label.sprite);
+      this.floorGroup.add(areaGroup);
     }
     this.tileGroup.add(this.buildTileGrid(project));
+  }
+
+  /** Raised, thick wall rails make an empty classroom and its corridor legible. */
+  private buildAreaWalls(area: Project["classroom"]): Group {
+    const walls = new Group();
+    const material = new MeshBasicMaterial({
+      color: area.id === "classroom" ? this.palette.wallClassroom : this.palette.wallCorridor,
+    });
+    const thickness = 0.1;
+    const height = 0.12;
+    const rails = [
+      [area.length, thickness, area.x + area.length / 2, area.z],
+      [area.length, thickness, area.x + area.length / 2, area.z + area.width],
+      [thickness, area.width, area.x, area.z + area.width / 2],
+      [thickness, area.width, area.x + area.length, area.z + area.width / 2],
+    ] as const;
+    for (const [width, depth, x, z] of rails) {
+      const wall = new Mesh(new BoxGeometry(width, height, depth), material);
+      wall.position.set(x, height / 2, z);
+      walls.add(wall);
+    }
+    return walls;
   }
 
   private buildTileGrid(project: Project): Object3D {
@@ -512,12 +589,24 @@ export class SceneManager {
     for (const g of project.groups) {
       seen.add(g.id);
       const members = groupMembers(g);
-      const sig = `${g.sourceKind}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
+      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
       let entry = this.arrayNodes.get(g.id);
       if (!entry || entry.sig !== sig) {
-        if (entry) { this.arrayGroupRoot.remove(entry.mesh); entry.mesh.geometry.dispose(); }
+        if (entry) {
+          this.arrayGroupRoot.remove(entry.mesh);
+          this.arrayGroupRoot.remove(entry.overlay);
+          entry.mesh.geometry.dispose();
+          disposeObject(entry.overlay);
+        }
         const geom = buildMergedGeometry(g.sourceKind, { width: g.itemWidth, depth: g.itemDepth, height: g.itemHeight });
         const material = assetInstanceMaterial(g.sourceKind).clone();
+        if (isFieldMatGroup(g)) {
+          // The individual meshes remain pickable, but the field itself reads
+          // as a plan rather than a single purple slab.
+          material.transparent = true;
+          material.opacity = 0.08;
+          material.depthWrite = false;
+        }
         const mesh = new InstancedMesh(geom, material, Math.max(members.length, 1));
         mesh.count = members.length;
         mesh.userData = { type: "group", id: g.id };
@@ -528,24 +617,63 @@ export class SceneManager {
           mesh.setMatrixAt(i, dummy.matrix);
         }
         mesh.instanceMatrix.needsUpdate = true;
+        const overlay = this.buildArrayOverlay(g, members);
         this.arrayGroupRoot.add(mesh);
-        entry = { mesh, sig };
+        this.arrayGroupRoot.add(overlay);
+        entry = { mesh, overlay, sig };
         this.arrayNodes.set(g.id, entry);
       }
       entry.mesh.visible = !g.hidden;
+      entry.overlay.visible = !g.hidden;
     }
     for (const [id, entry] of this.arrayNodes) {
       if (!seen.has(id)) {
-        this.arrayGroupRoot.remove(entry.mesh); entry.mesh.geometry.dispose();
+        this.arrayGroupRoot.remove(entry.mesh);
+        this.arrayGroupRoot.remove(entry.overlay);
+        entry.mesh.geometry.dispose();
+        disposeObject(entry.overlay);
         this.arrayNodes.delete(id);
       }
     }
+  }
+
+  /** Editor presentation for square mat fields: a 60 cm grid plus one clear label. */
+  private buildArrayOverlay(g: Project["groups"][number], members: ReturnType<typeof groupMembers>): Group {
+    const overlay = new Group();
+    if (!isFieldMatGroup(g) || !members.length) return overlay;
+
+    const positions: number[] = [];
+    for (const member of members) {
+      const r = member.rotationDeg * D2R;
+      const cos = Math.cos(r), sin = Math.sin(r);
+      const hw = g.itemWidth / 2, hd = g.itemDepth / 2;
+      const corners = [
+        [-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd],
+      ].map(([x, z]) => ({ x: member.x + x * cos - z * sin, z: member.z + x * sin + z * cos }));
+      for (let i = 0; i < corners.length; i++) {
+        const a = corners[i], b = corners[(i + 1) % corners.length];
+        positions.push(a.x, 0.12, a.z, b.x, 0.12, b.z);
+      }
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    overlay.add(new LineSegments(geo, new LineBasicMaterial({ color: 0xf5d0fe, transparent: true, opacity: 0.95 })));
+
+    const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
+    const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
+    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, "#f8fafc");
+    label.sprite.scale.set(3.25, 0.52, 1);
+    const center = groupCenter(g);
+    label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
+    overlay.add(label.sprite);
+    return overlay;
   }
 
   private syncZones(project: Project): void {
     this.zoneGroup.visible = this.layersState.zones;
     const partner = this.partner;
     const seen = new Set<string>();
+    const placedLabels: { x: number; z: number; width: number; depth: number; y: number }[] = [];
     for (const zone of project.zones) {
       seen.add(zone.id);
       // Partner labels are drawn at a higher texture resolution, so the mode
@@ -567,6 +695,14 @@ export class SceneManager {
       fillMat.color.set(zone.color);
       edgeMat.color.set(zone.color);
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
+      let labelY = partner ? 0.8 : 0.5;
+      while (placedLabels.some((other) =>
+        Math.abs(zone.x - other.x) < (zone.width + other.width) / 2 &&
+        Math.abs(zone.z - other.z) < (zone.depth + other.depth) / 2 &&
+        Math.abs(labelY - other.y) < 0.5
+      )) labelY += 0.55;
+      entry.label.sprite.position.y = labelY;
+      placedLabels.push({ x: zone.x, z: zone.z, width: zone.width, depth: zone.depth, y: labelY });
       if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the
         // rest stay as faint context so the room still makes sense.
@@ -695,7 +831,7 @@ export class SceneManager {
         const numLabel = partner
           ? new TextLabel({ width: 160, height: 160, fontSize: 108 })
           : new TextLabel();
-        numLabel.set(partner ? circledNumber(index + 1) : String(index + 1), partner ? "#f8fafc" : "#0b1120");
+        numLabel.set(partner ? circledNumber(index + 1) : String(index + 1), partner ? "#f8fafc" : this.palette.stepNumber);
         numLabel.sprite.scale.set(partner ? 0.9 : 0.5, partner ? 0.9 : 0.5, 1);
         numLabel.sprite.position.set(p.x, y + (partner ? 0.75 : 0.5), p.z);
         group.add(numLabel.sprite);
@@ -796,7 +932,12 @@ export class SceneManager {
       const b = this.combinedBounds(project);
       const plane = new Mesh(
         new PlaneGeometry(b.w + 4, b.h + 4),
-        new MeshBasicMaterial({ color: 0x0b1120, transparent: true, opacity: 0.62, depthWrite: false }),
+        new MeshBasicMaterial({
+          color: this.palette.focusVeil,
+          transparent: true,
+          opacity: this.palette.focusVeilOpacity,
+          depthWrite: false,
+        }),
       );
       plane.rotation.x = -Math.PI / 2;
       plane.position.set(b.cx, 3, b.cz);
@@ -826,21 +967,34 @@ export class SceneManager {
         label.sprite.position.set(st.x, 1.1, st.z);
       }
     }
-    if (session.simPositions && session.simPositions.length) {
-      for (const p of session.simPositions) {
-        const col =
-          p.state === "queued" ? 0xfbbf24 : p.state === "serving" ? 0x38bdf8 : 0xfef08a;
-        const dot = new Mesh(new BoxGeometry(0.28, 0.28, 0.28), new MeshBasicMaterial({ color: col }));
-        dot.position.set(p.x, 0.5, p.z);
-        this.overlayGroup.add(dot);
-      }
-    }
+    // People are drawn by SimCrowd in its own persistent group — instanced and
+    // reused, so playback does not allocate a mesh per person per frame.
+    this.crowd.update(session.simPositions);
     if (session.bottlenecks && session.bottlenecks.length) {
+      const seenBottleneckLabels = new Set<string>();
       for (const bn of session.bottlenecks) {
         const ring = new Mesh(new BoxGeometry(1.2, 0.05, 1.2), new MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.4, depthWrite: false }));
         ring.position.set(bn.x, 0.6, bn.z);
         this.overlayGroup.add(ring);
+        if (bn.name) {
+          const key = `${bn.kind ?? "route"}|${bn.x.toFixed(2)}|${bn.z.toFixed(2)}`;
+          seenBottleneckLabels.add(key);
+          const label = this.bottleneckLabels.get(key) ?? new TextLabel();
+          this.bottleneckLabels.set(key, label);
+          this.overlayGroup.add(label.sprite);
+          label.set(`${bn.name} ${bn.count}`, "#fecaca");
+          label.sprite.position.set(bn.x, 1.15, bn.z);
+        }
       }
+      for (const [key, label] of this.bottleneckLabels) {
+        if (!seenBottleneckLabels.has(key)) {
+          label.dispose();
+          this.bottleneckLabels.delete(key);
+        }
+      }
+    } else {
+      for (const label of this.bottleneckLabels.values()) label.dispose();
+      this.bottleneckLabels.clear();
     }
 
     for (const o of project.objects) {
@@ -1011,14 +1165,128 @@ export class SceneManager {
     return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
   }
 
-  /** Snapshot the current 3D scene (used for the 3D iso export image). */
+  /**
+   * Snapshot the current 3D scene (used for the 3D iso export image).
+   * Editor-only layers (selection outlines, placement ghost, live measure,
+   * simulation markers) are hidden for the shot so none of them bake into
+   * the exported PNG.
+   */
   renderToDataURL(project: Project, view: ViewName): string {
-    const prev = project.view;
-    this.setView(view);
-    this.renderer.render(this.scene, this.camera);
-    const url = this.renderer.domElement.toDataURL("image/png");
-    this.setView(prev);
-    return url;
+    const editorLayers = [this.ghostGroup, this.overlayGroup, this.measureGroup, this.crowd.group];
+    const prevVisible = editorLayers.map((g) => g.visible);
+    const savedPosition = this.camera.position.clone();
+    const savedQuaternion = this.camera.quaternion.clone();
+    const savedUp = this.camera.up.clone();
+    const savedZoom = this.camera.zoom;
+    const savedTarget = this.target.clone();
+    const savedControlTarget = this.controls.target.clone();
+    const savedRotate = this.controls.enableRotate;
+    const savedWorldPerPx = this.worldPerPx;
+    const savedPixelRatio = Math.min(window.devicePixelRatio, 2);
+    const savedBackground = this.scene.background;
+    for (const g of editorLayers) g.visible = false;
+    try {
+      const shotW = 2560;
+      const shotH = 1600;
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(shotW, shotH, false);
+      this.setView(view);
+      this.fitExportBounds(planBounds(project), shotW, shotH);
+      // The 場刊 is a paper document. Render its 3D page on the light palette
+      // even when the editor is in dark mode, so every exported page is one
+      // consistent artifact instead of a near-black sheet among white ones.
+      this.applyPalette(EXPORT_PALETTE);
+      this.syncAreasAndTiles(project, false);
+      this.renderer.render(this.scene, this.camera);
+      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background);
+    } finally {
+      editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
+      this.applyPalette(scenePalette(this.theme));
+      this.syncAreasAndTiles(project, false);
+      this.scene.background = savedBackground;
+      this.renderer.setPixelRatio(savedPixelRatio);
+      this.renderer.setSize(this.canvas.clientWidth || window.innerWidth, this.canvas.clientHeight || window.innerHeight, false);
+      this.camera.position.copy(savedPosition);
+      this.camera.quaternion.copy(savedQuaternion);
+      this.camera.up.copy(savedUp);
+      this.camera.zoom = savedZoom;
+      this.target.copy(savedTarget);
+      this.controls.target.copy(savedControlTarget);
+      this.controls.enableRotate = savedRotate;
+      this.worldPerPx = savedWorldPerPx;
+      this.applyProjection();
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /** Fit a snapshot independently of the editor viewport and user's zoom. */
+  private fitExportBounds(
+    bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+    width: number,
+    height: number,
+  ): void {
+    const contentHeight = 3.8;
+    const center = new Vector3((bounds.minX + bounds.maxX) / 2, contentHeight * 0.38, (bounds.minZ + bounds.maxZ) / 2);
+    const offset = this.camera.position.clone().sub(this.target);
+    this.target.copy(center);
+    this.controls.target.copy(center);
+    this.camera.position.copy(center).add(offset);
+    this.camera.lookAt(center);
+    this.camera.zoom = 1;
+    this.camera.updateMatrixWorld();
+    const right = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+    const up = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+    let halfU = 0;
+    let halfV = 0;
+    for (const x of [bounds.minX, bounds.maxX]) {
+      for (const y of [0, contentHeight]) {
+        for (const z of [bounds.minZ, bounds.maxZ]) {
+          const d = new Vector3(x, y, z).sub(center);
+          halfU = Math.max(halfU, Math.abs(d.dot(right)));
+          halfV = Math.max(halfV, Math.abs(d.dot(up)));
+        }
+      }
+    }
+    this.worldPerPx = Math.max((2 * halfU) / (width * 0.88), (2 * halfV) / (height * 0.88), 1e-4);
+    this.camera.left = (-width / 2) * this.worldPerPx;
+    this.camera.right = (width / 2) * this.worldPerPx;
+    this.camera.top = (height / 2) * this.worldPerPx;
+    this.camera.bottom = (-height / 2) * this.worldPerPx;
+    this.camera.near = -200;
+    this.camera.far = 500;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /** Remove the solid scene background around the fitted plan. */
+  private cropExportBackground(source: HTMLCanvasElement, background: number): string {
+    const raster = document.createElement("canvas");
+    raster.width = source.width;
+    raster.height = source.height;
+    const ctx = raster.getContext("2d");
+    if (!ctx) return source.toDataURL("image/png");
+    ctx.drawImage(source, 0, 0);
+    const image = ctx.getImageData(0, 0, source.width, source.height);
+    const br = (background >> 16) & 255;
+    const bg = (background >> 8) & 255;
+    const bb = background & 255;
+    let minX = source.width, minY = source.height, maxX = -1, maxY = -1;
+    for (let y = 0; y < source.height; y++) {
+      for (let x = 0; x < source.width; x++) {
+        const i = (y * source.width + x) * 4;
+        if (Math.abs(image.data[i] - br) + Math.abs(image.data[i + 1] - bg) + Math.abs(image.data[i + 2] - bb) > 12) {
+          minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    if (maxX < 0) return source.toDataURL("image/png");
+    const margin = 24;
+    minX = Math.max(0, minX - margin); minY = Math.max(0, minY - margin);
+    maxX = Math.min(source.width - 1, maxX + margin); maxY = Math.min(source.height - 1, maxY + margin);
+    const cropped = document.createElement("canvas");
+    cropped.width = maxX - minX + 1;
+    cropped.height = maxY - minY + 1;
+    cropped.getContext("2d")!.putImageData(image, -minX, -minY);
+    return cropped.toDataURL("image/png");
   }
 }
 
@@ -1076,6 +1344,10 @@ export function planBounds(project: Project): { minX: number; maxX: number; minZ
 interface Route2 { id: string; color: string; type?: string; points: { x: number; z: number }[] }
 
 function round(n: number): number { return Math.round(n * 1000) / 1000; }
+
+function isFieldMatGroup(g: Project["groups"][number]): boolean {
+  return g.sourceKind === "mat" && Math.abs(g.itemWidth - 0.6) < 1e-6 && Math.abs(g.itemDepth - 0.6) < 1e-6;
+}
 
 function measureText(a: { x: number; z: number }, b: { x: number; z: number }): string {
   const m = Math.hypot(b.x - a.x, b.z - a.z);

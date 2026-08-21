@@ -6,6 +6,7 @@
  * v3 → v4: description, zone icon/capacity, route type + zone links
  * v4 → v5: Asset Catalog assetId / serviceRole / catalogExtras
  * v5 → v6: Event Flow scenarios / ServiceStations
+ * v6 → v7: venue identity + independent field-calibration confirmations
  */
 
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
@@ -29,6 +30,7 @@ import {
   type Zone,
   uid,
 } from "./model";
+import { buildSimulationSpatial } from "./simSpatial";
 
 const KINDS: ReadonlySet<string> = new Set<ObjectKind>([
   "computer",
@@ -209,6 +211,7 @@ function migrateStation(raw: Partial<ServiceStation>): ServiceStation | null {
     staffCount: Math.max(1, raw.staffCount ?? 1),
     parallelServers: Math.max(1, raw.parallelServers ?? 1),
     meanServiceSeconds: Math.max(1, raw.meanServiceSeconds ?? 30),
+    profileServiceSeconds: raw.profileServiceSeconds,
     serviceVariance: raw.serviceVariance,
     queueCapacity: Math.max(1, raw.queueCapacity ?? 20),
     x: raw.x ?? 0,
@@ -247,6 +250,37 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
     settings: {
       speedMetersPerSecond: Math.max(0.3, raw.settings?.speedMetersPerSecond ?? 1.0),
     },
+  };
+}
+
+/** Resolve spatial bindings against the current project without mutating either input. */
+export function resolveStationPosition(project: Project, station: ServiceStation): { x: number; z: number } {
+  const object = station.objectId && project.objects.find((item) => item.id === station.objectId && !item.hidden);
+  if (object) return { x: object.x, z: object.z };
+  const zone = station.zoneId && project.zones.find((item) => item.id === station.zoneId && !item.hidden);
+  if (zone) return { x: zone.x, z: zone.z };
+  return { x: station.x, z: station.z };
+}
+
+function zoneParallelServers(project: Project, station: ServiceStation): number {
+  if (!station.zoneId || !["shoe", "backpack", "seating"].includes(station.type)) return station.parallelServers;
+  const zone = project.zones.find((item) => item.id === station.zoneId && !item.hidden);
+  if (!zone) return station.parallelServers;
+  return Math.min(12, Math.max(1, Math.floor((zone.width * zone.depth) / 0.5)));
+}
+
+/** Rebuild all project-derived station geometry immediately before a simulation. */
+export function resolveScenarioBindings(project: Project, scenario: EventScenario): EventScenario {
+  return {
+    ...scenario,
+    stations: scenario.stations.map((station) => ({
+      ...station,
+      ...resolveStationPosition(project, station),
+      parallelServers: zoneParallelServers(project, station),
+    })),
+    profiles: scenario.profiles.map((profile) => ({ ...profile, branch: [...profile.branch] })),
+    settings: { ...scenario.settings },
+    spatial: buildSimulationSpatial(project),
   };
 }
 
@@ -306,15 +340,21 @@ export function createDefaultScenario(
   if (checkinObj) {
     push("checkin", checkinObj.x, checkinObj.z, { objectId: checkinObj.id, name: "報到" });
   } else if (checkinZone) {
-    push("checkin", checkinZone.x + checkinZone.width / 2, checkinZone.z + checkinZone.depth / 2, {
+    push("checkin", checkinZone.x, checkinZone.z, {
       zoneId: checkinZone.id,
     });
   } else {
     push("checkin", project.classroom.x + 2, project.classroom.z + project.classroom.width - 1.5);
   }
 
+  const paymentZone = project.zones.find((z) => z.type === "payment");
   if (paymentObj) {
     push("payment", paymentObj.x, paymentObj.z, { objectId: paymentObj.id, name: "收費" });
+  } else if (paymentZone) {
+    push("payment", paymentZone.x, paymentZone.z, {
+      zoneId: paymentZone.id,
+      name: "收費",
+    });
   } else {
     // Combined with checkin by default (same coords, separate station for branching).
     const ck = stations.find((s) => s.type === "checkin")!;
@@ -322,7 +362,7 @@ export function createDefaultScenario(
   }
 
   if (shoeZone) {
-    push("shoe", shoeZone.x + shoeZone.width / 2, shoeZone.z + shoeZone.depth / 2, {
+    push("shoe", shoeZone.x, shoeZone.z, {
       zoneId: shoeZone.id,
     });
   } else {
@@ -330,7 +370,7 @@ export function createDefaultScenario(
   }
 
   if (bagZone) {
-    push("backpack", bagZone.x + bagZone.width / 2, bagZone.z + bagZone.depth / 2, {
+    push("backpack", bagZone.x, bagZone.z, {
       zoneId: bagZone.id,
     });
   } else {
@@ -338,7 +378,7 @@ export function createDefaultScenario(
   }
 
   if (seatZone) {
-    push("seating", seatZone.x + seatZone.width / 2, seatZone.z + seatZone.depth / 2, {
+    push("seating", seatZone.x, seatZone.z, {
       zoneId: seatZone.id,
     });
   } else {
@@ -391,7 +431,11 @@ export function migrateProject(input: Partial<Project>): Project {
   p.classroom = { ...base.classroom, ...input.classroom };
   p.corridor = { ...base.corridor, ...input.corridor };
   p.tile = { ...base.tile, ...input.tile };
-  p.calibration = { ...base.calibration, ...input.calibration };
+  p.calibration = {
+    ...base.calibration,
+    ...input.calibration,
+    confirmed: { ...base.calibration.confirmed, ...(input.calibration?.confirmed ?? {}) },
+  };
   p.layers = { ...base.layers, ...input.layers };
   p.description = input.description ?? "";
   p.zones = (Array.isArray(input.zones) ? input.zones : []).map(migrateZone);

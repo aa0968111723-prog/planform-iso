@@ -181,20 +181,23 @@ export class WorkspaceViewport {
       height: box.height || window.innerHeight,
     };
     const mode = workspaceModeForWidth(canvas.width);
-    const metrics = this.readMetrics(canvas);
+    const metrics = this.readMetrics(canvas, mode);
     const baseRect = insetRect(canvas, persistentInsets(mode, metrics));
     const safeRect = insetRect(canvas, visibleInsets(mode, metrics));
     const focusRect = insetRect(canvas, focusInsets(mode, metrics));
     return { mode, canvas, baseRect, safeRect, focusRect, coverage: rectCoverage(baseRect, canvas), metrics };
   }
 
-  private readMetrics(canvas: Rect): ChromeMetrics {
+  private readMetrics(canvas: Rect, mode: WorkspaceMode): ChromeMetrics {
     const c = this.chrome;
     if (!c) return { ...EMPTY_CHROME };
     // Team view swaps the editing header for its own bar; take whichever is up.
     const header = Math.max(0, ...headers(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
     // Editor bottom nav and partner dock are mutually exclusive; take whichever is up.
     const nav = Math.max(0, ...navs(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
+    const partnerDock = Math.max(0, ...navs(c)
+      .filter((n) => n.classList.contains("partnerdock"))
+      .map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
     // Rail widths only count when the panel is genuinely docked beside the
     // canvas; in sheet mode it is a bottom overlay instead.
     const docked = (node: HTMLElement) =>
@@ -217,6 +220,7 @@ export class WorkspaceViewport {
     return {
       headerHeight: header,
       bottomNavHeight: nav,
+      partnerDockHeight: mode === "desktop" ? partnerDock : 0,
       leftPanelWidth: left,
       rightPanelWidth: right,
       bottomSheetHeight: sheet,

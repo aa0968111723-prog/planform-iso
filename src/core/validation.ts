@@ -96,8 +96,16 @@ export function validateProject(project: Project, settings?: ValidationSettings)
   for (const o of objs) hash.insert(o);
   const pairs = hash.candidatePairs();
 
-  // Bounds.
+  // Bounds. Wall-mounted kinds (door/switch/screen) sit centered on the wall
+  // line by design, so half their thin depth legitimately overhangs the room
+  // rectangle — for those only the center must be on a wall of the venue.
   for (const o of objs) {
+    if (WALL_KINDS.has(o.kind)) {
+      if (!insideAny(o.cx, o.cz, project)) {
+        push("error", "bounds", "超出場地", `${assetDef(o.kind).displayName}超出場地邊界`, o.id, { x: o.cx, z: o.cz }, "移回教室或走廊範圍內");
+      }
+      continue;
+    }
     const corners = rectCorners(o.cx, o.cz, o.w, o.d, o.rot);
     if (corners.some((c) => !insideAny(c.x, c.z, project))) {
       push("error", "bounds", "超出場地", `${assetDef(o.kind).displayName}超出場地邊界`, o.id, { x: o.cx, z: o.cz }, "移回教室或走廊範圍內");

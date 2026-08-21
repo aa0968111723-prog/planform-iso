@@ -84,6 +84,8 @@ export interface ChromeMetrics {
   headerHeight: number;
   /** Height of the bottom navigation, including its safe-area padding. */
   bottomNavHeight: number;
+  /** Partner Mode uses the bottom strip even on desktop. */
+  partnerDockHeight?: number;
   /** Width of the left workflow rail — only honoured when docked. */
   leftPanelWidth: number;
   /** Width of the right inspector rail — only honoured when docked. */
@@ -105,6 +107,7 @@ export interface ChromeMetrics {
 export const EMPTY_CHROME: ChromeMetrics = {
   headerHeight: 0,
   bottomNavHeight: 0,
+  partnerDockHeight: 0,
   leftPanelWidth: 0,
   rightPanelWidth: 0,
   bottomSheetHeight: 0,
@@ -124,7 +127,9 @@ export function persistentInsets(mode: WorkspaceMode, m: ChromeMetrics): ChromeI
   return {
     top: Math.max(0, m.headerHeight),
     right: policy.dockRight ? Math.max(0, m.rightPanelWidth) : 0,
-    bottom: policy.bottomNav ? Math.max(0, m.bottomNavHeight) : 0,
+    bottom: policy.bottomNav
+      ? Math.max(0, m.bottomNavHeight)
+      : Math.max(0, m.partnerDockHeight ?? 0),
     left: policy.dockLeft ? Math.max(0, m.leftPanelWidth) : 0,
   };
 }

@@ -62,8 +62,8 @@ const FOCUS: Record<Exclude<PartnerRole, "all">, RoleFocus> = {
     objectKinds: new Set(["regTable", "door"]),
   },
   payment: {
-    zoneTypes: new Set<ZoneType>(["registration"]),
-    routeTypes: new Set<RouteType>(["registration"]),
+    zoneTypes: new Set<ZoneType>(["registration", "payment"]),
+    routeTypes: new Set<RouteType>(["registration", "payment"]),
     serviceRoles: new Set<ServiceRole>(["payment"]),
     stationTypes: new Set<StationType>(["payment"]),
     objectKinds: new Set(["regTable"]),
@@ -76,7 +76,8 @@ const FOCUS: Record<Exclude<PartnerRole, "all">, RoleFocus> = {
     objectKinds: new Set(["door", "screen"]),
   },
   life: {
-    zoneTypes: new Set<ZoneType>(["life", "meditation"]),
+    // 生活組站生活組區 — never the 講師禪定區 (zone order made find() pick it).
+    zoneTypes: new Set<ZoneType>(["life"]),
     routeTypes: new Set<RouteType>(["staff", "group"]),
     serviceRoles: new Set<ServiceRole>(["storage"]),
     stationTypes: new Set<StationType>(["group"]),
@@ -152,6 +153,8 @@ export interface RoleBriefing {
   /** 下一步去哪裡 */
   nextStop: string | null;
   steps: PartnerStep[];
+  /** Compact whole-flow sentence used by the 全部 view instead of a fake post. */
+  flowSummary?: string;
   /** Shown when the plan has nothing for this role yet. */
   emptyHint: string | null;
 }
@@ -235,14 +238,26 @@ export function buildRoleBriefing(
       peopleComeFrom: journey[0] ? `${journey[0].name}` : null,
       nextStop: journey.length > 1 ? journey[journey.length - 1].name : null,
       steps,
+      flowSummary: journey.map((s) => s.name).join(" → "),
       emptyHint: steps.length ? null : "這個場佈還沒有動線與區域，先請主辦加上報到區與入場動線。",
     };
   }
 
   const focus = FOCUS[role];
-  const mine = journey.findIndex((s) => focus.stationTypes.has(s.type));
+  // 引導組的工作點是走廊引導站；若場景有明確的 guide station，不能被
+  // 旅程中較早出現的鞋子區搶走。沒有 guide station 才退回入口或其他引導點。
+  const mine = role === "guide"
+    ? journey.findIndex((s) => s.type === "guide") >= 0
+      ? journey.findIndex((s) => s.type === "guide")
+      : journey.findIndex((s) => s.type === "entrance")
+    : journey.findIndex((s) => focus.stationTypes.has(s.type));
   const zone = roleZone(project, focus);
-  const post = zone?.name ?? roleObjectName(project, focus) ?? (mine >= 0 ? journey[mine].name : null);
+  const stationPost = mine >= 0 ? journey[mine].name : null;
+  const post = role === "guide"
+    ? stationPost ?? zone?.name ?? roleObjectName(project, focus)
+    : role === "life"
+      ? zone?.name ?? stationPost ?? roleObjectName(project, focus)
+      : zone?.name ?? roleObjectName(project, focus) ?? stationPost;
   const from = mine > 0 ? journey[mine - 1].name : roleRouteName(project, focus);
   const next = mine >= 0 && mine < journey.length - 1 ? journey[mine + 1].name : null;
 
@@ -270,7 +285,7 @@ function roleTask(role: Exclude<PartnerRole, "all">): string {
     case "checkin": return "核對名單、發名牌";
     case "payment": return "收費、找零、蓋章";
     case "guide": return "指引方向，讓通道保持順暢";
-    case "life": return "準備物資、照顧現場需求";
+    case "life": return "站在生活組區，管理茶水與物資，照顧現場需求";
   }
 }
 

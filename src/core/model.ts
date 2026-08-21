@@ -8,9 +8,10 @@
  * v4: visual-comm — description, zone icon/capacity, route type + zone links.
  * v5: Asset Catalog — optional assetId / serviceRole; custom catalogExtras.
  * v6: Event Flow — ServiceStation / EventScenario for DES simulation.
+ * v7: E310 venue identity + three independent field-calibration confirmations.
  */
 
-export const PROJECT_VERSION = 6;
+export const PROJECT_VERSION = 7;
 
 export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
@@ -35,6 +36,12 @@ export interface TileConfig {
 export interface Calibration {
   referenceLength: number | null;
   note: string;
+  /** Independent on-site confirmations; missing means not yet confirmed. */
+  confirmed: {
+    tile?: boolean;
+    door?: boolean;
+    room?: boolean;
+  };
 }
 
 export type ObjectKind =
@@ -148,11 +155,13 @@ export const DEFAULT_VALIDATION_SETTINGS: ValidationSettings = {
 
 export type ZoneType =
   | "registration"
+  | "payment"
   | "life"
   | "group"
   | "meditation"
   | "shoe"
-  | "backpack";
+  | "backpack"
+  | "custom";
 
 export interface Zone {
   id: string;
@@ -176,7 +185,7 @@ export interface RoutePoint {
 }
 
 export type RouteType =
-  | "entry" | "registration" | "shoe" | "backpack" | "seating" | "group" | "staff" | "custom";
+  | "entry" | "registration" | "payment" | "shoe" | "backpack" | "seating" | "group" | "staff" | "custom";
 
 export interface Route {
   id: string;
@@ -225,6 +234,8 @@ export interface ServiceStation {
   staffCount: number;
   parallelServers: number;
   meanServiceSeconds: number;
+  /** Optional branch-specific duration, used by a shared desk variant. */
+  profileServiceSeconds?: Partial<Record<ParticipantProfileId, number>>;
   serviceVariance?: number;
   queueCapacity: number;
   /** Spatial position in meters (derived from zone/object when bound). */
@@ -244,6 +255,23 @@ export interface ParticipantProfile {
 
 export type ArrivalProfile = "uniform" | "front-loaded";
 
+export interface SimulationDoor {
+  id: string;
+  x: number;
+  z: number;
+  width: number;
+  /** 1 is unobstructed; lower values represent a narrower or blocked passage. */
+  throughput: number;
+  blocked: boolean;
+}
+
+export interface SimulationSpatial {
+  routes: Route[];
+  corridor: AreaConfig;
+  classroom: AreaConfig;
+  doors: SimulationDoor[];
+}
+
 export interface EventScenario {
   id: string;
   name: string;
@@ -254,6 +282,7 @@ export interface EventScenario {
   stations: ServiceStation[];
   seed: number;
   settings: { speedMetersPerSecond: number };
+  spatial?: SimulationSpatial;
 }
 
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
@@ -287,6 +316,8 @@ export interface ProjectCatalogExtra {
 export interface Project {
   version: number;
   name: string;
+  /** Built-in venue identity, retained so honest calibration copy survives reload. */
+  venuePresetId?: string;
   /** Short activity description shown in the team/partner view. */
   description: string;
   classroom: AreaConfig;
@@ -319,11 +350,13 @@ export const ZONE_DEFAULTS: Record<
   { label: string; color: string; width: number; depth: number; icon: string }
 > = {
   registration: { label: "報到區", color: "#38bdf8", width: 2.5, depth: 1.5, icon: "👋" },
+  payment: { label: "收費區", color: "#facc15", width: 2, depth: 1.5, icon: "💰" },
   life: { label: "生活組區", color: "#34d399", width: 2, depth: 2, icon: "🧺" },
   group: { label: "小組組別區", color: "#a78bfa", width: 3, depth: 3, icon: "👥" },
   meditation: { label: "講師禪定區", color: "#f472b6", width: 2, depth: 2, icon: "🧘" },
   shoe: { label: "鞋子擺放區", color: "#fbbf24", width: 2, depth: 1, icon: "👟" },
   backpack: { label: "背包放置區", color: "#fb923c", width: 2, depth: 1, icon: "🎒" },
+  custom: { label: "自訂區", color: "#94a3b8", width: 2, depth: 2, icon: "📦" },
 };
 
 export function createDefaultProject(): Project {
@@ -334,7 +367,7 @@ export function createDefaultProject(): Project {
     classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 },
     corridor: { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8 },
     tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
-    calibration: { referenceLength: null, note: "" },
+    calibration: { referenceLength: null, note: "", confirmed: {} },
     zones: [],
     objects: [],
     groups: [],
@@ -347,4 +380,24 @@ export function createDefaultProject(): Project {
     scenarios: [],
     activeScenarioId: null,
   };
+}
+
+export function venueNeedsCalibration(project: Project): boolean {
+  return project.venuePresetId === "venue:tku-e310";
+}
+
+export function calibrationComplete(project: Project): boolean {
+  if (!venueNeedsCalibration(project)) return true;
+  const c = project.calibration.confirmed;
+  return c.tile === true && c.door === true && c.room === true;
+}
+
+export function calibrationPendingLabels(project: Project): string[] {
+  if (!venueNeedsCalibration(project)) return [];
+  const c = project.calibration.confirmed;
+  return [
+    c.tile ? null : "地磚",
+    c.door ? null : "門寬",
+    c.room ? null : "已知距離",
+  ].filter((x): x is string => x !== null);
 }

@@ -1,6 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { migrateObject, migrateProject } from "../src/core/migrate";
-import { PROJECT_VERSION } from "../src/core/model";
+import { createDefaultScenario, migrateObject, migrateProject, resolveScenarioBindings, resolveStationPosition } from "../src/core/migrate";
+import { createDefaultProject, PROJECT_VERSION } from "../src/core/model";
+
+describe("simulation spatial bindings", () => {
+  it("resolves object first, then zone, and keeps the old position as a final fallback", () => {
+    const p = createDefaultProject();
+    p.zones.push({ id: "z", type: "registration", name: "z", x: 4, z: 5, width: 2, depth: 1, color: "#fff", locked: false, hidden: false, icon: "", capacity: null });
+    const base = { id: "s", name: "s", type: "checkin" as const, x: 1, z: 2, staffCount: 1, parallelServers: 1, meanServiceSeconds: 10, queueCapacity: 10 };
+    expect(resolveStationPosition(p, { ...base, zoneId: "z" })).toEqual({ x: 4, z: 5 });
+    p.objects.push(migrateObject({ id: "o", kind: "regTable", x: 8, z: 9, rotationDeg: 0, locked: false, hidden: false }));
+    expect(resolveStationPosition(p, { ...base, objectId: "o", zoneId: "z" })).toEqual({ x: 8, z: 9 });
+    expect(resolveStationPosition(p, base)).toEqual({ x: 1, z: 2 });
+  });
+
+  it("rebuilds station geometry and self-service capacity from the moved project", () => {
+    const p = createDefaultProject();
+    p.zones.push({ id: "shoe", type: "shoe", name: "shoe", x: 3, z: 4, width: 2, depth: 1, color: "#fff", locked: false, hidden: false, icon: "", capacity: null });
+    const scenario = createDefaultScenario(p);
+    const shoe = scenario.stations.find((station) => station.type === "shoe")!;
+    expect(shoe.zoneId).toBe("shoe");
+    expect(resolveScenarioBindings(p, scenario).stations.find((station) => station.id === shoe.id)).toMatchObject({ x: 3, z: 4, parallelServers: 4 });
+    p.zones[0].x = 12;
+    const moved = resolveScenarioBindings(p, scenario).stations.find((station) => station.id === shoe.id)!;
+    expect(moved.x).toBe(12);
+    expect(moved.parallelServers).toBe(4);
+  });
+});
 
 describe("v1 → v2 object migration", () => {
   it("derives placement metadata from the asset kind", () => {
@@ -59,10 +84,11 @@ describe("project migration", () => {
     expect(p.groups[0].sourceKind).toBe("mat");
   });
 
-  it("upgrades to v6 with scenarios array", () => {
+  it("upgrades older projects with scenarios and calibration state", () => {
     const p = migrateProject({ version: 5, name: "v5" } as never);
-    expect(p.version).toBe(6);
+    expect(p.version).toBe(7);
     expect(p.scenarios).toEqual([]);
     expect(p.activeScenarioId).toBeNull();
+    expect(p.calibration.confirmed).toEqual({});
   });
 });

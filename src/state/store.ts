@@ -2,6 +2,7 @@ import { createDefaultProject, type Project } from "../core/model";
 import { migrateProject } from "../core/migrate";
 
 const AUTOSAVE_KEY = "planform-iso:autosave";
+const AUTOSAVE_BACKUP_KEY = "planform-iso:autosave-backup";
 const LAYOUTS_KEY = "planform-iso:layouts";
 const MAX_HISTORY = 100;
 
@@ -111,10 +112,17 @@ export class Store {
     this.scheduleAutosave();
   }
 
-  /** Replace the whole project (import / load layout). Resets history. */
-  loadProject(project: Project): void {
+  /** Replace the whole project. Safety loads keep one undo checkpoint. */
+  loadProject(project: Project, options: { undoBeforeLoad?: boolean } = {}): void {
+    const hasContent = this.project.objects.length > 0 || this.project.zones.length > 0 ||
+      this.project.groups.length > 0 || this.project.routes.length > 0;
+    if (options.undoBeforeLoad ?? hasContent) {
+      this.undoStack.push(clone(this.project));
+      if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
+    } else {
+      this.undoStack = [];
+    }
     this.project = migrateProject(project);
-    this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
     this.emit();
@@ -129,19 +137,71 @@ export class Store {
     this.autosaveTimer = window.setTimeout(() => this.saveAutosave(), 400);
   }
 
+  /** Called once if autosave writes start failing (e.g. storage full). */
+  onStorageError: (() => void) | null = null;
+  onStorageRecovered: (() => void) | null = null;
+  onLayoutError: ((action: "save" | "delete") => void) | null = null;
+  private storageErrorReported = false;
+
   saveAutosave(): void {
+    if (typeof localStorage === "undefined") return;
     try {
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(this.project));
+      if (this.storageErrorReported) {
+        this.storageErrorReported = false;
+        this.onStorageRecovered?.();
+      }
     } catch {
-      /* storage may be unavailable; ignore */
+      if (!this.storageErrorReported) {
+        this.storageErrorReported = true;
+        this.onStorageError?.();
+      }
     }
   }
 
+  /** Write pending changes immediately (pagehide / tab hidden). */
+  flushAutosave(): void {
+    if (this.autosaveTimer !== null && typeof window !== "undefined") {
+      window.clearTimeout(this.autosaveTimer);
+      this.autosaveTimer = null;
+    }
+    this.saveAutosave();
+  }
+
   static loadAutosave(): Project | null {
+    return Store.loadAutosaveWithRecovery().project;
+  }
+
+  /**
+   * Load the autosave; if it is corrupt, keep the raw blob in a backup key
+   * (so nothing is silently destroyed) and report `recovered: true` for the
+   * UI to explain what happened.
+   */
+  static loadAutosaveWithRecovery(): { project: Project | null; recovered: boolean } {
+    let raw: string | null;
     try {
-      const raw = localStorage.getItem(AUTOSAVE_KEY);
-      if (!raw) return null;
-      return migrateProject(JSON.parse(raw));
+      raw = localStorage.getItem(AUTOSAVE_KEY);
+    } catch {
+      return { project: null, recovered: false };
+    }
+    if (!raw) return { project: null, recovered: false };
+    try {
+      return { project: migrateProject(JSON.parse(raw)), recovered: false };
+    } catch {
+      try {
+        localStorage.setItem(AUTOSAVE_BACKUP_KEY, raw);
+        localStorage.removeItem(AUTOSAVE_KEY);
+      } catch {
+        /* keep going — a fresh project still beats a white screen */
+      }
+      return { project: null, recovered: true };
+    }
+  }
+
+  /** Raw backup kept from a failed load, if any (for support/export). */
+  static corruptBackup(): string | null {
+    try {
+      return localStorage.getItem(AUTOSAVE_BACKUP_KEY);
     } catch {
       return null;
     }
@@ -153,29 +213,41 @@ export class Store {
     return Object.keys(readLayouts()).sort();
   }
 
-  saveNamedLayout(name: string): void {
-    const layouts = readLayouts();
-    const project = clone(this.project);
-    project.name = name;
-    layouts[name] = project;
-    localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
-    this.mutate((p) => {
-      p.name = name;
-    }, { history: false });
+  saveNamedLayout(name: string): boolean {
+    try {
+      const layouts = readLayouts();
+      const project = clone(this.project);
+      project.name = name;
+      layouts[name] = project;
+      localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+      this.mutate((p) => {
+        p.name = name;
+      }, { history: false });
+      return true;
+    } catch {
+      this.onLayoutError?.("save");
+      return false;
+    }
   }
 
   loadNamedLayout(name: string): boolean {
     const layouts = readLayouts();
     const project = layouts[name];
     if (!project) return false;
-    this.loadProject(project);
+    this.loadProject(project, { undoBeforeLoad: true });
     return true;
   }
 
-  deleteNamedLayout(name: string): void {
-    const layouts = readLayouts();
-    delete layouts[name];
-    localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+  deleteNamedLayout(name: string): boolean {
+    try {
+      const layouts = readLayouts();
+      delete layouts[name];
+      localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+      return true;
+    } catch {
+      this.onLayoutError?.("delete");
+      return false;
+    }
   }
 }
 

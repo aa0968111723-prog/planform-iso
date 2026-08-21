@@ -93,6 +93,12 @@ export function buildVisualGroup(
   const tint = assetDef(kind).color;
 
   switch (visualRef) {
+    case "proc:stage-platform":
+      buildStagePlatform(g, w, d, h, detail);
+      break;
+    case "proc:lectern":
+      buildLectern(g, w, d, h, detail);
+      break;
     case "proc:payment-desk":
       buildDesk(g, w, d, h, tint, "payment", detail);
       break;
@@ -194,6 +200,24 @@ function buildDesk(
     g.add(part(w * 0.45, 0.16, 0.025, "paper", 0, h + 0.12, d / 2 - 0.02, boardColor));
     g.add(part(w * 0.45, 0.02, 0.03, "painted-metal", 0, h + 0.03, d / 2 - 0.02));
   }
+}
+
+function buildStagePlatform(g: Group, w: number, d: number, h: number, detail: boolean): void {
+  const top = Math.min(0.06, h * 0.35);
+  g.add(part(w, h - top, d, "dark-wood", 0, (h - top) / 2, 0, "#315b45"));
+  g.add(part(w, top, d, "dark-wood", 0, h - top / 2, 0, "#3f7658"));
+  if (detail) {
+    // A low front fascia makes the raised platform legible in the isometric view.
+    g.add(part(w * 0.98, 0.025, 0.025, "painted-metal", 0, h + 0.012, d / 2 + 0.012, "#9cc6a8"));
+  }
+}
+
+function buildLectern(g: Group, w: number, d: number, h: number, detail: boolean): void {
+  const topH = Math.min(0.08, h * 0.1);
+  g.add(part(w, topH, d, "dark-wood", 0, h - topH / 2, 0, "#8b6b4a", -8));
+  g.add(part(Math.max(0.08, w * 0.12), h - topH, Math.max(0.08, d * 0.12), "painted-metal", 0, (h - topH) / 2, 0, "#5b4633"));
+  g.add(part(w * 0.82, Math.max(0.08, h * 0.48), 0.035, "dark-wood", 0, h * 0.42, d / 2 - 0.025, "#8b6b4a", 8));
+  if (detail) g.add(part(w * 0.55, 0.025, 0.02, "plastic-gloss", 0, h * 0.7, d / 2 + 0.002, "#e2e8f0"));
 }
 
 function buildComputer(g: Group, w: number, d: number, h: number, tint: string, detail: boolean): void {

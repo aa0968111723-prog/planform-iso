@@ -1,12 +1,13 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import type { MeasurementType, RouteType, ViewName } from "../core/model";
+import { calibrationComplete, calibrationPendingLabels, venueNeedsCalibration, type MeasurementType, type RouteType, type ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
 import { ROUTE_PRESETS } from "../core/routes";
+import type { LayoutCandidate } from "../core/smartLayout";
 import { issueCounts, type Severity } from "../core/validation";
 import { dockingPolicy, type WorkspaceMode } from "../core/viewport";
-import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanPreset } from "../export/constructionPlan";
-import { downloadPng, exportProjectJson, importProjectJson } from "../export/exporters";
+import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanOptions, type PlanPreset, type RoleFilter } from "../export/constructionPlan";
+import { downloadPng, exportProjectJson, importProjectJson, pngFilename, sharePng } from "../export/exporters";
 import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
@@ -16,11 +17,15 @@ import { refreshSimPanel } from "./simPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
+import { quickStartSeen, showQuickStart } from "./quickStart";
+import { BUILD_INFO } from "../buildInfo";
+import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
+import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
-  { id: "top", label: "俯視" }, { id: "iso", label: "等角(3D)" }, { id: "front", label: "正視" },
+  { id: "top", label: "俯視" }, { id: "iso", label: "立體" }, { id: "front", label: "正視" },
   { id: "left", label: "左視" }, { id: "right", label: "右視" },
 ];
 const SNAPS: { id: SnapMode; label: string }[] = [
@@ -29,11 +34,15 @@ const SNAPS: { id: SnapMode; label: string }[] = [
 ];
 const WORKFLOWS: { id: Workflow; label: string; icon: string }[] = [
   { id: "site", label: "場地", icon: "▦" }, { id: "layout", label: "場佈", icon: "▤" },
-  { id: "route", label: "動線", icon: "↝" }, { id: "check", label: "檢查", icon: "✓" },
-  { id: "export", label: "分享", icon: "↗" },
+  { id: "route", label: "動線", icon: "↝" }, { id: "export", label: "分享", icon: "↗" },
 ];
+const WORKFLOW_LABELS: Record<Workflow, string> = {
+  site: "場地", layout: "場佈", route: "動線", check: "檢查", export: "分享",
+};
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
+
+const PRIMARY_WORKFLOWS = WORKFLOWS;
 
 /** Which sheet, if any, currently covers part of the canvas on a compact layout. */
 type SheetKind = "none" | "workflow" | "inspector";
@@ -47,6 +56,8 @@ export class UI {
   private measurebar = el("div", { class: "measurebar", style: "display:none" });
   private box = el("div", { class: "boxsel", style: "display:none" });
   private toast = el("div", { class: "toast", style: "display:none" });
+  private calibrationBanner = el("div", { class: "calibration-banner", style: "display:none" });
+  private statusBadge = el("span", { class: "status-badge", role: "status" });
   private partner: PartnerModeHandles;
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
@@ -54,13 +65,14 @@ export class UI {
   private lastMode: Mode | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
-  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: true, inventory: true, simplify: false };
+  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false };
   private agentSheet: QuickAgentSheetHandles;
   private menu: MenuSheetHandles = buildMenuSheet();
   private smartBox = el("div", { class: "list" });
   private simPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
   private sheet: SheetKind = "none";
+  private placebarKind: "place" | "route" | "zone" | null = null;
   private sheetDetent: "collapsed" | "half" | "full" = "half";
   private sheetHistoryPushed = false;
   private viewport: WorkspaceViewport;
@@ -68,16 +80,50 @@ export class UI {
   private builtHeaderMode: WorkspaceMode | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
+    this.calibrationBanner.append(
+      el("span", { text: "尺寸待現場校正" }),
+      button("去校正", () => {
+        this.app.setWorkflow("site");
+        this.app.startCalibration();
+        if (this.compact) this.setSheet("workflow");
+        this.update();
+      }, "chip chip--sm chip--primary"),
+    );
     this.partner = buildPartnerMode(app, {
       onExit: () => this.app.exitPartnerMode(),
       onLayoutChange: () => this.viewport.schedule(),
     });
     root.append(
-      this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
+      this.topbar, this.calibrationBanner, this.left, this.right, this.nav, this.placebar, this.measurebar,
       this.box, this.toast, this.ctxbar, this.menu.root,
       this.partner.top, this.partner.dock, this.partner.sheet,
     );
-    this.agentSheet = buildQuickAgentSheet(app);
+    this.agentSheet = buildQuickAgentSheet(app, {
+      openMatArranger: () => {
+        this.app.setWorkflow("layout");
+        this.setSheet("workflow");
+        this.app.computeMatCandidates(this.app.session.participants, this.matOpts());
+        this.update();
+      },
+      startEntryRoute: () => {
+        this.app.setWorkflow("route");
+        this.app.newRoutePreset("entry");
+        if (this.compact) this.setSheet("none");
+        this.showToast("點畫面新增動線節點，畫完按「完成繪製」");
+      },
+      openCheck: () => {
+        // 檢查 now lives at the top of 分享 (pre-export checklist).
+        this.app.setWorkflow("export");
+        this.setSheet("workflow");
+      },
+      sharePartnerImage: () => {
+        const state = this.app.store.getState();
+        const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false });
+        void sharePng(dataUrl, pngFilename(state.name, "夥伴觀看圖")).then((how) => {
+          if (how !== "cancelled") this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+        });
+      },
+    });
     root.append(this.agentSheet.root);
 
     this.viewport = new WorkspaceViewport(root, app.scene.domElement);
@@ -103,6 +149,9 @@ export class UI {
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.store.onLayoutError = (action) =>
+      this.showToast(action === "save" ? "儲存平面圖失敗，請先匯出 JSON" : "刪除平面圖失敗，原檔案仍保留");
+    this.app.onImprove = () => this.agentSheet.runPreset("幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門");
     this.app.onChange(() => this.update());
     this.bindKeys();
     this.bindSheetGestures();
@@ -135,24 +184,17 @@ export class UI {
   }
 
   private buildQuickStart(): void {
-    const KEY = "planform-iso:quickstart";
-    try { if (localStorage.getItem(KEY)) return; } catch { return; }
-    const steps = [
-      "① 場地：設定教室尺寸與地磚，放門 / 投影幕",
-      "② 場佈：建立功能區，輸入人數自動排地墊，放桌椅",
-      "③ 動線：選類型畫人流，可「聚焦」或「▶ 模擬動線」",
-      "④ 分享：匯出場佈總覽 / 動線圖 / 夥伴任務圖，或按「檢視給團隊」",
-    ];
-    const dismiss = () => { try { localStorage.setItem(KEY, "1"); } catch { /* ignore */ } overlay.remove(); this.viewport.schedule(); };
-    const overlay = el("div", { class: "quickstart" }, [
-      el("div", { class: "quickstart__card" }, [
-        el("div", { class: "quickstart__title", text: "平面場 ISO — 三步驟快速上手" }),
-        el("div", { class: "quickstart__steps" }, steps.map((s) => el("div", { text: s }))),
-        el("p", { class: "hint", text: "手機 / 平板：下方分頁切換場地 / 場佈 / 動線 / 分享；再點同一分頁可收回、露出畫布。" }),
-        button("開始使用", dismiss),
-      ]),
-    ]);
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) dismiss(); });
+    if (quickStartSeen()) return;
+    this.openQuickStart();
+  }
+
+  /** Open the Quick Start wizard (first run, or 更多 → 快速開始). */
+  openQuickStart(): void {
+    if (this.root.querySelector(".quickstart")) return;
+    const overlay = showQuickStart(this.app, () => {
+      this.viewport.schedule();
+      this.update();
+    });
     this.root.append(overlay);
   }
 
@@ -190,7 +232,7 @@ export class UI {
     const ai = button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent");
     const more = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     more.setAttribute("aria-label", "更多設定");
-    this.topbar.append(title, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
+    this.topbar.append(title, this.statusBadge, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
   }
 
   private buildDesktopTopbar(): void {
@@ -200,7 +242,7 @@ export class UI {
     const views = el("div", { class: "group", "data-group": "views" },
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
     const flows = el("div", { class: "group group--flows", "data-group": "flows" },
-      WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
+      PRIMARY_WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
     const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
     for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
     snapSel.value = this.app.session.snap;
@@ -213,10 +255,13 @@ export class UI {
       button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent"),
     ]);
     const team = button("👥 夥伴模式", () => this.app.enterPartnerMode(), "chip chip--primary");
+    const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
+    moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
       el("div", { class: "topbar__title", text: "平面場 ISO" }),
-      history, flows, views, more, el("div", { class: "topbar__spacer" }), team,
+      history, flows, views, more, el("div", { class: "topbar__spacer" }), team, moreBtn,
     );
+    this.topbar.append(this.statusBadge);
   }
 
   private openViewMenu(): void {
@@ -240,6 +285,11 @@ export class UI {
           { label: "置中 / 重新框選", onSelect: () => this.app.recenterView() },
           { label: "簡化顯示", active: sess.simplify, onSelect: () => { this.app.setSimplify(!sess.simplify); return true; } },
           { label: "顯示 / 隱藏格線", onSelect: () => this.app.updateTile({ visible: !this.app.store.getState().tile.visible }) },
+          {
+            label: this.app.theme === "dark" ? "☀ 換成明亮畫面" : "🌙 換成深色畫面",
+            sub: this.app.theme === "dark" ? "目前是深色；明亮版比較接近場刊圖" : "目前是明亮版，和場刊圖同一套配色",
+            onSelect: () => { this.app.toggleTheme(); return true; },
+          },
         ],
       },
       {
@@ -261,7 +311,32 @@ export class UI {
       {
         title: "活動",
         items: [
+          { label: "🚀 快速開始", sub: "選場地、勾需求、自動排場佈", onSelect: () => this.openQuickStart() },
           { label: "重新命名活動", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
+        ],
+      },
+      {
+        title: "關於",
+        items: [
+          {
+            label: `版本 ${BUILD_INFO.version}`,
+            sub: `${BUILD_INFO.commit}${BUILD_INFO.builtAt ? ` · ${BUILD_INFO.builtAt.slice(0, 16).replace("T", " ")}` : ""}`,
+            onSelect: () => true,
+          },
+          ...(Store.corruptBackup()
+            ? [{
+                label: "下載損壞前的備份",
+                sub: "上次無法讀取的專案原始資料",
+                onSelect: () => {
+                  const raw = Store.corruptBackup();
+                  if (raw) {
+                    const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+                    downloadPng(url, "planform-備份.json");
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  }
+                },
+              }]
+            : []),
         ],
       },
     ];
@@ -277,7 +352,7 @@ export class UI {
   // --- bottom navigation --------------------------------------------------
 
   private buildNav(): void {
-    this.nav.append(...WORKFLOWS.map((it) =>
+    this.nav.append(...PRIMARY_WORKFLOWS.map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.id }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
@@ -393,14 +468,14 @@ export class UI {
   private rebuildLeft(): void {
     this.left.innerHTML = "";
     const wf = this.app.session.workflow;
-    const label = WORKFLOWS.find((w) => w.id === wf)?.label ?? "";
+    const label = WORKFLOW_LABELS[wf];
     if (this.compact) this.left.append(this.sheetHandle(label));
     const onPick = () => { if (this.compact) this.setSheet("none"); };
     if (wf === "site") this.left.append(...this.siteSections(onPick));
     else if (wf === "layout") this.left.append(
       this.smartLayoutSection(),
-      buildCustomAssetFlow(this.app),
       buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true, onPick }),
+      buildCustomAssetFlow(this.app),
     );
     else if (wf === "route") this.left.append(this.routeSection());
     else if (wf === "check") this.left.append(this.validationSection());
@@ -408,19 +483,62 @@ export class UI {
   }
 
   /**
-   * 場地 first level is deliberately four things — 教室尺寸 / 地磚 / 現場校正 /
-   * 固定設施. Engineering parameters (X, Z, tile origin, tile rotation) are
-   * real but rarely touched, so they sit in 進階設定 instead of being the first
-   * thing a phone or tablet user meets.
+   * 場地 first level is deliberately five things — 場地模板 / 教室尺寸 / 地磚 /
+   * 現場校正 / 固定設施. Engineering parameters (X, Z, tile origin, tile
+   * rotation) are real but rarely touched, so they sit in 進階設定 instead of
+   * being the first thing a phone or tablet user meets.
    */
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
+      this.venuePresetSection(),
       this.roomSizeSection(),
       this.tileSection(),
       this.calibrationSection(),
       this.fixtureSection(onPick),
       this.siteAdvancedSection(),
     ];
+  }
+
+  private venuePresetSection(): HTMLElement {
+    const body: HTMLElement[] = [];
+    const pending = calibrationPendingLabels(this.app.store.getState());
+    if (pending.length) {
+      body.push(el("div", { class: "readout readout--warn", text: `⚠ 待校正：${pending.join("、")}` }),
+        button("現場校正", () => { this.app.startCalibration(); }, "btn btn--primary"));
+    }
+    const apply = (id: string) => {
+      if (window.confirm("套用場地模板會改變教室尺寸與地磚（物件會保留、可復原）。繼續？")) {
+        this.app.applyVenuePresetById(id);
+      }
+    };
+    body.push(el("div", { class: "row wrap" },
+      BUILTIN_VENUE_PRESETS.map((p) => button(p.name, () => apply(p.id), "chip chip--sm"))));
+    const mine = listUserVenuePresets();
+    if (mine.length) {
+      body.push(el("div", { class: "subhead", text: "我的場地" }));
+      for (const p of mine) {
+        body.push(el("div", { class: "row" }, [
+          button(`🏫 ${p.name}`, () => apply(p.id), "chip chip--sm"),
+          button("刪除", () => {
+            if (window.confirm(`確定刪除場地模板「${p.name}」？`)) {
+              deleteUserVenuePreset(p.id);
+              this.update();
+            }
+          }, "chip chip--sm"),
+        ]));
+      }
+    }
+    const nameInput = el("input", { type: "text", class: "field__input", placeholder: "場地名稱（例如：B302）" }) as HTMLInputElement;
+    body.push(el("div", { class: "row" }, [
+      nameInput,
+      button("儲存為我的場地", () => {
+        if (this.app.saveCurrentVenuePreset(nameInput.value)) {
+          nameInput.value = "";
+          this.update();
+        }
+      }, "btn btn--ghost"),
+    ]));
+    return section("場地模板", body);
   }
 
   private roomSizeSection(): HTMLElement {
@@ -498,11 +616,30 @@ export class UI {
     actual.addEventListener("input", compare);
     compare();
 
+    const doorInput = el("input", { type: "number", step: "1", class: "field__input", placeholder: "門寬 (cm)" }) as HTMLInputElement;
+    const pending = calibrationPendingLabels(s);
+    const needsCal = venueNeedsCalibration(s);
+    const doorObj = s.objects.find((ob) => ob.kind === "door" && !ob.hidden);
+    const ok = (flag: boolean | undefined) => (flag ? " ✓" : needsCal ? "（待校正）" : "");
+    const currentLine = el("div", {
+      class: "hint",
+      text: `目前：地磚 ${Math.round(s.tile.width * 100)}×${Math.round(s.tile.depth * 100)} cm${ok(s.calibration.confirmed.tile)}｜` +
+        `門寬 ${doorObj ? Math.round(doorObj.width * 100) + " cm" : "—"}${ok(s.calibration.confirmed.door)}｜` +
+        `教室 ${s.classroom.length.toFixed(1)}×${s.classroom.width.toFixed(1)} m${ok(s.calibration.confirmed.room)}`,
+    });
     const body: HTMLElement[] = [
-      el("p", { class: "hint", text: "① 在畫布點兩個已知距離的端點 ② 輸入實際長度 ③ 選擇套用方式。" }),
-      this.app.session.mode === "calibrate"
-        ? button("重新選點（校正中…）", () => this.startCalibrationFromSheet(), "btn btn--primary")
-        : button("在畫布選兩點", () => this.startCalibrationFromSheet()),
+      ...(pending.length
+        ? [el("div", { class: "readout readout--warn", text: `待校正：${pending.join("、")}` })]
+        : needsCal
+          ? [el("div", { class: "readout", text: "✓ 三項尺寸都已現場校正" })]
+          : [el("div", { class: "hint", text: "此場地尺寸為自訂值；需要時可用下面工具對照現場。" })]),
+      currentLine,
+      el("p", { class: "hint", text: "三個選項各自完成：量地磚、量門寬，或在圖上量一段已知距離。" }),
+      el("div", { class: "row wrap calibration-actions" }, [
+        button("量一塊地磚", () => this.startCalibrationFromSheet(), "btn btn--primary"),
+        button("量門寬", () => { doorInput.focus(); doorInput.scrollIntoView({ block: "nearest" }); }, "btn btn--ghost"),
+        button("量已知距離", () => this.startCalibrationFromSheet(), "btn btn--ghost"),
+      ]),
     ];
     body.push(
       el("label", { class: "field" }, [el("span", { class: "field__label", text: "實際長度 (cm)" }), actual]),
@@ -511,6 +648,11 @@ export class UI {
         button("記錄結果", () => this.applyCalib("record", actual)),
         button("套用到地磚", () => this.applyCalib("tile", actual), "btn btn--ghost"),
         button("套用到教室長", () => this.applyCalib("classroom-length", actual), "btn btn--ghost"),
+      ]),
+      el("div", { class: "subhead", text: "量門寬" }),
+      el("div", { class: "row" }, [
+        doorInput,
+        button("更新門寬", () => this.applyCalib("door", doorInput)),
       ]),
     );
     return section("現場校正", body);
@@ -522,20 +664,66 @@ export class UI {
     if (this.compact) this.setSheet("none");
   }
 
-  private applyCalib(action: "record" | "tile" | "classroom-length", input: HTMLInputElement): void {
+  private applyCalib(action: "record" | "tile" | "door" | "classroom-length", input: HTMLInputElement): void {
     const cm = parseFloat(input.value);
     if (!cm) { this.showToast("請先輸入實際長度"); return; }
     this.app.applyCalibration(action, cm / 100);
   }
 
+  /** 排地墊 options: 直向/橫向 and 相黏（gap 0）/留縫. */
+  private matOrient: "v" | "h" = "v";
+  private matSnug = true;
+  private matMode: "individual" | "field" = "individual";
+  /** Venue the matMode default was last derived from — manual choices stick until the venue changes. */
+  private matModeVenue: string | undefined;
+
+  private matOpts(): { matWidth: number; matDepth: number; gap: number; mode: "individual" | "field" } {
+    if (this.matMode === "field") return { matWidth: 0.6, matDepth: 0.6, gap: 0, mode: "field" };
+    const w = this.matOrient === "v" ? 0.6 : 1.8;
+    const d = this.matOrient === "v" ? 1.8 : 0.6;
+    return { matWidth: w, matDepth: d, gap: this.matSnug ? 0 : 0.1, mode: "individual" };
+  }
+
   private smartLayoutSection(): HTMLElement {
-    const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input" }) as HTMLInputElement;
-    pIn.addEventListener("change", () => { this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0)); });
-    return section("人數場佈（地墊排列器）", [
-      el("p", { class: "hint", text: "輸入人數，系統依空間與走道自動產生地墊方案。先選一個小區域可排在區域內。" }),
+    const venueId = this.app.store.getState().venuePresetId;
+    if (venueId !== this.matModeVenue) {
+      this.matModeVenue = venueId;
+      if (venueId === "venue:tku-classroom" || venueId === "venue:tku-e310") this.matMode = "field";
+    }
+    // One head count everywhere: follow the session (seeded from the event's
+    // scenario) unless the user has typed something here since.
+    if (this.app.session.participants > 0) this.participants = this.app.session.participants;
+    const pIn = el("input", { type: "number", step: "1", value: this.participants, class: "field__input", inputmode: "numeric" }) as HTMLInputElement;
+    pIn.addEventListener("change", () => {
+      this.participants = Math.max(1, Math.round(parseFloat(pIn.value) || 0));
+      this.app.session.participants = this.participants;
+    });
+    const regen = () => { this.app.computeMatCandidates(this.participants, this.matOpts()); };
+    const quick = el("div", { class: "row wrap" }, [20, 30, 40, 60].map((n) =>
+      button(String(n), () => {
+        this.participants = n;
+        pIn.value = String(n);
+        regen();
+      }, "chip chip--sm")));
+    const orientChip = (o: "v" | "h", label: string) =>
+      button(label, () => { this.matOrient = o; regen(); this.update(); },
+        this.matOrient === o ? "chip chip--sm chip--primary" : "chip chip--sm");
+    const snugChip = button(this.matSnug ? "✓ 相黏排列" : "相黏排列", () => {
+      this.matSnug = !this.matSnug;
+      regen();
+      this.update();
+    }, this.matSnug ? "chip chip--sm chip--primary" : "chip chip--sm");
+    return section("排地墊", [
+      el("p", { class: "hint", text: "選人數就出 A/B/C 方案，看圖套用。先選一個區域可只排在區域內。" }),
+      el("div", { class: "row wrap" }, [
+        button(this.matMode === "field" ? "✓ 巧拼整片" : "巧拼整片", () => { this.matMode = "field"; regen(); this.update(); }, this.matMode === "field" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(this.matMode === "individual" ? "✓ 個人墊" : "個人墊", () => { this.matMode = "individual"; regen(); this.update(); }, this.matMode === "individual" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      ]),
+      quick,
+      ...(this.matMode === "individual" ? [el("div", { class: "row wrap" }, [orientChip("v", "直向"), orientChip("h", "橫向"), snugChip])] : []),
       el("div", { class: "row" }, [
-        el("label", { class: "field" }, [el("span", { class: "field__label", text: "人數" }), pIn]),
-        button("產生方案", () => this.app.computeMatCandidates(this.participants)),
+        el("label", { class: "field" }, [el("span", { class: "field__label", text: "自訂人數" }), pIn]),
+        button("產生方案", () => regen()),
       ]),
       this.smartBox,
     ]);
@@ -544,12 +732,28 @@ export class UI {
   private updateSmartBox(): void {
     this.smartBox.innerHTML = "";
     const cands = this.app.session.matCandidates;
-    if (!cands.length) { this.smartBox.append(el("span", { class: "hint", text: "尚未產生方案。" })); return; }
+    if (!cands.length) {
+      // With mats already on the floor, say what IS there instead of the
+      // misleading 「尚未產生方案」 (the 60p example ships pre-laid).
+      const matGroups = this.app.store.getState().groups.filter((g) => g.sourceKind === "mat" && !g.hidden);
+      if (matGroups.length) {
+        const pieces = matGroups.reduce((sum, g) => sum + g.rows * g.cols, 0);
+        const seats = matGroups.reduce((sum, g) =>
+          sum + (g.itemWidth === g.itemDepth
+            ? g.cols * Math.floor((g.rows * g.itemDepth + 1e-9) / 0.9)
+            : g.rows * g.cols), 0);
+        this.smartBox.append(el("span", { class: "hint", text: `已排好：巧拼 ${pieces} 片，約可坐 ${seats} 人。要重排就選人數再「產生方案」。` }));
+      } else {
+        this.smartBox.append(el("span", { class: "hint", text: "尚未產生方案。" }));
+      }
+      return;
+    }
     for (const c of cands) {
       const warn = c.warnings.length ? ` ⚠ ${c.warnings.join("、")}` : " ✓ 可放置";
       this.smartBox.append(el("div", { class: `card smart ${c.fits ? "" : "smart--warn"}` }, [
+        matCandidateThumb(c),
         el("span", { class: "card__body" }, [
-          el("span", { class: "card__title", text: `${c.label}（${c.count} 張）` }),
+          el("span", { class: "card__title", text: c.mode === "field" ? c.label : `${c.label}（${c.count} 張）` }),
           el("span", { class: "card__sub", text: `${c.footprint.width.toFixed(1)} × ${c.footprint.depth.toFixed(1)} m${warn}` }),
         ]),
         button("套用", () => { this.app.applyMatCandidate(c.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm chip--primary"),
@@ -566,7 +770,7 @@ export class UI {
         el("span", { text: `${r.name}（${r.points.length} 點）` }),
         button(this.app.session.activeRouteId === r.id ? "繪製中" : "編輯", () => { this.app.editRoute(r.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
         button(focused ? "取消聚焦" : "聚焦", () => { this.app.setRouteFocus(focused ? null : r.id); if (this.compact) this.setSheet("none"); }, focused ? "chip chip--sm chip--primary" : "chip chip--sm"),
-        button("刪除", () => { this.app.setSelection([r.id]); this.app.deleteSelection(); }, "chip chip--sm chip--danger"),
+        button("刪除", () => { this.app.setSelection([r.id]); this.app.deleteSelection(); }, "chip chip--sm"),
       ]));
     }
     if (!s.routes.length) list.append(el("span", { class: "hint", text: "尚無動線。選一個類型開始畫。" }));
@@ -635,7 +839,14 @@ export class UI {
     const importInput = el("input", { type: "file", accept: "application/json", style: "display:none" }) as HTMLInputElement;
     importInput.addEventListener("change", async () => {
       const f = importInput.files?.[0]; if (!f) return;
-      try { this.app.store.loadProject(await importProjectJson(f) as never); } catch { alert("匯入失敗：JSON 格式錯誤"); }
+      const current = this.app.store.getState();
+      const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
+        current.groups.length > 0 || current.routes.length > 0;
+      if (hasContent && !window.confirm("載入 JSON 會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) {
+        importInput.value = "";
+        return;
+      }
+      try { this.app.store.loadProject(await importProjectJson(f) as never); this.showToast("已匯入專案"); } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
     });
     const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" }) as HTMLInputElement;
@@ -649,43 +860,57 @@ export class UI {
     };
     refreshList();
     const o = this.planOpts;
-    const shot = (preset: PlanPreset, role: "report" | "life" | "guide" | null, name: string) =>
-      downloadPng(renderConstructionPlan(state(), { ...o, preset, roleFilter: role }), `planform-${name}.png`);
-    const planSection = section("分享給夥伴（圖片）", [
-      el("p", { class: "hint", text: "輸出乾淨、可直接給工作人員看的圖，不含編輯控制點。" }),
-      button("場佈總覽", () => shot("full", null, "overview")),
-      button("動線圖", () => shot("route", null, "route"), "btn btn--ghost"),
-      button("地墊圖", () => shot("mats", null, "mats"), "btn btn--ghost"),
-      el("div", { class: "subhead", text: "夥伴任務圖（只顯示相關資訊）" }),
+    const share = (preset: PlanPreset, role: RoleFilter, kind: string, extra?: Partial<PlanOptions>) => {
+      const dataUrl = renderConstructionPlan(state(), { ...o, preset, roleFilter: role, ...extra });
+      void sharePng(dataUrl, pngFilename(state().name, kind)).then((how) => {
+        if (how !== "cancelled") this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+      });
+    };
+    const planChoice = (label: string, preset: PlanPreset, kind: string, extra: Partial<PlanOptions> = {}, role: RoleFilter = null) =>
+      el("div", { class: "export-choice" }, [
+        button(label, () => share(preset, role, kind, extra)),
+        button("手機版", () => share(preset, role, `${kind}-手機版`, { ...extra, page: "phone", orientation: "portrait" }), "chip chip--sm"),
+      ]);
+    const checkCounts = issueCounts(this.app.session.issues);
+    const uncalibratedExport = !calibrationComplete(this.app.store.getState());
+    const preExportChecklist = section("分享前先確認", [
+      el("div", { class: "checklist-row" }, [
+        el("span", { text: checkCounts.error ? "🔴" : checkCounts.warning ? "🟡" : "🟢" }),
+        el("span", { text: checkCounts.error ? "還有問題要先處理" : checkCounts.warning ? "有提醒，請看一下" : "目前沒有阻擋分享的問題" }),
+      ]),
+      ...(uncalibratedExport ? [el("div", { class: "checklist-row" }, [
+        el("span", { text: "🟡" }),
+        el("span", { text: "尺寸還沒現場校正——圖可以先傳討論，右下角會標「尺寸待現場校正」" }),
+      ])] : []),
+      el("div", { class: "hint", text: "分享會使用目前畫面與活動名稱；需要修改時可回到場地、場佈或動線。" }),
+    ]);
+    const planSection = section("場刊圖（傳給夥伴）", [
+      el("p", { class: "hint", text: "乾淨、看得懂的圖，手機會直接開分享（LINE），電腦則下載。" }),
+      el("div", { class: "export-grid" }, [
+        planChoice("場佈總覽圖", "full", "場佈總覽"),
+        button("3D 場佈圖", () => {
+          const dataUrl = this.app.scene.renderToDataURL(state(), "iso");
+          void sharePng(dataUrl, pngFilename(state().name, "3D場佈")).then((how) => {
+            if (how !== "cancelled") this.showToast(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+          });
+        }),
+        planChoice("動線圖", "route", "動線圖", { }, null),
+        planChoice("地墊 / 座位圖", "mats", "地墊座位圖"),
+        planChoice("工作分區圖", "zones", "工作分區圖"),
+        planChoice("物資清單圖", "inventory", "物資清單", { orientation: "portrait" }),
+        planChoice("夥伴觀看圖", "partner", "夥伴觀看圖", { simplify: true, dims: false }),
+      ]),
+      el("div", { class: "subhead", text: "各組任務圖（只顯示該組需要的）" }),
       el("div", { class: "row wrap" }, [
-        button("報到組", () => shot("staff", "report", "report"), "chip chip--sm"),
-        button("生活組", () => shot("staff", "life", "life"), "chip chip--sm"),
-        button("引導組", () => shot("staff", "guide", "guide"), "chip chip--sm"),
-      ]),
-      el("div", { class: "subhead", text: "模擬摘要" }),
-      el("p", { class: "hint", text: this.app.session.simResult
-        ? this.app.session.simResult.summaryLines.join(" ")
-        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
-      button("匯出模擬摘要 PNG", () => {
-        const r = this.app.session.simResult ?? this.app.runEventSimulation();
-        downloadPng(renderConstructionPlan(state(), {
-          ...o,
-          preset: "route",
-          simplify: true,
-          titleSuffix: "模擬摘要",
-          extraNotes: r.summaryLines,
-        }), "planform-sim-summary.png");
-      }, "btn btn--ghost"),
-      el("div", { class: "grid2" }, [
-        selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }], o.page, (v) => { o.page = v as PageSize; }),
-        selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
+        planChoice("報到組", "staff", "報到組", { titleSuffix: "報到組" }, "checkin"),
+        planChoice("收費組", "staff", "收費組", { titleSuffix: "收費組" }, "payment"),
+        planChoice("引導組", "staff", "引導組", { titleSuffix: "引導組" }, "guide"),
+        planChoice("生活組", "staff", "生活組", { titleSuffix: "生活組" }, "life"),
       ]),
       el("div", { class: "row wrap" }, [
-        button(o.dims ? "✓ 尺寸標註" : "尺寸標註", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
-        button(o.inventory ? "✓ 數量清單" : "數量清單", () => { o.inventory = !o.inventory; this.update(); }, o.inventory ? "chip chip--sm chip--primary" : "chip chip--sm"),
-        button(o.simplify ? "✓ 簡化顯示" : "簡化顯示", () => { o.simplify = !o.simplify; this.update(); }, o.simplify ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(o.dims ? "✓ 顯示尺寸" : "顯示尺寸", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(o.inventory ? "✓ 顯示物資數量" : "顯示物資數量", () => { o.inventory = !o.inventory; this.update(); }, o.inventory ? "chip chip--sm chip--primary" : "chip chip--sm"),
       ]),
-      button("3D 示意圖", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), "planform-3d.png"), "btn btn--ghost"),
     ]);
 
     const measureSection = section("現場量測", [
@@ -695,24 +920,65 @@ export class UI {
       ], this.app.session.measureType, (v) => this.app.setMeasureType(v as MeasurementType)),
       button("開始量測（端點自動吸附）", () => { this.app.startMeasure(this.app.session.measureType); if (this.compact) this.setSheet("none"); }),
       this.measurementsList(),
-    ]);
+    ], false);
 
-    return section("匯出 / 儲存", [
-      planSection,
-      measureSection,
-      el("div", { class: "subhead", text: "資料" }),
+    const advancedSection = section("進階匯出", [
+      el("div", { class: "grid2" }, [
+        selectField("紙張", [{ value: "a4", label: "A4" }, { value: "a3", label: "A3" }, { value: "phone", label: "手機版 1080×1920" }], o.page, (v) => { o.page = v as PageSize; }),
+        selectField("方向", [{ value: "landscape", label: "橫式" }, { value: "portrait", label: "直式" }], o.orientation, (v) => { o.orientation = v as PageOrientation; }),
+      ]),
+      button(o.simplify ? "✓ 簡化顯示（略過開關、電腦）" : "簡化顯示（略過開關、電腦）", () => { o.simplify = !o.simplify; this.update(); }, o.simplify ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      el("div", { class: "subhead", text: "模擬摘要" }),
+      el("p", { class: "hint", text: this.app.session.simResult
+        ? this.app.session.simResult.summaryLines.join(" ")
+        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
+      button("匯出模擬摘要圖", () => {
+        const r = this.app.session.simResult ?? this.app.runEventSimulation();
+        share("route", null, "模擬摘要", { simplify: true, titleSuffix: "模擬摘要", extraNotes: r.summaryLines });
+      }, "btn btn--ghost"),
+      button("3D 示意圖", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), pngFilename(state().name, "3D示意")), "btn btn--ghost"),
+      el("div", { class: "subhead", text: "專案資料（備份 / 搬機）" }),
       el("div", { class: "row" }, [
         button("匯出 JSON", () => exportProjectJson(state())),
         button("匯入 JSON", () => importInput.click(), "btn btn--ghost"),
       ]),
       importInput,
-      el("div", { class: "subhead", text: "本機平面圖" }),
+    ], false);
+
+    return section("分享 / 匯出", [
+      // 「給夥伴看」是主流程第四步的一半 — 夥伴模式在這裡有一級入口
+      // （手機不用再鑽 ⋯ 選單）。
+      button("👥 夥伴模式（給志工看的現場畫面）", () => this.app.enterPartnerMode(), "btn btn--big"),
+      preExportChecklist,
+      planSection,
+      el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
-      textField("簡短說明（團隊檢視顯示）", state().description, (v) => this.app.updateDescription(v)),
-      el("div", { class: "row" }, [layoutName, button("儲存", () => { this.app.store.saveNamedLayout(layoutName.value.trim() || state().name); refreshList(); })]),
+      textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
+      el("div", { class: "subhead", text: "我的平面圖（本機儲存）" }),
+      el("div", { class: "row" }, [layoutName, button("儲存", () => {
+        const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
+        if (saved) { refreshList(); this.showToast("已儲存平面圖"); }
+      })]),
       el("div", { class: "row" }, [layoutList,
-        button("載入", () => { if (layoutList.value) this.app.store.loadNamedLayout(layoutList.value); }, "btn btn--ghost"),
-        button("刪除", () => { if (layoutList.value) { this.app.store.deleteNamedLayout(layoutList.value); refreshList(); } }, "btn btn--ghost")]),
+        button("載入", () => {
+          if (!layoutList.value) return;
+          const current = this.app.store.getState();
+          const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
+            current.groups.length > 0 || current.routes.length > 0;
+          if (hasContent && !window.confirm("載入平面圖會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) return;
+          if (this.app.store.loadNamedLayout(layoutList.value)) this.showToast("已載入平面圖");
+        }, "btn btn--ghost"),
+        button("刪除", () => {
+          const name = layoutList.value;
+          if (!name) return;
+          if (!window.confirm(`確定刪除平面圖「${name}」？此動作無法復原。`)) return;
+          if (this.app.store.deleteNamedLayout(name)) {
+            refreshList();
+            this.showToast(`已刪除「${name}」`);
+          }
+        }, "btn btn--ghost")]),
+      measureSection,
+      advancedSection,
     ]);
   }
 
@@ -736,13 +1002,39 @@ export class UI {
   private update(): void {
     const sess = this.app.session;
     const s = this.app.store.getState();
+    const counts = issueCounts(sess.issues);
+    const uncalibrated = !calibrationComplete(s);
+    // 「檢查通過」next to a 待校正 banner reads as a contradiction — an
+    // uncalibrated venue can never claim a green light.
+    const tone = counts.error ? "bad" : counts.warning || uncalibrated ? "warn" : "ok";
+    this.statusBadge.className = "status-badge status-badge--" + tone;
+    this.statusBadge.textContent = counts.error
+      ? "有問題待處理"
+      : counts.warning ? "有提醒" : uncalibrated ? "尺寸待校正" : "檢查通過";
+    const pendingCalibration = uncalibrated;
+    this.calibrationBanner.style.display = pendingCalibration ? "flex" : "none";
+    if (pendingCalibration) {
+      const labels = calibrationPendingLabels(s);
+      const span = this.calibrationBanner.querySelector("span")!;
+      span.innerHTML = "";
+      // Wrap between terms only — never inside 「校正」 or 「門寬」.
+      span.append(el("span", { text: "尺寸待現場校正", style: "white-space:nowrap" }));
+      if (labels.length) {
+        span.append(el("span", { text: "：" }));
+        labels.forEach((label, i) => span.append(
+          el("span", { text: label + (i < labels.length - 1 ? "、" : ""), style: "white-space:nowrap" }),
+        ));
+      }
+    }
 
     if (this.compact) {
       const title = this.topbar.querySelector(".topbar__title--compact");
       if (title) title.textContent = s.name || "平面場 ISO";
     } else {
+      const desktopTitle = this.topbar.querySelector(".topbar__title");
+      if (desktopTitle) desktopTitle.textContent = s.name || "平面場 ISO";
       setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-      setPressed(this.topbar, "flows", (b) => WORKFLOWS[b].id === sess.workflow);
+      setPressed(this.topbar, "flows", (b) => PRIMARY_WORKFLOWS[b].id === sess.workflow);
       setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
       if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     }
@@ -789,7 +1081,39 @@ export class UI {
     this.applySheetState();
 
     // Placement + measure bars.
-    this.placebar.style.display = sess.mode === "place" ? "flex" : "none";
+    // The floating bottom bar serves placement AND route drawing, so 完成
+    // is always on screen even when the compact sheet is collapsed.
+    if (sess.zonePlace) {
+      if (this.placebarKind !== "zone") {
+        this.placebar.innerHTML = "";
+        this.placebar.append(el("div", { class: "placebar" }, [
+          el("span", { class: "placebar__hint", text: "點畫布放置區域" }),
+          button("取消放置區域", () => this.app.cancelPlacement(), "chip chip--danger"),
+        ]));
+        this.placebarKind = "zone";
+      }
+      this.placebar.style.display = "flex";
+    } else if (sess.mode === "place") {
+      if (this.placebarKind !== "place") {
+        this.placebar.innerHTML = "";
+        this.placebar.append(buildPlacementToolbar(this.app));
+        this.placebarKind = "place";
+      }
+      this.placebar.style.display = "flex";
+    } else if (sess.mode === "route" && sess.activeRouteId) {
+      if (this.placebarKind !== "route") {
+        this.placebar.innerHTML = "";
+        this.placebar.append(el("div", { class: "placebar" }, [
+          el("span", { class: "placebar__hint", text: "點地面新增動線節點" }),
+          button("完成繪製", () => this.app.finishRoute(), "chip chip--primary"),
+        ]));
+        this.placebarKind = "route";
+      }
+      this.placebar.style.display = "flex";
+    } else {
+      this.placebar.style.display = "none";
+      this.placebarKind = null;
+    }
     this.updateMeasureBar();
     this.viewport.schedule();
   }
@@ -915,4 +1239,48 @@ function setPressed(root: HTMLElement, group: string, pred: (i: number) => boole
   const c = root.querySelector(`[data-group="${group}"]`);
   if (!c) return;
   Array.from(c.querySelectorAll("button")).forEach((b, i) => b.setAttribute("aria-pressed", String(pred(i))));
+}
+
+/** Small overhead preview: enough to distinguish A/B/C without pretending it
+ * is a rendered 3D result. */
+function matCandidateThumb(candidate: LayoutCandidate): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.className = "mat-candidate-thumb";
+  canvas.width = 120;
+  canvas.height = 72;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const maxW = Math.max(...candidate.groups.map((g) => g.anchorX + g.cols * g.itemWidth)) -
+    Math.min(...candidate.groups.map((g) => g.anchorX));
+  const maxD = Math.max(...candidate.groups.map((g) => g.anchorZ + g.rows * g.itemDepth)) -
+    Math.min(...candidate.groups.map((g) => g.anchorZ));
+  const minX = Math.min(...candidate.groups.map((g) => g.anchorX));
+  const minZ = Math.min(...candidate.groups.map((g) => g.anchorZ));
+  const scale = Math.min(104 / Math.max(maxW, 0.1), 56 / Math.max(maxD, 0.1));
+  const ox = (canvas.width - maxW * scale) / 2;
+  const oz = (canvas.height - maxD * scale) / 2;
+  ctx.strokeStyle = "#64748b";
+  ctx.lineWidth = 1;
+  for (const group of candidate.groups) {
+    const x = ox + (group.anchorX - minX) * scale;
+    const z = oz + (group.anchorZ - minZ) * scale;
+    const w = group.cols * group.itemWidth * scale;
+    const d = group.rows * group.itemDepth * scale;
+    ctx.fillStyle = "#c4b5fd";
+    ctx.fillRect(x, z, w, d);
+    ctx.strokeRect(x, z, w, d);
+    ctx.strokeStyle = "rgba(100, 116, 139, .45)";
+    for (let col = 1; col < group.cols; col++) {
+      const gx = x + col * group.itemWidth * scale;
+      ctx.beginPath(); ctx.moveTo(gx, z); ctx.lineTo(gx, z + d); ctx.stroke();
+    }
+    for (let row = 1; row < group.rows; row++) {
+      const gz = z + row * group.itemDepth * scale;
+      ctx.beginPath(); ctx.moveTo(x, gz); ctx.lineTo(x + w, gz); ctx.stroke();
+    }
+    ctx.strokeStyle = "#64748b";
+  }
+  return canvas;
 }

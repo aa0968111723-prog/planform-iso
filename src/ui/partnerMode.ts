@@ -14,7 +14,7 @@ import type { App } from "../app/App";
 import { PARTNER_ROLES, type PartnerRole } from "../core/partner";
 import { formatDuration, type RehearsalEvent } from "../core/rehearsal";
 import { renderConstructionPlan } from "../export/constructionPlan";
-import { downloadPng } from "../export/exporters";
+import { pngFilename, sharePng } from "../export/exporters";
 import { button, el } from "./dom";
 
 export type PartnerSheet = "none" | "steps" | "timeline" | "suggest" | "marks";
@@ -63,14 +63,15 @@ export function buildPartnerMode(
       openSheet("timeline");
     }, "btn partneraction"),
     button("✦ 更順的排法", () => {
-      void app.requestPartnerSuggestion().then(() => openSheet("suggest"));
+      void app.requestPartnerSuggestion();
       openSheet("suggest");
     }, "btn partneraction partneraction--accent"),
     button("🖼 存成圖", () => {
-      downloadPng(
-        renderConstructionPlan(app.store.getState(), { preset: "full", simplify: true, dims: false, inventory: false }),
-        "planform-partner.png",
-      );
+      const state = app.store.getState();
+      const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false, inventory: false });
+      void sharePng(dataUrl, pngFilename(state.name, "夥伴觀看圖")).then((how) => {
+        if (how !== "cancelled") app.notifyToast?.(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+      });
     }, "btn partneraction"),
   ]);
   const dock = el("div", { class: "partnerdock" }, [brief, actions]);
@@ -111,7 +112,9 @@ export function buildPartnerMode(
     ]) as HTMLButtonElement;
     chip.addEventListener("click", () => {
       app.setPartnerRole(role.id as PartnerRole);
-      if (sheetKind === "timeline" || sheetKind === "suggest") return;
+      // Keep an open step sheet open, but let the already-rendered briefing
+      // replace its list with the newly selected role's instructions.
+      if (sheetKind === "steps" || sheetKind === "timeline" || sheetKind === "suggest") return;
       openSheet("none");
     });
     roles.append(chip);
@@ -121,6 +124,7 @@ export function buildPartnerMode(
 
   function renderBrief(): void {
     const b = app.partnerBriefing();
+    const role = app.session.partner?.role ?? "all";
     brief.innerHTML = "";
     if (b.emptyHint) {
       brief.append(el("span", { class: "partnerbrief__line", text: b.emptyHint }));
@@ -128,8 +132,12 @@ export function buildPartnerMode(
     }
     const lines: { icon: string; text: string }[] = [];
     if (b.youAre) lines.push({ icon: "📍", text: `你在「${b.youAre}」` });
-    if (b.peopleComeFrom) lines.push({ icon: "⬅️", text: `人從「${b.peopleComeFrom}」來` });
-    if (b.nextStop) lines.push({ icon: "➡️", text: `再往「${b.nextStop}」` });
+    if (role === "all" && b.flowSummary) {
+      lines.push({ icon: "➡️", text: `整體流程：${b.flowSummary}` });
+    } else {
+      if (b.peopleComeFrom) lines.push({ icon: "⬅️", text: `人從「${b.peopleComeFrom}」來` });
+      if (b.nextStop) lines.push({ icon: "➡️", text: `再往「${b.nextStop}」` });
+    }
     if (!lines.length) {
       lines.push({ icon: "👀", text: `整場流程共 ${b.steps.length} 步，點我看順序` });
     }
@@ -140,6 +148,12 @@ export function buildPartnerMode(
       ]));
     }
     brief.append(el("span", { class: "partnerbrief__more", text: sheetKind === "steps" ? "收起 ▾" : "看步驟 ▸" }));
+    brief.append(el("span", {
+      class: "partnerbrief__journey",
+      text: role === "all"
+        ? `整體流程：${b.flowSummary ?? "依現場動線前進"}`
+        : `上一站：${b.peopleComeFrom ?? "入口"} → 你：${b.youAre ?? "目前沒有指定站點"} → 下一站：${b.nextStop ?? "座區結束"}`,
+    }));
   }
 
   function renderSteps(): void {
@@ -218,7 +232,7 @@ export function buildPartnerMode(
       return;
     }
     const shot = (project: Parameters<typeof renderConstructionPlan>[0]) =>
-      renderConstructionPlan(project, { preset: "full", simplify: true, dims: false, inventory: false });
+      renderConstructionPlan(project, { preset: "full", simplify: true, dims: false, inventory: false, scale: 1 });
 
     sheetBody.append(
       el("div", { class: "beforeafter" }, [
