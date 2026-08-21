@@ -9,11 +9,18 @@ export interface WorkspaceProbe {
   coverage: number;
 }
 
-/** Load the app with the first-run overlay already dismissed. */
+/** Load the app with the first-run overlay already dismissed, in the editor. */
 export async function openWorkspace(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    // A clean library every time, then straight into the editor: these tests
+    // are about the workspace, and 我的專案 is now the default first screen.
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("planform-iso:") && key !== "planform-iso:venues") {
+        localStorage.removeItem(key);
+      }
+    }
     localStorage.setItem("planform-iso:quickstart", "1");
-    localStorage.removeItem("planform-iso:autosave");
+    localStorage.setItem("planform-iso:boot", "editor");
   });
   await page.goto("/");
   await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);

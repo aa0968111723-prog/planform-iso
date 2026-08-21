@@ -83,6 +83,7 @@ import {
   type VenueCaptureSession,
 } from "../assets/venueCapture";
 import { Store } from "../state/store";
+import type { ProjectSession } from "../state/projectSession";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
 import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
 import { QuickAgent } from "../agent/quickAgent";
@@ -196,6 +197,8 @@ const TOUCH_GHOST_OFFSET_PX = 46;
 
 export class App {
   readonly store: Store;
+  /** The project library. Owns which project is open; see state/projectSession. */
+  readonly projects: ProjectSession;
   readonly scene: SceneManager;
   readonly session: Session = {
     selection: new Set(),
@@ -274,8 +277,9 @@ export class App {
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
 
-  constructor(canvas: HTMLCanvasElement, store: Store) {
+  constructor(canvas: HTMLCanvasElement, store: Store, projects: ProjectSession) {
     this.store = store;
+    this.projects = projects;
     this.scene = new SceneManager(canvas);
     // Light by default; a stored preference wins. Applied before the first
     // paint so the canvas and the panels never disagree for a frame.
@@ -577,11 +581,32 @@ export class App {
     return ok;
   }
 
-  /** Load a Quick Start generated project and land the user in 場佈. */
-  startFromQuickStart(project: Project): void {
-    // The store keeps an undo checkpoint when replacing a non-empty plan; the
-    // wizard still confirms so the replacement is explicit.
-    this.store.loadProject(project);
+  /**
+   * Take on a project that has just been loaded into the Store.
+   *
+   * Split in two halves because boot adopts BEFORE `new UI` exists. The frame
+   * half depends on `scene.setViewportRects(...)`, which only ever runs from
+   * inside `UI`'s viewport subscription — recentering before that frames
+   * against unmeasured defaults, with nothing to correct it afterwards.
+   */
+  adoptProject(project: Project, opts: { frame: boolean; toast?: string }): void {
+    // --- state half: always ------------------------------------------------
+    // Everything here is derived from the OLD project and would otherwise
+    // survive the switch: a selection of ids that no longer exist, a
+    // half-placed object, a simulation of somebody else's floor plan.
+    this.session.selection = new Set();
+    this.cancelPlacement();
+    if (this.session.measure) this.stopMeasure();
+    if (this.session.calibrate) this.cancelCalibration();
+    this.session.agentPreview = null;
+    this.session.simResult = null;
+    this.session.simPositions = [];
+    this.session.simMode = "off";
+    this.session.simCompare = null;
+    this.session.matCandidates = [];
+    this.session.issues = [];
+    this.session.focusRouteId = null;
+
     const scenario = project.activeScenarioId
       ? project.scenarios.find((s) => s.id === project.activeScenarioId)
       : project.scenarios[0];
@@ -604,6 +629,16 @@ export class App {
       // number the event was created with.
       this.session.participants = scenario.participantCount;
     }
+    this.scene.setView(project.view);
+
+    // --- frame half: interactive opens only --------------------------------
+    if (!opts.frame) {
+      // Boot restores exactly what the previous session left, including its
+      // workflow step. Forcing 場佈 here would change first-launch behaviour
+      // for every existing user.
+      this.notifyUi();
+      return;
+    }
     this.setWorkflow("layout");
     // Two flat purple slabs in a shallow isometric view read as nothing on a
     // phone — compact devices open the plan top-down.
@@ -611,7 +646,8 @@ export class App {
       this.setView("top");
     }
     this.recenterView();
-    this.toast("場佈起點已建立，直接拖曳調整即可");
+    if (opts.toast) this.toast(opts.toast);
+    this.notifyUi();
   }
 
   // --- array groups ------------------------------------------------------

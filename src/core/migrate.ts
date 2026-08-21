@@ -428,6 +428,12 @@ export function createDefaultScenario(
 export function migrateProject(input: Partial<Project>): Project {
   const base = createDefaultProject();
   const p: Project = { ...base, ...input, version: PROJECT_VERSION };
+  // v8: keep an existing id. Without this the fresh uid() from
+  // createDefaultProject() would be overwritten by the spread only when the
+  // input HAS one — and a document without one must keep the fresh id rather
+  // than inherit a shared constant. Guards "" and non-strings from hand-edited
+  // or foreign JSON.
+  p.id = typeof input.id === "string" && input.id.length > 0 ? input.id : base.id;
   p.classroom = { ...base.classroom, ...input.classroom };
   p.corridor = { ...base.corridor, ...input.corridor };
   p.tile = { ...base.tile, ...input.tile };

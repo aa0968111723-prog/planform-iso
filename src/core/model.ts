@@ -9,9 +9,12 @@
  * v5: Asset Catalog — optional assetId / serviceRole; custom catalogExtras.
  * v6: Event Flow — ServiceStation / EventScenario for DES simulation.
  * v7: E310 venue identity + three independent field-calibration confirmations.
+ * v8: stable project identity (`id`) + optional event date — a project library
+ *     needs a key that is not the display name, because two events can share a
+ *     name and a rename must not orphan the file.
  */
 
-export const PROJECT_VERSION = 7;
+export const PROJECT_VERSION = 8;
 
 export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
@@ -315,7 +318,16 @@ export interface ProjectCatalogExtra {
 
 export interface Project {
   version: number;
+  /**
+   * v8: stable identity, independent of `name`. This is the project's storage
+   * key, so it must never be reused across a duplicate and must never be
+   * derived from anything the user can edit.
+   */
+  id: string;
   name: string;
+  /** v8: optional 活動日期, `YYYY-MM-DD`. Lives on the body so export, import
+   *  and duplicate carry it — an index-only copy would be silently dropped. */
+  eventDate?: string;
   /** Built-in venue identity, retained so honest calibration copy survives reload. */
   venuePresetId?: string;
   /** Short activity description shown in the team/partner view. */
@@ -362,6 +374,11 @@ export const ZONE_DEFAULTS: Record<
 export function createDefaultProject(): Project {
   return {
     version: PROJECT_VERSION,
+    // MUST be an inline uid() call. A module-level constant or a memoised value
+    // would collapse every migrated legacy document onto ONE storage key and
+    // destroy the whole library in a single pass — migrate.ts spreads this base
+    // over the input, so this is the id a document without one inherits.
+    id: uid("proj"),
     name: "未命名平面圖",
     description: "",
     classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 },

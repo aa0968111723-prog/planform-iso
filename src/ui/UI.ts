@@ -18,9 +18,12 @@ import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuShe
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
 import { quickStartSeen, showQuickStart } from "./quickStart";
+import { buildProjectHome, type ProjectHomeHandle } from "./projectHome";
 import { BUILD_INFO } from "../buildInfo";
 import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
-import { Store } from "../state/store";
+import type { Screen, ToastUndo } from "../state/projectSession";
+import { readLegacyCorruptBackup } from "../state/projectStorage";
+import { migrateProject } from "../core/migrate";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
 
@@ -77,6 +80,8 @@ export class UI {
   private sheetHistoryPushed = false;
   private viewport: WorkspaceViewport;
   private mode: WorkspaceMode = "desktop";
+  private projectHome: ProjectHomeHandle;
+  private screen: Screen = "editor";
   private builtHeaderMode: WorkspaceMode | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
@@ -93,9 +98,15 @@ export class UI {
       onExit: () => this.app.exitPartnerMode(),
       onLayoutChange: () => this.viewport.schedule(),
     });
+    this.projectHome = buildProjectHome({
+      session: app.projects,
+      menu: this.menu,
+      onNewProject: () => this.openQuickStart(),
+      onToast: (msg, undo) => this.showToast(msg, undo),
+    });
     root.append(
       this.topbar, this.calibrationBanner, this.left, this.right, this.nav, this.placebar, this.measurebar,
-      this.box, this.toast, this.ctxbar, this.menu.root,
+      this.box, this.toast, this.ctxbar, this.projectHome.root, this.menu.root,
       this.partner.top, this.partner.dock, this.partner.sheet,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
@@ -150,7 +161,7 @@ export class UI {
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
     this.app.store.onLayoutError = (action) =>
-      this.showToast(action === "save" ? "儲存平面圖失敗，請先匯出 JSON" : "刪除平面圖失敗，原檔案仍保留");
+      this.showToast(action === "save" ? "儲存這版場佈失敗，請先匯出 JSON" : "刪除這版場佈失敗，原檔案仍保留");
     this.app.onImprove = () => this.agentSheet.runPreset("幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門");
     this.app.onChange(() => this.update());
     this.bindKeys();
@@ -191,17 +202,49 @@ export class UI {
   /** Open the Quick Start wizard (first run, or 更多 → 快速開始). */
   openQuickStart(): void {
     if (this.root.querySelector(".quickstart")) return;
-    const overlay = showQuickStart(this.app, () => {
+    const overlay = showQuickStart(this.app, this.app.projects, () => {
       this.viewport.schedule();
       this.update();
     });
     this.root.append(overlay);
   }
 
-  private showToast(msg: string, undo = false): void {
+  /**
+   * Switch application surface.
+   *
+   * Home deliberately leaves the project hydrated with its persistence
+   * installed, so 「繼續編輯」 is instant — which is exactly why `bindKeys`
+   * has to refuse to act while this is `"home"`.
+   */
+  setScreen(screen: Screen): void {
+    this.screen = screen;
+    this.root.dataset.screen = screen;
+    if (screen === "home") {
+      if (this.app.session.partner) this.app.exitPartnerMode();
+      this.setSheet("none");
+      this.menu.close();
+      this.projectHome.update();
+    }
+    // The canvas is display:none on Home, so the measured rect changes in both
+    // directions and the camera has to be told.
+    this.viewport.schedule();
+    this.update();
+  }
+
+  refreshProjectHome(): void {
+    this.projectHome.update();
+  }
+
+  showToast(msg: string, undo: boolean | ToastUndo = false): void {
     this.toast.innerHTML = "";
     this.toast.append(el("span", { text: msg }));
-    if (undo) this.toast.append(button("復原", () => this.app.undo(), "chip chip--sm"));
+    if (undo === true) this.toast.append(button("復原", () => this.app.undo(), "chip chip--sm"));
+    else if (undo && typeof undo === "object") {
+      this.toast.append(button(undo.label, () => {
+        this.toast.style.display = "none";
+        undo.onSelect();
+      }, "chip chip--sm"));
+    }
     this.toast.style.display = "flex";
     if (this.toastTimer !== null) window.clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => { this.toast.style.display = "none"; }, 4000);
@@ -223,7 +266,7 @@ export class UI {
    * Workflows live in the bottom nav; everything else lives behind More.
    */
   private buildCompactTopbar(): void {
-    const title = el("div", { class: "topbar__title topbar__title--compact" });
+    const title = this.buildHomeChip("chip chip--sm topbar__home");
     const history = el("div", { class: "group" }, [
       button("↶", () => this.app.undo(), "chip chip--sm"),
       button("↷", () => this.app.redo(), "chip chip--sm"),
@@ -258,10 +301,26 @@ export class UI {
     const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
-      el("div", { class: "topbar__title", text: "平面場 ISO" }),
+      this.buildHomeChip("chip topbar__home"),
       history, flows, views, more, el("div", { class: "topbar__spacer" }), team, moreBtn,
     );
     this.topbar.append(this.statusBadge);
+  }
+
+  /**
+   * The way back to 我的專案, in the slot the project name used to occupy.
+   *
+   * 🗂 and not ←: a back arrow next to a label reads as "back to that label",
+   * and this goes to the library, not to the project it names.
+   */
+  private buildHomeChip(cls: string): HTMLButtonElement {
+    const home = button("", () => this.app.projects.goHome(), cls);
+    home.append(
+      el("span", { class: "topbar__home-glyph", text: "🗂" }),
+      el("span", { class: "topbar__home-name" }),
+    );
+    home.setAttribute("aria-label", "回到我的專案");
+    return home;
   }
 
   private openViewMenu(): void {
@@ -311,6 +370,7 @@ export class UI {
       {
         title: "活動",
         items: [
+          { label: "🗂 我的專案", sub: "切換活動、複製或刪除舊的場佈", onSelect: () => this.app.projects.goHome() },
           { label: "🚀 快速開始", sub: "選場地、勾需求、自動排場佈", onSelect: () => this.openQuickStart() },
           { label: "重新命名活動", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
         ],
@@ -323,12 +383,12 @@ export class UI {
             sub: `${BUILD_INFO.commit}${BUILD_INFO.builtAt ? ` · ${BUILD_INFO.builtAt.slice(0, 16).replace("T", " ")}` : ""}`,
             onSelect: () => true,
           },
-          ...(Store.corruptBackup()
+          ...(readLegacyCorruptBackup()
             ? [{
                 label: "下載損壞前的備份",
-                sub: "上次無法讀取的專案原始資料",
+                sub: "舊版存檔中無法讀取的資料",
                 onSelect: () => {
-                  const raw = Store.corruptBackup();
+                  const raw = readLegacyCorruptBackup();
                   if (raw) {
                     const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
                     downloadPng(url, "planform-備份.json");
@@ -839,22 +899,30 @@ export class UI {
     const importInput = el("input", { type: "file", accept: "application/json", style: "display:none" }) as HTMLInputElement;
     importInput.addEventListener("change", async () => {
       const f = importInput.files?.[0]; if (!f) return;
-      const current = this.app.store.getState();
-      const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
-        current.groups.length > 0 || current.routes.length > 0;
-      if (hasContent && !window.confirm("載入 JSON 會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) {
-        importInput.value = "";
-        return;
+      // Importing no longer replaces anything, so the old confirm is gone. It
+      // does have to reject junk BEFORE creating a project, or a bad file
+      // becomes a permanent broken card in 我的專案.
+      try {
+        const parsed = await importProjectJson(f) as unknown;
+        const shape = parsed as { version?: unknown; zones?: unknown; objects?: unknown };
+        if (!parsed || typeof parsed !== "object" || typeof shape.version !== "number" ||
+            (!Array.isArray(shape.zones) && !Array.isArray(shape.objects))) {
+          this.showToast("匯入失敗：檔案格式不正確");
+        } else {
+          const meta = this.app.projects.createProject({ project: migrateProject(parsed), open: true });
+          this.showToast(`已匯入「${meta.name}」`);
+        }
+      } catch {
+        this.showToast("匯入失敗：檔案格式不正確");
       }
-      try { this.app.store.loadProject(await importProjectJson(f) as never); this.showToast("已匯入專案"); } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
     });
-    const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" }) as HTMLInputElement;
+    const layoutName = el("input", { type: "text", placeholder: "這版場佈的名字", class: "field__input" }) as HTMLInputElement;
     const layoutList = el("select", { class: "field__input" }) as HTMLSelectElement;
     const refreshList = () => {
-      const names = this.app.store.listLayouts(); const cur = layoutList.value;
+      const names = this.app.projects.listLayouts(); const cur = layoutList.value;
       layoutList.innerHTML = "";
-      layoutList.append(el("option", { value: "", text: names.length ? "選擇平面圖…" : "尚無已存平面圖" }));
+      layoutList.append(el("option", { value: "", text: names.length ? "選擇存過的場佈…" : "還沒存過其他排法" }));
       for (const n of names) layoutList.append(el("option", { value: n, text: n }));
       if (names.includes(cur)) layoutList.value = cur;
     };
@@ -954,25 +1022,26 @@ export class UI {
       el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
       textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
-      el("div", { class: "subhead", text: "我的平面圖（本機儲存）" }),
+      el("div", { class: "subhead", text: "這份專案存過的場佈" }),
+      el("p", { class: "hint", text: "同一個活動的不同排法；換活動請回「我的專案」開新的。" }),
       el("div", { class: "row" }, [layoutName, button("儲存", () => {
-        const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
-        if (saved) { refreshList(); this.showToast("已儲存平面圖"); }
+        const saved = this.app.projects.saveLayout(layoutName.value.trim() || state().name);
+        if (saved) { refreshList(); this.showToast("已儲存這版場佈"); }
       })]),
       el("div", { class: "row" }, [layoutList,
         button("載入", () => {
           if (!layoutList.value) return;
-          const current = this.app.store.getState();
-          const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
-            current.groups.length > 0 || current.routes.length > 0;
-          if (hasContent && !window.confirm("載入平面圖會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) return;
-          if (this.app.store.loadNamedLayout(layoutList.value)) this.showToast("已載入平面圖");
+          if (!window.confirm("載入其他排法會取代畫面上目前的排法（目前這版會先自動存起來）。要繼續嗎？")) return;
+          if (this.app.projects.applyLayout(layoutList.value)) {
+            refreshList();
+            this.showToast("已載入");
+          }
         }, "btn btn--ghost"),
         button("刪除", () => {
           const name = layoutList.value;
           if (!name) return;
-          if (!window.confirm(`確定刪除平面圖「${name}」？此動作無法復原。`)) return;
-          if (this.app.store.deleteNamedLayout(name)) {
+          if (!window.confirm(`確定刪除場佈「${name}」？此動作無法復原。`)) return;
+          if (this.app.projects.deleteLayout(name)) {
             refreshList();
             this.showToast(`已刪除「${name}」`);
           }
@@ -1012,7 +1081,10 @@ export class UI {
       ? "有問題待處理"
       : counts.warning ? "有提醒" : uncalibrated ? "尺寸待校正" : "檢查通過";
     const pendingCalibration = uncalibrated;
-    this.calibrationBanner.style.display = pendingCalibration ? "flex" : "none";
+    // Belt and braces with the CSS hide list: this banner is position:fixed at
+    // z 55 and would otherwise float over the card grid.
+    this.calibrationBanner.style.display =
+      pendingCalibration && this.screen === "editor" ? "flex" : "none";
     if (pendingCalibration) {
       const labels = calibrationPendingLabels(s);
       const span = this.calibrationBanner.querySelector("span")!;
@@ -1027,12 +1099,12 @@ export class UI {
       }
     }
 
-    if (this.compact) {
-      const title = this.topbar.querySelector(".topbar__title--compact");
-      if (title) title.textContent = s.name || "平面場 ISO";
-    } else {
-      const desktopTitle = this.topbar.querySelector(".topbar__title");
-      if (desktopTitle) desktopTitle.textContent = s.name || "平面場 ISO";
+    // The header's first slot names the open project and is the way back to
+    // 我的專案. The index's copy of the name wins while it is fresher than the
+    // Store (a rename of another project writes the index first).
+    const homeName = this.topbar.querySelector(".topbar__home-name");
+    if (homeName) homeName.textContent = this.app.projects.activeMeta?.name || s.name || "我的專案";
+    if (!this.compact) {
       setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
       setPressed(this.topbar, "flows", (b) => PRIMARY_WORKFLOWS[b].id === sess.workflow);
       setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
@@ -1199,6 +1271,12 @@ export class UI {
     window.addEventListener("keydown", (e) => {
       const tgt = e.target as HTMLElement;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "SELECT" || tgt.tagName === "TEXTAREA")) return;
+      // Home keeps the project hydrated and its autosave live, so Delete / d /
+      // arrows here would mutate the open plan while the user is looking at a
+      // card grid — and `loadProject` clears the undo stack on the next switch,
+      // so it would be unrecoverable. The wizard half fixes the same
+      // pre-existing hole in the non-modal Quick Start overlay.
+      if (this.screen === "home" || this.root.querySelector(".quickstart")) return;
       // Partner Mode is read-only: only Escape (close a sheet, then leave).
       if (this.app.session.partner) {
         if (e.key !== "Escape") return;

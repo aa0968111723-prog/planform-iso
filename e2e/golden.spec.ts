@@ -17,15 +17,16 @@ import { settle } from "./helpers";
 async function openFresh(page: Page): Promise<void> {
   await page.addInitScript(() => {
     // Only wipe on the FIRST load — a later reload must behave like a real
-    // returning user (autosave intact, wizard already seen).
+    // returning user (their project intact, wizard already seen).
     if (!sessionStorage.getItem("e2e-fresh-done")) {
       sessionStorage.setItem("e2e-fresh-done", "1");
-      localStorage.removeItem("planform-iso:quickstart");
-      localStorage.removeItem("planform-iso:autosave");
-      localStorage.removeItem("planform-iso:autosave-backup");
-      localStorage.removeItem("planform-iso:venues");
-      localStorage.removeItem("planform-iso:layouts");
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("planform-iso:")) localStorage.removeItem(key);
+      }
     }
+    // Outside the guard on purpose: these flows are about the editor, and the
+    // reload in Flow 3 must land there too rather than on 我的專案.
+    localStorage.setItem("planform-iso:boot", "editor");
   });
   await page.goto("/");
   await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
