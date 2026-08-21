@@ -319,7 +319,11 @@ test.describe("我的專案的畫面契約（手機）", () => {
     await openLibrary(page);
     await expect(page.locator("#app")).toHaveAttribute("data-screen", "home");
 
-    for (const sel of [".topbar", ".left", ".right", ".bottomnav", ".ctxbar", "#scene", ".calibration-banner"]) {
+    // The list is hardcoded on purpose, and it is the thing that has to grow
+    // when new editor chrome appears: the AI 預覽就緒 bar is `position: fixed`
+    // at the highest z-index in the app and was missed by the first version.
+    for (const sel of [".topbar", ".left", ".right", ".bottomnav", ".ctxbar", "#scene",
+                       ".calibration-banner", ".agent-sheet", ".agent-preview-bar"]) {
       expect(await isOnScreen(page, sel), `${sel} must be hidden on 我的專案`).toBe(false);
     }
     expect(await isOnScreen(page, ".projecthome")).toBe(true);
@@ -390,6 +394,93 @@ test.describe("我的專案的畫面契約（手機）", () => {
     });
     await settle(page);
     expect(await zoneTypes(page)).toEqual(["registration"]);
+  });
+});
+
+test.describe("AI 預覽不會跨到別的專案（桌機）", () => {
+  test.use({ viewport: { width: 1366, height: 1024 } });
+
+  test("回到我的專案會收掉預覽，套用不到另一份專案", async ({ page }) => {
+    await openEditor(page);
+    await addZone(page, "registration");
+
+    // A real local preview — MockProvider, no network.
+    const previewing = await page.evaluate(async () => {
+      const pf = (window as unknown as {
+        planform: { agent: { run(r: { text: string }): Promise<unknown>; isPreviewActive(): boolean } };
+      }).planform;
+      await pf.agent.run({ text: "幫我排場佈" });
+      return pf.agent.isPreviewActive();
+    });
+    expect(previewing).toBe(true);
+
+    await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: { projects: { createProject(o: { name: string; open: boolean }): unknown } };
+      }).planform;
+      pf.projects.createProject({ name: "另一個活動", open: true });
+    });
+    await settle(page);
+
+    // Committing it now would replace THIS project's zones, objects, routes and
+    // even its name with a draft generated from the previous one.
+    const stillPreviewing = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: { agent: { isPreviewActive(): boolean } };
+      }).planform;
+      return pf.agent.isPreviewActive();
+    });
+    expect(stillPreviewing).toBe(false);
+    expect(await isOnScreen(page, ".agent-preview-bar")).toBe(false);
+    expect(await zoneTypes(page)).toEqual([]);
+  });
+
+  test("從我的專案開啟後，平面圖是照編輯器的可視範圍框的", async ({ page }) => {
+    await openEditor(page);
+    await addZone(page, "registration");
+    await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: { projects: { createProject(o: { name: string; open: boolean }): unknown; goHome(): void } };
+      }).planform;
+      pf.projects.createProject({ name: "第二個活動", open: true });
+      pf.projects.goHome();
+    });
+    await page.waitForTimeout(250);
+
+    const framed = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: {
+          repo: { listProjects: () => { id: string; name: string }[] };
+          projects: { openProject(id: string): boolean };
+          app: {
+            recenterView(): void;
+            scene: { project(x: number, z: number): { x: number; y: number } };
+            store: { getState(): { classroom: { x: number; z: number; length: number; width: number } } };
+          };
+        };
+      }).planform;
+      // The scale the room is drawn at — the thing that goes wrong when the
+      // camera is framed against a screen where every rail is display:none.
+      const span = () => {
+        const s = pf.app.store.getState();
+        const a = pf.app.scene.project(s.classroom.x, s.classroom.z);
+        const b = pf.app.scene.project(s.classroom.x + s.classroom.length, s.classroom.z);
+        return Math.hypot(b.x - a.x, b.y - a.y);
+      };
+      const target = pf.repo.listProjects().find((m) => m.name === "第二個活動")!;
+      pf.projects.openProject(target.id);
+      const onOpen = span();
+      // What the same call produces once the editor is demonstrably measured.
+      pf.app.recenterView();
+      return { onOpen, correct: span() };
+    });
+
+    // Framed against Home's insets the room comes up over-zoomed, and the only
+    // fix the user has is to find 置中 themselves. Both numbers come from the
+    // same projection, so a real difference here is a real difference on screen.
+    expect(framed.correct).toBeGreaterThan(0);
+    const drift = Math.abs(framed.onOpen - framed.correct) / framed.correct;
+    expect(drift).toBeLessThan(0.02);
   });
 });
 

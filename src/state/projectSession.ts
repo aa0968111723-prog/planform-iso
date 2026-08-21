@@ -277,15 +277,7 @@ export class ProjectSession {
    */
   private canAdoptPristine(): boolean {
     if (!this.activeIdValue || this.activeIdValue !== this.pristineBootId) return false;
-    const p = this.store.getState();
-    return (
-      p.zones.length === 0 &&
-      p.objects.length === 0 &&
-      p.groups.length === 0 &&
-      p.routes.length === 0 &&
-      p.measurements.length === 0 &&
-      (p.scenarios?.length ?? 0) === 0
-    );
+    return !planHasContent(this.store.getState());
   }
 
   goHome(): void {
@@ -396,14 +388,13 @@ export class ProjectSession {
     if (!id) return false;
 
     const current = this.store.getState();
-    const hasContent =
-      current.zones.length > 0 ||
-      current.objects.length > 0 ||
-      current.groups.length > 0 ||
-      current.routes.length > 0;
-    if (hasContent) {
+    if (planHasContent(current)) {
       try {
-        this.repo.writeLayout(id, autoKeepName(), current);
+        // A minute-granular name would let a second 載入 inside the same minute
+        // overwrite this auto-keep with an arrangement that is ALREADY saved
+        // under its own name — and the arrangement it replaced was never
+        // written anywhere else.
+        this.repo.writeLayout(id, uniqueAutoKeepName(this.repo.listLayouts(id)), current);
       } catch {
         this.onToast?.("目前的排法沒能先存起來，已取消載入");
         return false;
@@ -436,9 +427,48 @@ export class ProjectSession {
   }
 }
 
+/**
+ * Does this plan hold anything the user would miss?
+ *
+ * One predicate, two callers, on purpose. Measurements and scenarios count:
+ * someone who walked the venue and recorded 尺寸線 before placing a single
+ * object, or who configured an event-flow 情境, has real work here. The
+ * four-array version of this test is exactly the unsound check that the
+ * deleted `confirmReplace()` used to wipe plans with — it must not grow back.
+ */
+function planHasContent(p: Project): boolean {
+  return (
+    p.zones.length > 0 ||
+    p.objects.length > 0 ||
+    p.groups.length > 0 ||
+    p.routes.length > 0 ||
+    p.measurements.length > 0 ||
+    (p.scenarios?.length ?? 0) > 0
+  );
+}
+
 /** 「自動保留 3/14 20:11」 — legible at a glance, and sorts naturally per day. */
 function autoKeepName(): string {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `自動保留 ${now.getMonth() + 1}/${now.getDate()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+/**
+ * An auto-keep name that cannot clobber an earlier one.
+ *
+ * Comparing two saved 場佈 means two 載入 within the same minute, and the name
+ * above only has minute resolution. The second write would then replace the
+ * first auto-keep — which holds the user's unsaved arrangement — with content
+ * that is already saved under its own name. Same failure as a single-slot
+ * tombstone: the only surviving copy, dropped silently.
+ */
+function uniqueAutoKeepName(taken: string[]): string {
+  const base = autoKeepName();
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
+  for (let i = 2; ; i += 1) {
+    const candidate = `${base}（${i}）`;
+    if (!used.has(candidate)) return candidate;
+  }
 }

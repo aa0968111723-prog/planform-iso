@@ -152,6 +152,10 @@ export class UI {
       // Everything that frames the world uses the measured visible rect, so the
       // camera never assumes the whole window is canvas.
       this.app.scene.setViewportRects(state.canvas, state.safeRect, state.focusRect);
+      // A project opened from 我的專案 was adopted while the canvas and every
+      // rail were still display:none, so its framing used the wrong insets.
+      // This is the first moment real rects exist; re-frame exactly once.
+      if (this.screen === "editor" && this.app.consumePendingFrame()) this.app.recenterView();
       this.onModeMaybeChanged();
     });
 
@@ -217,6 +221,13 @@ export class UI {
    * has to refuse to act while this is `"home"`.
    */
   setScreen(screen: Screen): void {
+    // Always, in both directions: an AI preview belongs to the project it was
+    // generated from. Its 套用 bar is `position: fixed` at the highest z-index
+    // in the app and is a SIBLING of `.agent-sheet`, so it outlives any screen
+    // change on its own — and committing it after a switch would overwrite a
+    // different project's zones, objects, routes and name wholesale.
+    this.agentSheet.close();
+
     this.screen = screen;
     this.root.dataset.screen = screen;
     if (screen === "home") {
@@ -225,9 +236,11 @@ export class UI {
       this.menu.close();
       this.projectHome.update();
     }
-    // The canvas is display:none on Home, so the measured rect changes in both
-    // directions and the camera has to be told.
-    this.viewport.schedule();
+    // Measure NOW, not on the next frame: the canvas has just flipped between
+    // display:none and visible, and `App.adoptProject` has already asked for a
+    // frame that must land against the rects of the screen we are entering,
+    // not the one we are leaving.
+    this.viewport.measure();
     this.update();
   }
 

@@ -645,9 +645,28 @@ export class App {
     if (typeof window !== "undefined" && window.matchMedia?.("(max-width: 600px)").matches) {
       this.setView("top");
     }
+    // Best effort now (correct when the editor is already on screen), and
+    // again after the next measurement (correct when it is not).
+    this.framePending = true;
     this.recenterView();
     if (opts.toast) this.toast(opts.toast);
     this.notifyUi();
+  }
+
+  private framePending = false;
+
+  /**
+   * Whether the plan still needs framing against real viewport rects.
+   *
+   * Opening a project from 我的專案 adopts it while `#scene` and every rail are
+   * `display:none`, so `recenterView()` picks its zoom from the Home layout —
+   * the plan lands over-zoomed with an edge under the docked rail. `UI` calls
+   * this once per measurement and re-frames when it returns true.
+   */
+  consumePendingFrame(): boolean {
+    if (!this.framePending) return false;
+    this.framePending = false;
+    return true;
   }
 
   // --- array groups ------------------------------------------------------

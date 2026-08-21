@@ -73,6 +73,80 @@ quarantine 四步、rename/duplicate 兩條路徑、CSS 欄數切換。
 
 ---
 
+## 1b. 第二輪對抗式審查（多視角 ＋ 反駁）
+
+第一輪抓到四個之後，又跑了一輪不同角度的：五個獨立視角（資料遺失／開機與復原／
+手機畫面契約／遷移正確性／測試的假信心）各自讀真實檔案，共 16 個 finding，
+取最嚴重的 8 個交給「預設判定為誤報」的反駁者，**4 個活下來**。全部修了。
+
+### 🔴 高 — 一分鐘內載入兩次場佈，使用者沒存的排法會被無聲蓋掉
+
+`autoKeepName()` 只有到分鐘的解析度，而 `writeLayout` 是無條件覆蓋。
+比較兩版場佈＝一分鐘內載入兩次：第二次的「自動保留」會用**已經另外存過**的
+內容蓋掉第一次的，而第一次那份保的是使用者拖了 20 分鐘、沒存過的排法。
+專案 body 在載入後 400ms 也被覆蓋，undo stack 又會在下次切換或 reload 時清掉，
+所以那份排法哪裡都不存在了 —— 但確認對話框剛剛才說「目前這版會先自動存起來」。
+
+這和第一輪修掉的 tombstone 是同一個 bug class。那次的註解（「刪 A 再刪 B
+會把 A 唯一的副本丟在地上」）把「刪」換成「載入」就是這一條。
+
+→ `uniqueAutoKeepName(taken)`：撞名就加 `（2）`、`（3）`。
+
+### 🔴 高 — AI 的「預覽就緒」列會跟著你離開專案，套用會蓋到**另一份**專案
+
+`quickAgentSheet` 把預覽列**移出** `.agent-sheet`、掛到 host 上，所以它是
+sibling 不是 descendant；Home 的隱藏清單只寫了 `.agent-sheet`，碰不到它。
+它是 `position: fixed`、`z-index: 61`（全檔最高，在 toast 40、精靈 50、
+menusheet 60 之上），而 Home 上 `--ws-header-h` 塌成 0，所以它正好蓋在
+「我的專案」標題和「＋建立新專案」上面，而且完全可以點。
+
+更糟的是跨專案：在 A 專案預覽 → 回我的專案 → 開 B → 按套用。
+`tx.commit` 是整份取代（zones／objects／routes／groups／measurements
+加 `Object.assign(p, next)`），連 **name 都會變成 A 的**，所以 B 的卡片
+也跟著改名。
+
+→ `UI.setScreen()` 一律先 `agentSheet.close()`（會 rollback 並收掉列），
+加上 CSS 改成隱藏 `.agent-sheet-host`。
+
+### 🟡 中 — `applyLayout` 的 hasContent 漏了量測與情境
+
+只看 zones／objects／groups／routes —— 正是我自己在 `quickStart.ts` 的註解裡
+說「這個判斷不成立，所以要拿掉」的那一個。走過場地、只記了尺寸線的專案，
+或只設定了活動流程情境的專案，載入其他排法前**完全不會**被保留。
+
+→ 抽出單一的 `planHasContent()`，`applyLayout` 和 `canAdoptPristine` 共用，
+兩邊不會再各自漂移。
+
+### 🟡 中 — 從我的專案開啟時，鏡頭是照著「Home 的版面」框的
+
+`openProject` 先 `hydrate()`（裡面就框好了鏡頭）才 `setScreen("editor")`，
+而框的當下 `#scene` 和所有側欄都還是 `display:none`，所以 inset 全是 0。
+之後的量測只會重新錨定、不會重框。實測在 1366×1024 下縮放差 **6.3%**
+（房間邊緣被側欄壓住），使用者得自己去按「置中」。
+
+→ `App` 記一個 `framePending`，`UI` 在每次量測後 `consumePendingFrame()`
+時重框一次；`setScreen` 改用同步的 `viewport.measure()`。
+
+### 這四條都有測試釘住，而且驗證過「拿掉修法就會紅」
+
+| 測試 | 拿掉修法後 |
+|---|---|
+| 同一分鐘內載入兩次，第一次自動保留的排法不會被蓋掉 | ❌ |
+| 只有量測的專案，載入其他排法前也會先保留 | ❌ |
+| 只有量測時，精靈也會開新專案而不是覆蓋 | ❌ |
+| 回到我的專案會收掉預覽，套用不到另一份專案（e2e） | ❌ |
+| 從我的專案開啟後，平面圖是照編輯器的可視範圍框的（e2e） | ❌ drift 6.3% > 2% |
+
+最後一條第一版寫錯了：只比對「中心點離安全區中心多近」，容差 ±35%，
+把修法拿掉照樣是綠的。改成量**房間被畫出來的長度**，跟同一支投影在編輯器裡
+`recenterView()` 之後的值相比，才真的抓得到。這正是這一輪第五個視角
+（測試的假信心）要找的東西 —— 而它在我自己新寫的測試上就出現了一次。
+
+e2e 的隱藏清單也一併補上 `.agent-sheet` 與 `.agent-preview-bar`：那份清單是
+硬編碼的，而它漏掉預覽列正是這個 bug 能活下來的原因。
+
+---
+
 ## 2. Grok 盲測（§19）— **沒有執行，原因如下**
 
 這個容器的出站代理擋掉 x.ai：
@@ -107,9 +181,9 @@ curl: (56) CONNECT tunnel failed, response 403
 |---|---|
 | `npm run lint` | PASS |
 | `npm run typecheck` | PASS |
-| `npm run test`（Vitest） | PASS — 33 檔 286 測試 |
+| `npm run test`（Vitest） | PASS — 33 檔 289 測試 |
 | `npm run build` | PASS |
-| `npm run test:e2e`（Playwright，10 viewport + Golden Flows + 多專案） | PASS — 83 測試 |
+| `npm run test:e2e`（Playwright，10 viewport + Golden Flows + 多專案） | PASS — 85 測試 |
 | `node scripts/prodSmoke.mjs`（正式 bundle，本機 preview） | PASS — 15/15 |
 
 prodSmoke 的 15 項包含「離線重新整理仍然開得起來，而且看得到專案」，

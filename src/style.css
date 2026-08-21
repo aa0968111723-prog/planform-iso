@@ -914,6 +914,10 @@ html, body {
 #app[data-screen="home"] .ctxbar,
 #app[data-screen="home"] .placebar-wrap,
 #app[data-screen="home"] .measurebar,
+/* The host, not just `.agent-sheet`: `quickAgentSheet` MOVES the 預覽就緒 bar
+   out of the sheet and into the host, so it is a sibling and a rule naming
+   only `.agent-sheet` never reaches it. */
+#app[data-screen="home"] .agent-sheet-host,
 #app[data-screen="home"] .agent-sheet,
 #app[data-screen="home"] .calibration-banner,
 #app[data-screen="home"] #scene { display: none !important; }

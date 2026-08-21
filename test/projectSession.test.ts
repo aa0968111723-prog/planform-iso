@@ -33,6 +33,18 @@ function zone(name: string, x = 0): Zone {
   };
 }
 
+function measurement(id: string): Project["measurements"][number] {
+  return {
+    id,
+    type: "free-distance",
+    start: { x: 0, z: 0 },
+    end: { x: 3, z: 0 },
+    locked: false,
+    visible: true,
+    color: "#facc15",
+  };
+}
+
 function plan(name: string): Project {
   const p = createDefaultProject();
   p.name = name;
@@ -136,6 +148,58 @@ describe("ProjectSession", () => {
     expect(autoKept).toBeDefined();
     const kept = session.repo.readLayout(session.activeId!, autoKept!);
     expect(kept?.zones[0].x).toBe(9);
+  });
+
+  it("同一分鐘內載入兩次，第一次自動保留的排法不會被蓋掉", () => {
+    session.createProject({ project: plan("A"), open: true });
+    store.mutate((p) => void p.zones.push(zone("晚宴", 1)));
+    session.saveLayout("晚宴版");
+    store.mutate((p) => void (p.zones[0].x = 2));
+    session.saveLayout("午餐版");
+
+    // The arrangement the user has been dragging and has NOT saved anywhere.
+    store.mutate((p) => void (p.zones[0].x = 99));
+
+    // Two 載入 back to back — comparing two saved arrangements, which lands
+    // both auto-keeps inside the same minute.
+    expect(session.applyLayout("晚宴版")).toBe(true);
+    expect(session.applyLayout("午餐版")).toBe(true);
+
+    const id = session.activeId!;
+    const autoKept = session.listLayouts().filter((n) => n.startsWith("自動保留"));
+    expect(autoKept.length).toBe(2);
+
+    // The unsaved arrangement must still be recoverable from one of them.
+    const positions = autoKept.map((n) => session.repo.readLayout(id, n)?.zones[0]?.x);
+    expect(positions).toContain(99);
+  });
+
+  it("只有量測的專案，載入其他排法前也會先保留", () => {
+    session.createProject({ project: plan("只有量測"), open: true });
+    store.mutate((p) => void p.zones.push(zone("暫時")));
+    session.saveLayout("有東西的版本");
+    store.mutate((p) => {
+      p.zones = [];
+      p.measurements.push(measurement("m1"));
+    });
+
+    expect(session.applyLayout("有東西的版本")).toBe(true);
+
+    // 尺寸線 is real work: walking the venue and recording it before placing a
+    // single object must not count as "nothing to keep".
+    const autoKept = session.listLayouts().find((n) => n.startsWith("自動保留"));
+    expect(autoKept).toBeDefined();
+    const kept = session.repo.readLayout(session.activeId!, autoKept!);
+    expect(kept?.measurements).toHaveLength(1);
+  });
+
+  it("只有量測時，精靈也會開新專案而不是覆蓋", () => {
+    session.bootstrap();
+    store.mutate((p) => void p.measurements.push(measurement("m1")));
+
+    session.createProject({ project: plan("新的活動"), open: true, adoptPristineActive: true });
+
+    expect(session.listProjects()).toHaveLength(2);
   });
 
   it("儲存場佈不會把專案改名", () => {
