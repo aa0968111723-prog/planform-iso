@@ -1,6 +1,6 @@
 # CURRENT_STATE（Claude Lead checkpoint）
 
-更新：2026-08-21 08:0x · 環境已更換（見 §0）
+更新：2026-08-21 09:3x · 環境已更換（見 §0）
 
 ## 0. ⚠ 環境變更 — 接手者必讀
 
@@ -31,6 +31,9 @@ branch `release/planform-1.0-rc`，base `main` @ `86fe454`。本輪 commits：
 | `fa8df82` | fix(e310)：到達窗 20 分鐘＋物資清單寫真實物資名 |
 | `9f2807b` | fix(ux)：幫我改善的 Before/After＋測試瀏覽器 UTF-8 locale |
 | `7e03d7b` | fix(export)：場刊圖可讀性（標題最後畫、白色光暈、圖例補進手機版） |
+| `59617b8` | docs(handoff)：Round 4 Claude-run 對抗檢查與 gate 狀態 |
+| `8e67335` | fix(export)：物資數量欄不被擠掉，重產場刊圖組 |
+| `337dcad` | fix(ux)：armed 區域不再劫走動線的第一次點擊（Round 5） |
 
 ## 2. Release Gate 逐項
 
@@ -60,13 +63,14 @@ branch `release/planform-1.0-rc`，base `main` @ `86fe454`。本輪 commits：
 ```
 npm run lint       ✅
 npm run typecheck  ✅
-npm run test       ✅ 239/239（原 196 + 新 43）
+npm run test       ✅ 242/242（原 196 + 新 46）
 npm run build      ✅
-npm run test:e2e   ✅ 72/72
+npm run test:e2e   ✅ 74/74
 ```
 
 新測試：`test/crowd.test.ts`（13）、`test/theme.test.ts`（10）、
-`test/fieldEvidence.test.ts`（18）、`test/agent.test.ts` +2。
+`test/fieldEvidence.test.ts`（18）、`test/agent.test.ts` +2、
+`test/eventFlow.test.ts` +3、`e2e/workspace.spec.ts` +2。
 `fieldEvidence.test.ts` 把有證據支持的數值釘在 `REFERENCE_MAPPING` 條目上，
 防止日後漂回 generic 預設。
 
@@ -76,11 +80,30 @@ npm run test:e2e   ✅ 72/72
 
 ## 4. 待辦
 
-1. 重產 `docs/release-1.0/` 場刊證據（淺色版）：
-   `npm run build` → `PLANFORM_PREVIEW_URL=http://127.0.0.1:4173 node scripts/exportPlans.cjs`
-2. 更新 PR #17 body
-3. **使用者端**：跑 `audit-local-references.ps1`、放行 production 網域或本機跑 prodSmoke
-4. **不 merge**
+Claude 這一側能做的都做完了。剩下**全部**卡在使用者端：
+
+1. 跑 `scripts\audit-local-references.ps1`，把真實照片／場刊圖清單的**結論**
+   回填 `REFERENCE_MAPPING.md`（照片本身不要 commit）
+2. 放行 `planform-iso-k7d2.zeabur.app`，或在本機跑
+   `node scripts/prodSmoke.mjs https://planform-iso-k7d2.zeabur.app`
+3. 若要真的跑 Grok 盲測／Codex 實作：在本機安裝並登入兩支 CLI
+4. **不 merge**——Production Gate 通過前這仍是 RC
+
+已完成（勿重做）：場刊證據圖已用淺色版重產（`8e67335`）；PR #17 body 已更新到 Round 5。
+
+## 4.1 Round 5（Codex review bot 的兩則未結 thread）
+
+兩則都**先查證再處置**，不照單全收：
+
+- 「平均等待未加權」→ **指控不成立**：`eventFlow.ts` 早就是 `totalWaitSeconds / agents.length`
+  （每人平均），`simPanel` 用的也是這個頂層值。補 3 個 unit test 釘住，含一個反向斷言。
+- 「armed 區域沒被清除」→ **大部分不成立**（`cancelPlacement()` 有清、`setWorkflow()`／Escape
+  都會呼叫、畫面上有取消按鈕），**但**五個入口（`newRoute` / `newRoutePreset` / `editRoute` /
+  `startMeasure` / `startCalibration`）直接改 `session.mode`，而 click chain 裡 `zonePlace`
+  排在 route point 之前 → 舉起區域後開始畫動線，第一下會掉一個區域。已用 `enterMode()` 修掉。
+  **先把修復拿掉證明 e2e 會失敗**（`Received: "registration"`）才收工。
+
+兩則 thread 已回覆並 resolve。
 
 ## 5. Known limitations（PR §17 同步）
 
@@ -91,7 +114,7 @@ npm run test:e2e   ✅ 72/72
 - S-04/S-06/S-07/S-08/S-09（電腦、收費箱、鞋架、欄杆、立牌）真實性未覆核，
   已標 `estimated`／`medium`，且全部保持為可刪可換的一般物件。
 - E310 尺寸仍為照片推導起點，維持「待現場校正」。
-- 場刊圖尚存 P2：背包放置區標題會略蓋到左側鞋架小標。
+- 場刊圖尚存 P2：背包放置區標題會略蓋到地墊區 A 下緣。
 - 前輪既有 P2 清單見 Round 3 尾表。
 
 ## 6. 環境備忘（供任何 agent 接手）
