@@ -116,11 +116,13 @@ describe("S-07/S-08/S-09 unverified kit stays removable, never fixed furniture",
 describe("物資清單 names the material the 場務組 has to carry", () => {
   it("lists mat groups as 巧拼 60 × 60, not a generic 地墊", () => {
     const project = buildE310GoldenProject(venuePresetById("venue:tku-e310")!);
-    const matLine = inventoryLines(project).find((l) => l.name.includes("地墊"));
+    const matLine = inventoryLines(project).find((l) => l.name.includes("巧拼"));
     expect(matLine).toBeDefined();
-    // The old code emitted the placeholder "▫" icon and the bare kind name.
+    // The old code emitted the placeholder "▫" icon and the bare kind name 地墊.
     expect(matLine!.icon).not.toBe("▫");
-    expect(matLine!.name).toContain("巧拼");
+    expect(matLine!.name).toContain("60");
+    // Short enough that the count still fits the 物資數量 column.
+    expect(matLine!.name.length).toBeLessThanOrEqual(16);
     // The golden 60-person example lays a real field, not a handful of mats.
     expect(matLine!.count).toBeGreaterThan(50);
   });

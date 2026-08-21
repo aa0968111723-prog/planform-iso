@@ -22,7 +22,14 @@ async function clickDownload(page, label, filename) {
 async function main() {
   fs.mkdirSync(EXPORT_DIR, { recursive: true });
   fs.mkdirSync(PHONE_DIR, { recursive: true });
-  const browser = await chromium.launch({ headless: true, args: ["--enable-unsafe-swiftshader"] });
+  // PLAYWRIGHT_CHROMIUM_EXECUTABLE mirrors playwright.config.ts so a box with a
+  // preinstalled browser (and no headless-shell download) can still regenerate
+  // the plans. Software GL because the 3D page needs a real WebGL context.
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+    args: ["--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader"],
+  });
   const context = await browser.newContext({ viewport: { width: 1366, height: 1024 }, acceptDownloads: true });
   const page = await context.newPage();
   await page.addInitScript(() => {

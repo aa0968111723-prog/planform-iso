@@ -146,7 +146,11 @@ export function inventoryLines(project: Project): InventoryLine[] {
     const preset = entry.presets?.find(
       (p) => Math.abs(p.width - g.itemWidth) < 1e-6 && Math.abs(p.depth - g.itemDepth) < 1e-6,
     );
-    add(entry.icon, preset ? `${entry.name}（${preset.label}）` : entry.name, g.rows * g.cols);
+    // When the preset names the real material (巧拼), that name alone is what
+    // the 場務組 says out loud — and short enough that the count still fits the
+    // column. A bare-size preset keeps the kind name in front of it.
+    const named = preset && /[\u4e00-\u9fff]/.test(preset.label);
+    add(entry.icon, named ? preset.label : preset ? `${entry.name} ${preset.label}` : entry.name, g.rows * g.cols);
   }
   return [...byName.values()].sort((a, b) => b.count - a.count);
 }
@@ -706,7 +710,10 @@ function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][numb
     }
     ctx.textAlign = "left";
     ctx.font = font("600 16px");
-    ctx.fillText("一人約 1 格寬 × 1.5 格深", x, y + h + 28);
+    const pitchText = "一人約 1 格寬 × 1.5 格深";
+    const pitchW = ctx.measureText(pitchText).width;
+    const pitchSpot = placeLabel(x, y + h + 12, pitchW, 20, 24);
+    planText(ctx, pitchText, pitchSpot.x, pitchSpot.y + 16);
   }
 
   // Two lines (name / spec) so a narrow block never ellipsizes the piece count.
