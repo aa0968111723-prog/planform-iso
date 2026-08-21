@@ -333,3 +333,36 @@ describe("createDefaultScenario + migration v6", () => {
     expect(again.activeScenarioId).toBe(scn.id);
   });
 });
+
+describe("平均等待 is per attendee, not an average of stations", () => {
+  // Review finding: averaging the per-station avgWaitSeconds gives a barely
+  // used station the same weight as check-in, and counts stations nobody
+  // queued at as zero. The headline 「平均等待」 must answer "how long did a
+  // person wait", so it has to divide total wait by people.
+  const result = runDiscreteEvent(miniScenario());
+
+  it("equals totalWaitSeconds divided by the participant count", () => {
+    expect(result.avgWaitSeconds).toBeCloseTo(
+      result.totalWaitSeconds / result.participantCount,
+      6,
+    );
+  });
+
+  it("does not equal the unweighted mean of the station averages", () => {
+    // Only half the attendees visit 收費, so the two must differ — if they ever
+    // coincide the guard above has stopped proving anything.
+    const stationMean =
+      result.stations.reduce((sum, s) => sum + s.avgWaitSeconds, 0) / result.stations.length;
+    expect(Math.abs(stationMean - result.avgWaitSeconds)).toBeGreaterThan(1);
+  });
+
+  it("station stats still divide each station's wait by the people it served", () => {
+    for (const s of result.stations) {
+      if (!s.served) {
+        expect(s.avgWaitSeconds).toBe(0);
+        continue;
+      }
+      expect(s.avgWaitSeconds).toBeCloseTo(s.totalWaitSeconds / s.served, 6);
+    }
+  });
+});

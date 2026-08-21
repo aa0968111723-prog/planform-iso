@@ -404,6 +404,17 @@ export class App {
     this.notifyUi();
   }
 
+  /**
+   * Enter a drawing / measuring mode, disarming any pending zone tap first.
+   * The armed zone is checked before route points in the canvas-click chain,
+   * so arming 「點畫面放區域」 and then starting a route made the next tap drop
+   * a zone instead of adding a route point.
+   */
+  private enterMode(mode: Mode): void {
+    this.session.zonePlace = null;
+    this.session.mode = mode;
+  }
+
   cancelPlacement(): void {
     if (this.session.mode === "place") this.session.mode = "select";
     this.session.zonePlace = null;
@@ -758,13 +769,13 @@ export class App {
     const colors = ["#f97316", "#22d3ee", "#a78bfa", "#34d399", "#f43f5e"];
     const route: Route = { id: uid("route"), name: `動線 ${this.state.routes.length + 1}`, color: colors[this.state.routes.length % colors.length], points: [], visible: true, type: "custom" };
     this.store.mutate((p) => p.routes.push(route));
-    this.session.mode = "route";
+    this.enterMode("route");
     this.session.activeRouteId = route.id;
     this.setSelection([route.id]);
     this.notifyUi();
   }
   finishRoute(): void { this.session.activeRouteId = null; this.session.mode = "select"; this.notifyUi(); }
-  editRoute(id: string): void { this.session.mode = "route"; this.session.activeRouteId = id; this.setSelection([id]); this.notifyUi(); }
+  editRoute(id: string): void { this.enterMode("route"); this.session.activeRouteId = id; this.setSelection([id]); this.notifyUi(); }
   updateRoute(id: string, patch: Partial<Route>): void { this.store.mutate((p) => { const r = p.routes.find((x) => x.id === id); if (r) Object.assign(r, patch); }); }
 
   // --- measure -----------------------------------------------------------
@@ -772,7 +783,7 @@ export class App {
   setMeasureType(t: MeasurementType): void { this.session.measureType = t; this.notifyUi(); }
   startMeasure(type: MeasurementType = "free-distance"): void {
     this.session.measureType = type;
-    this.session.mode = "measure";
+    this.enterMode("measure");
     this.session.measure = { a: null, b: null };
     this.notifyUi();
   }
@@ -800,7 +811,7 @@ export class App {
 
   // --- calibration wizard ------------------------------------------------
 
-  startCalibration(): void { this.session.mode = "calibrate"; this.session.calibrate = { a: null, b: null }; this.notifyUi(); }
+  startCalibration(): void { this.enterMode("calibrate"); this.session.calibrate = { a: null, b: null }; this.notifyUi(); }
   cancelCalibration(): void { this.session.mode = "select"; this.session.calibrate = null; this.render(); }
   getCalibrationDistance(): number | null {
     const c = this.session.calibrate;
@@ -1065,7 +1076,7 @@ export class App {
     const pre = routePreset(type);
     const route: Route = { id: uid("route"), name: pre.label, color: pre.color, points: [], visible: true, type };
     this.store.mutate((p) => p.routes.push(route));
-    this.session.mode = "route";
+    this.enterMode("route");
     this.session.activeRouteId = route.id;
     this.setSelection([route.id]);
     this.notifyUi();

@@ -303,3 +303,64 @@ test.describe("camera framing uses the visible canvas rect", () => {
     expect(framed).toBe(true);
   });
 });
+
+/**
+ * Review finding: arming 「點畫面放置」 for a zone and then starting to draw a
+ * route left the zone armed. The armed zone is checked before route points in
+ * the canvas-click chain, so the next tap dropped a zone on the plan instead of
+ * adding a point — in the middle of drawing a 動線, on a phone, in a classroom.
+ */
+test.describe("an armed zone does not hijack the next canvas tap", () => {
+  test("starting a route disarms a pending zone placement", async ({ page }) => {
+    await openWorkspace(page);
+
+    const before = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: {
+          app: { beginZonePlacement(t: string): void; newRoutePreset(t: string): void; session: { zonePlace: string | null } };
+          store: { getState(): { zones: unknown[]; routes: { points: unknown[] }[] } };
+        };
+      }).planform;
+      pf.app.beginZonePlacement("registration");
+      const armed = pf.app.session.zonePlace;
+      pf.app.newRoutePreset("entry");
+      return { armed, stillArmed: pf.app.session.zonePlace, zones: pf.store.getState().zones.length };
+    });
+    expect(before.armed).toBe("registration");
+    expect(before.stillArmed).toBeNull();
+
+    // Tap inside the visible canvas rect — x:200 sits under the desktop left
+    // rail, so the click would be intercepted rather than reaching the scene.
+    const spot = await page.evaluate(() => {
+      const r = (window as unknown as { planform: { workspace: () => WorkspaceProbe } }).planform.workspace().safeRect;
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    });
+    await page.mouse.click(spot.x, spot.y);
+    await page.waitForTimeout(200);
+    const after = await page.evaluate(() => {
+      const s = (window as unknown as {
+        planform: { store: { getState(): { zones: unknown[]; routes: { points: unknown[] }[] } } };
+      }).planform.store.getState();
+      return { zones: s.zones.length, points: Math.max(0, ...s.routes.map((r) => r.points.length)) };
+    });
+    expect(after.zones).toBe(before.zones);
+    expect(after.points).toBeGreaterThan(0);
+  });
+
+  test("Escape and workflow changes still clear it", async ({ page }) => {
+    await openWorkspace(page);
+    const cleared = await page.evaluate(() => {
+      const app = (window as unknown as {
+        planform: { app: { beginZonePlacement(t: string): void; setWorkflow(w: string): void; cancelPlacement(): void; session: { zonePlace: string | null } } };
+      }).planform.app;
+      app.beginZonePlacement("shoe");
+      app.setWorkflow("route");
+      const afterWorkflow = app.session.zonePlace;
+      app.beginZonePlacement("shoe");
+      app.cancelPlacement();
+      return { afterWorkflow, afterCancel: app.session.zonePlace };
+    });
+    expect(cleared.afterWorkflow).toBeNull();
+    expect(cleared.afterCancel).toBeNull();
+  });
+});

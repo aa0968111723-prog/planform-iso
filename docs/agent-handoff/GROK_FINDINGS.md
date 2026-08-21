@@ -149,3 +149,19 @@ viewport 各跑一次，並**實際打開匯出的 PNG 用眼睛看**。
 - **production URL 本身**（SHA、PWA 安裝、離線、真手機觸控）
 - Grok 的獨立盲測觀點——本輪是實作者自己檢查自己，天生有盲點
 - 真實現場：E310 尺寸、社團實際物資清單
+
+---
+
+## Round 5（2026-08-21，RC `8e67335`）— Codex review bot 的兩則未結 thread
+
+PR #17 上 `chatgpt-codex-connector` 留了兩則 P2，先逐項查證再處置——**不照單全收**。
+
+| # | 級 | Bot 指控 | 查證結果 | 處置 |
+|---|---|---|---|---|
+| R5-1 | P2 | 「平均等待」是各站 `avgWaitSeconds` 的未加權平均，沒去的站算 0，數字會失真 | **指控不成立（已被修過）**：`eventFlow.ts` 的 `avgWaitSeconds = totalWaitSeconds / agents.length`，是每人平均；`simPanel` 用的也是這個頂層值，不是站點平均。thread 本身被標 outdated | 補 3 個 unit test 永久釘住（含一個反向斷言：站點未加權平均必須**不等於**它，否則守衛失效） |
+| R5-2 | P2 | armed 的區域放置只有成功落地才清除，切換工作流／Escape／取消路徑都不會清，之後點畫布會突然冒出區域 | **大部分不成立、一小段成立**：`cancelPlacement()` 有清、`setWorkflow()` 會呼叫它、Escape 也會、而且畫面上有「取消放置區域」按鈕。**但** `newRoute()` / `newRoutePreset()` / `editRoute()` / `startMeasure()` / `startCalibration()` 直接改 `session.mode`，沒清 `zonePlace`；而 click chain 裡 `zonePlace` 排在 route point 之前 → **舉起區域後開始畫動線，第一下點擊會掉一個區域而不是動線點** | 新增 `enterMode()`：進入繪製／量測模式一律先解除 armed 區域。兩個 e2e 守住 |
+
+**先證明測試抓得到**：把 `enterMode` 的清除拿掉重跑，e2e 如預期失敗（`Received: "registration"`），
+放回去才綠。沒有寫一個永遠會過的測試。
+
+Gate：lint ✅ typecheck ✅ unit **242/242** ✅ build ✅ e2e ✅
