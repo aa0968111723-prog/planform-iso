@@ -34,6 +34,8 @@ import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
+import { SimCrowd } from "./crowd";
+import { DEFAULT_THEME, EXPORT_PALETTE, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
@@ -68,7 +70,7 @@ interface SessionView {
   showLabels: boolean;
   focusRouteId?: string | null;
   simplify?: boolean;
-  simPositions?: { x: number; z: number; routeId?: string; state?: string }[];
+  simPositions?: { id?: number; x: number; z: number; routeId?: string; state?: string }[];
   bottlenecks?: { x: number; z: number; count: number; name?: string; kind?: "door" | "corridor" | "route" }[];
   simQueues?: Record<string, number>;
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
@@ -127,6 +129,10 @@ export class SceneManager {
   private ghostGroup = new Group();
   private measureGroup = new Group(); // persistent dimension lines
   private overlayGroup = new Group(); // selection + live measure/calibrate
+  /** Simulation participants — persistent instanced figures, not per-frame meshes. */
+  private crowd = new SimCrowd();
+  private theme: ThemeName = DEFAULT_THEME;
+  private palette: ScenePalette = scenePalette(DEFAULT_THEME);
   private partnerGroup = new Group(); // partner-mode marks (never in editor mode)
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
@@ -151,10 +157,11 @@ export class SceneManager {
     applyRendererLook(this.renderer);
 
     this.scene = new Scene();
-    this.scene.background = new Color(0x0b1120);
+    this.scene.background = new Color(this.palette.background);
     this.scene.add(
       this.floorGroup, this.tileGroup, this.zoneGroup, this.objectGroup,
       this.arrayGroupRoot, this.routeGroup, this.ghostGroup, this.measureGroup, this.overlayGroup,
+      this.crowd.group,
       this.partnerGroup,
     );
 
@@ -417,6 +424,29 @@ export class SceneManager {
     return { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: maxX - minX, h: maxZ - minZ };
   }
 
+  /** Current visual theme. Light is the default; dark is opt-in. */
+  getTheme(): ThemeName {
+    return this.theme;
+  }
+
+  /**
+   * Switch the canvas between the paper-like light look and the dark look.
+   * Floors, walls and area labels are baked into meshes, so the area cache is
+   * invalidated to force a rebuild on the next sync.
+   */
+  setTheme(theme: ThemeName): void {
+    if (theme === this.theme) return;
+    this.theme = theme;
+    this.applyPalette(scenePalette(theme));
+  }
+
+  private applyPalette(palette: ScenePalette): void {
+    this.palette = palette;
+    this.scene.background = new Color(palette.background);
+    // Areas, walls and labels carry palette colours in their materials.
+    this.lastAreaSig = "";
+  }
+
   private syncAreasAndTiles(project: Project, simplify: boolean): void {
     const { tile } = project;
     this.floorGroup.visible = this.layersState.areas;
@@ -431,14 +461,18 @@ export class SceneManager {
       const areaGroup = new Group();
       const floor = new Mesh(
         new PlaneGeometry(area.length, area.width),
-        new MeshStandardMaterial({ color: area.id === "classroom" ? 0x334155 : 0x172033, roughness: 1, side: DoubleSide }),
+        new MeshStandardMaterial({
+          color: area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor,
+          roughness: 1,
+          side: DoubleSide,
+        }),
       );
       floor.rotation.x = -Math.PI / 2;
       floor.position.set(area.x + area.length / 2, 0, area.z + area.width / 2);
       areaGroup.add(floor);
       areaGroup.add(this.buildAreaWalls(area));
       const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
-      label.set(area.name, area.id === "classroom" ? "#e2e8f0" : "#bae6fd");
+      label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
       label.sprite.scale.set(1.8, 0.42, 1);
       label.sprite.position.set(area.x + area.length / 2, 0.14, area.z + area.width / 2);
       areaGroup.add(label.sprite);
@@ -450,7 +484,9 @@ export class SceneManager {
   /** Raised, thick wall rails make an empty classroom and its corridor legible. */
   private buildAreaWalls(area: Project["classroom"]): Group {
     const walls = new Group();
-    const material = new MeshBasicMaterial({ color: area.id === "classroom" ? 0xf8fafc : 0x7dd3fc });
+    const material = new MeshBasicMaterial({
+      color: area.id === "classroom" ? this.palette.wallClassroom : this.palette.wallCorridor,
+    });
     const thickness = 0.1;
     const height = 0.12;
     const rails = [
@@ -795,7 +831,7 @@ export class SceneManager {
         const numLabel = partner
           ? new TextLabel({ width: 160, height: 160, fontSize: 108 })
           : new TextLabel();
-        numLabel.set(partner ? circledNumber(index + 1) : String(index + 1), partner ? "#f8fafc" : "#0b1120");
+        numLabel.set(partner ? circledNumber(index + 1) : String(index + 1), partner ? "#f8fafc" : this.palette.stepNumber);
         numLabel.sprite.scale.set(partner ? 0.9 : 0.5, partner ? 0.9 : 0.5, 1);
         numLabel.sprite.position.set(p.x, y + (partner ? 0.75 : 0.5), p.z);
         group.add(numLabel.sprite);
@@ -896,7 +932,12 @@ export class SceneManager {
       const b = this.combinedBounds(project);
       const plane = new Mesh(
         new PlaneGeometry(b.w + 4, b.h + 4),
-        new MeshBasicMaterial({ color: 0x0b1120, transparent: true, opacity: 0.62, depthWrite: false }),
+        new MeshBasicMaterial({
+          color: this.palette.focusVeil,
+          transparent: true,
+          opacity: this.palette.focusVeilOpacity,
+          depthWrite: false,
+        }),
       );
       plane.rotation.x = -Math.PI / 2;
       plane.position.set(b.cx, 3, b.cz);
@@ -926,15 +967,9 @@ export class SceneManager {
         label.sprite.position.set(st.x, 1.1, st.z);
       }
     }
-    if (session.simPositions && session.simPositions.length) {
-      for (const p of session.simPositions) {
-        const col =
-          p.state === "queued" ? 0xfbbf24 : p.state === "serving" ? 0x38bdf8 : 0xfef08a;
-        const dot = new Mesh(new BoxGeometry(0.28, 0.28, 0.28), new MeshBasicMaterial({ color: col }));
-        dot.position.set(p.x, 0.5, p.z);
-        this.overlayGroup.add(dot);
-      }
-    }
+    // People are drawn by SimCrowd in its own persistent group — instanced and
+    // reused, so playback does not allocate a mesh per person per frame.
+    this.crowd.update(session.simPositions);
     if (session.bottlenecks && session.bottlenecks.length) {
       const seenBottleneckLabels = new Set<string>();
       for (const bn of session.bottlenecks) {
@@ -1137,7 +1172,7 @@ export class SceneManager {
    * the exported PNG.
    */
   renderToDataURL(project: Project, view: ViewName): string {
-    const editorLayers = [this.ghostGroup, this.overlayGroup, this.measureGroup];
+    const editorLayers = [this.ghostGroup, this.overlayGroup, this.measureGroup, this.crowd.group];
     const prevVisible = editorLayers.map((g) => g.visible);
     const savedPosition = this.camera.position.clone();
     const savedQuaternion = this.camera.quaternion.clone();
@@ -1157,11 +1192,17 @@ export class SceneManager {
       this.renderer.setSize(shotW, shotH, false);
       this.setView(view);
       this.fitExportBounds(planBounds(project), shotW, shotH);
-      this.scene.background = new Color(0x0b1120);
+      // The 場刊 is a paper document. Render its 3D page on the light palette
+      // even when the editor is in dark mode, so every exported page is one
+      // consistent artifact instead of a near-black sheet among white ones.
+      this.applyPalette(EXPORT_PALETTE);
+      this.syncAreasAndTiles(project, false);
       this.renderer.render(this.scene, this.camera);
-      return this.cropExportBackground(this.renderer.domElement, 0x0b1120);
+      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background);
     } finally {
       editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
+      this.applyPalette(scenePalette(this.theme));
+      this.syncAreasAndTiles(project, false);
       this.scene.background = savedBackground;
       this.renderer.setPixelRatio(savedPixelRatio);
       this.renderer.setSize(this.canvas.clientWidth || window.innerWidth, this.canvas.clientHeight || window.innerHeight, false);

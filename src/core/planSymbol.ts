@@ -68,7 +68,7 @@ export function planSymbolForKind(kind: ObjectKind, serviceRole?: ServiceRole): 
       icon: serviceRole === "payment" ? "收費" : undefined,
     },
     chair: { kind: "chair", fill: "#b8c0cc", showFacing: true },
-    mat: { kind: "mat", fill: "#8b8fc7", showFacing: false },
+    mat: { kind: "mat", fill: "#5fa877", showFacing: false },
     computer: { kind: "computer", fill: "#94a3b8", showFacing: true },
     regTable: { kind: "checkin-desk", label: "報到", fill: "#a8b3a0", showFacing: true, icon: "報到" },
   };

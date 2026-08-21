@@ -285,6 +285,11 @@ export class UI {
           { label: "置中 / 重新框選", onSelect: () => this.app.recenterView() },
           { label: "簡化顯示", active: sess.simplify, onSelect: () => { this.app.setSimplify(!sess.simplify); return true; } },
           { label: "顯示 / 隱藏格線", onSelect: () => this.app.updateTile({ visible: !this.app.store.getState().tile.visible }) },
+          {
+            label: this.app.theme === "dark" ? "☀ 換成明亮畫面" : "🌙 換成深色畫面",
+            sub: this.app.theme === "dark" ? "目前是深色；明亮版比較接近場刊圖" : "目前是明亮版，和場刊圖同一套配色",
+            onSelect: () => { this.app.toggleTheme(); return true; },
+          },
         ],
       },
       {

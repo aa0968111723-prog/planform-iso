@@ -36,7 +36,7 @@ export const MATERIAL_PRESETS: Record<MaterialPresetId, MaterialPreset> = {
   rubber: { id: "rubber", baseColor: "#4b5563", roughness: 0.9, metalness: 0.0 },
   paper: { id: "paper", baseColor: "#f8fafc", roughness: 0.9, metalness: 0.0 },
   "screen-glass": { id: "screen-glass", baseColor: "#94a3b8", roughness: 0.2, metalness: 0.15 },
-  "mat-soft": { id: "mat-soft", baseColor: "#8b8fc7", roughness: 0.98, metalness: 0.0 },
+  "mat-soft": { id: "mat-soft", baseColor: "#5fa877", roughness: 0.98, metalness: 0.0 },
 };
 
 const cache = new Map<string, MeshStandardMaterial>();

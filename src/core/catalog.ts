@@ -240,10 +240,18 @@ export const BUILTIN_CATALOG: AssetCatalogEntry[] = [
     clearanceFront: 0,
     blocksFlow: false,
     serviceRole: "none",
-    icon: "🟪",
-    color: "#8b8fc7",
+    // Green puzzle mat: the club's 巧拼 are green in the event photos
+    // (docs/e310/E310_GOLDEN_SCENARIO.md §1.6, REFERENCE_MAPPING M-01).
+    // 🧩 rather than 🟩 so it does not collide with the stage platform icon.
+    icon: "🧩",
+    color: "#5fa877",
     tags: ["floor", "mat"],
-    presets: [preset("m60180", 0.6, 1.8, 0.04), preset("m60120", 0.6, 1.2, 0.04), preset("m6060", 0.6, 0.6, 0.04)],
+    presets: [
+      preset("m60180", 0.6, 1.8, 0.04),
+      preset("m60120", 0.6, 1.2, 0.04),
+      // The club's actual material, so it reads as 巧拼 rather than a bare size.
+      { ...preset("m6060", 0.6, 0.6, 0.04), label: "巧拼 60 × 60 cm" },
+    ],
   }),
   // Event-adjacent variants (catalog-only; kind stays one of the eight)
   {

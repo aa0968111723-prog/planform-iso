@@ -84,6 +84,7 @@ import {
 } from "../assets/venueCapture";
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
+import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
 import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
@@ -121,7 +122,7 @@ export interface Session {
   matCandidates: LayoutCandidate[];
   /** Zone type waiting for a canvas tap ("點畫面放區域"). */
   zonePlace: ZoneType | null;
-  simPositions: { x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
+  simPositions: { id?: number; x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
   bottlenecks: Bottleneck[];
   simPlaying: boolean;
   /** DES playback (preferred over route-walk when a scenario exists). */
@@ -276,6 +277,9 @@ export class App {
   constructor(canvas: HTMLCanvasElement, store: Store) {
     this.store = store;
     this.scene = new SceneManager(canvas);
+    // Light by default; a stored preference wins. Applied before the first
+    // paint so the canvas and the panels never disagree for a frame.
+    this.applyTheme(loadTheme(), false);
     this.quickAgent = new QuickAgent(store, new MockProvider());
     this.store.subscribe(() => {
       this.syncScene();
@@ -1025,6 +1029,19 @@ export class App {
     this.render();
   }
   setSimplify(on: boolean): void { this.session.simplify = on; this.render(); }
+
+  /** Current look: "light" (default) or "dark". */
+  get theme(): ThemeName { return this.scene.getTheme(); }
+
+  toggleTheme(): void { this.applyTheme(otherTheme(this.theme), true); }
+
+  private applyTheme(theme: ThemeName, persist: boolean): void {
+    applyThemeToDocument(theme);
+    this.scene.setTheme(theme);
+    if (persist) saveTheme(theme);
+    this.render();
+  }
+
   setRouteFocus(id: string | null): void {
     this.session.focusRouteId = id;
     if (id) {
@@ -1358,7 +1375,9 @@ export class App {
     this.session.simQueues = frame.queues;
     this.session.simPositions = frame.agents
       .filter((a) => a.state !== "pending" && a.state !== "done")
-      .map((a) => ({ x: a.x, z: a.z, state: a.state }));
+      // id travels with the position so the crowd can keep each figure facing
+      // the way it is walking between frames.
+      .map((a) => ({ id: a.id, x: a.x, z: a.z, state: a.state }));
     this.session.bottlenecks = result.stations
       .filter((s) => (frame.queues[s.stationId] ?? 0) >= 3)
       .map((s) => {
