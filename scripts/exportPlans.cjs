@@ -4,8 +4,10 @@ const { chromium } = require("@playwright/test");
 
 const BASE_URL = process.env.PLANFORM_PREVIEW_URL || "http://127.0.0.1:4181";
 const ROOT = path.resolve(__dirname);
-const EXPORT_DIR = path.join(ROOT, "exports");
-const PHONE_DIR = path.join(ROOT, "phone");
+// Write straight into the release evidence set so it can never drift from what
+// the app actually produces; PLANFORM_EXPORT_DIR overrides for a scratch run.
+const EXPORT_DIR = process.env.PLANFORM_EXPORT_DIR || path.join(ROOT, "..", "docs", "release-1.0");
+const PHONE_DIR = process.env.PLANFORM_PHONE_DIR || path.join(ROOT, "phone");
 
 async function clickDownload(page, label, filename) {
   const downloadPromise = page.waitForEvent("download", { timeout: 45_000 });
@@ -48,7 +50,8 @@ async function main() {
   await phone.setViewportSize({ width: 390, height: 844 });
   for (const output of outputs) {
     const base64 = fs.readFileSync(output).toString("base64");
-    await phone.setContent(`<!doctype html><style>html,body{margin:0;background:#0b1120}img{display:block;width:100%;height:auto}</style><img src="data:image/png;base64,${base64}">`);
+    // Light sheet behind the preview — the plans are paper, not a dark IDE.
+    await phone.setContent(`<!doctype html><style>html,body{margin:0;background:#eef2f7}img{display:block;width:100%;height:auto}</style><img src="data:image/png;base64,${base64}">`);
     const stem = path.basename(output, ".png");
     await phone.screenshot({ path: path.join(PHONE_DIR, `${stem}-390px.png`), fullPage: true });
   }
