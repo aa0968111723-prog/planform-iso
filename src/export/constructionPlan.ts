@@ -224,7 +224,13 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const planW = worldW * s;
   const planH = worldH * s;
   const offX = pad + (regionW - planW) / 2;
-  const offY = headerH + (regionH - planH) / 2;
+  // A roughly square room on a tall portrait page leaves a lot of slack. It
+  // used to be split evenly above and below, so a phone 場刊圖 was a small
+  // drawing floating in white. Top-align instead and spend the slack on the
+  // legend, which phone pages were dropping altogether.
+  const slack = regionH - planH;
+  const phoneLegendGap = phone && slack > 260 ? slack - 120 : 0;
+  const offY = headerH + (phoneLegendGap ? 60 : slack / 2);
 
   const scale = Math.max(1, opt.scale);
   const canvas = document.createElement("canvas");
@@ -236,6 +242,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
 
   ctx.fillStyle = "#f8fafc";
   ctx.fillRect(0, 0, cw, ch);
+  resetLabelLayout({ minX: 12, minY: headerH - 8, maxX: cw - 12, maxY: ch - footerH - 8 });
 
   const emphasizeRoutes = opt.preset === "route" || opt.preset === "partner";
   const showRouteBadges = emphasizeRoutes || opt.preset === "staff";
@@ -277,6 +284,9 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   withAlpha(ctx, emphasizeRoutes ? 1 : opt.preset === "mats" ? 0.5 : 0.85, () =>
     drawRoutes(ctx, project, t, showRouteBadges));
 
+  // Titles last: everything that could paint over them is already down.
+  drawZoneLabels(ctx, project, t, emphasizeZones);
+
   if (opt.dims) drawDimensions(ctx, project, t);
   const subtitle = opt.titleSuffix
     ? `${PRESET_TITLE[opt.preset]} · ${opt.titleSuffix}`
@@ -293,6 +303,11 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   }
   const footerY = ch - footerH + 26;
   if (phone) {
+    if (phoneLegendGap >= 90) {
+      const legendY = offY + planH + 56;
+      const phonePerRow = Math.max(1, Math.floor((cw - 48) / 300));
+      drawLegend(ctx, legendEntries, legendY, phonePerRow, 300);
+    }
     drawPhoneFooter(ctx, project, cw, ch, opt.preset);
   } else {
     drawLegend(ctx, legendEntries, footerY, legendPerRow, legendColW);
@@ -416,12 +431,20 @@ function renderMiniPlan(project: Project, w: number, h: number): HTMLCanvasEleme
   const maxZ = bounds.maxZ;
   const s = Math.min((w - 24) / (maxX - minX), (h - 24) / (maxZ - minZ));
   const t: Xform = { s, X: (wx) => 12 + (wx - minX) * s, Y: (wz) => 12 + (wz - minZ) * s };
+  // The thumbnail is its own drawing: give it a fresh label layout framed to
+  // the tile, or its titles inherit the host page's boxes and run off the edge.
+  const hostBoxes = labelBoxes;
+  const hostFrame = labelFrame;
+  resetLabelLayout({ minX: 4, minY: 4, maxX: w - 4, maxY: h - 4 });
   drawFloors(ctx, project, t);
   drawZones(ctx, project, t, false);
   for (const o of project.objects) {
     if (!o.hidden) drawObject(ctx, o, t, "full", project);
   }
   drawGroups(ctx, project, t, false);
+  drawZoneLabels(ctx, project, t, false);
+  labelBoxes = hostBoxes;
+  labelFrame = hostFrame;
   return canvas;
 }
 
@@ -442,7 +465,7 @@ function drawFloors(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {
     ctx.strokeRect(x, y, w, h);
     ctx.fillStyle = "#64748b";
     ctx.font = font("600 20px");
-    ctx.fillText(fitText(ctx, a.name, Math.max(120, w - 16)), x + 8, y + 24);
+    planText(ctx, fitText(ctx, a.name, Math.max(120, w - 16)), x + 8, y + 24);
   }
 }
 
@@ -459,8 +482,73 @@ function drawTiles(ctx: CanvasRenderingContext2D, p: Project, t: Xform, minX: nu
   ctx.stroke();
 }
 
+interface LabelBox { x: number; y: number; w: number; h: number }
+
+/**
+ * Every text label drawn onto the plan registers its box here for the duration
+ * of one render. Zone names used to dodge only each other, so a 報到區 title
+ * landed straight on top of the 電腦 sitting on its desk and neither could be
+ * read — on the one page a volunteer actually needs (where do I check in?).
+ */
+let labelBoxes: LabelBox[] = [];
+/** Drawing frame, so a label near the edge is nudged in rather than clipped. */
+let labelFrame = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+
+/**
+ * Draw plan text with a soft white halo. A 場刊圖 label sits on top of routes,
+ * mats and furniture, and without a halo the 報到區 title reads as mush where
+ * the green 入場動線 crosses it — exactly the label a volunteer needs most.
+ */
+function planText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, halo = 4): void {
+  const prevStroke = ctx.strokeStyle;
+  const prevWidth = ctx.lineWidth;
+  const prevJoin = ctx.lineJoin;
+  ctx.strokeStyle = "rgba(248, 250, 252, 0.92)";
+  ctx.lineWidth = halo;
+  ctx.lineJoin = "round";
+  ctx.strokeText(text, x, y);
+  ctx.fillText(text, x, y);
+  ctx.strokeStyle = prevStroke;
+  ctx.lineWidth = prevWidth;
+  ctx.lineJoin = prevJoin;
+}
+
+function resetLabelLayout(frame: { minX: number; minY: number; maxX: number; maxY: number }): void {
+  labelBoxes = [];
+  labelFrame = frame;
+}
+
+function overlapsPlaced(box: LabelBox): boolean {
+  return labelBoxes.some(
+    (r) => box.x < r.x + r.w && box.x + box.w > r.x && box.y < r.y + r.h && box.y + box.h > r.y,
+  );
+}
+
+/**
+ * Find a clear spot for a label near (x, y): try the anchor, then step above
+ * and below in alternating rings, then give up and take the anchor. Always
+ * clamped inside the drawing frame.
+ */
+function placeLabel(x: number, y: number, w: number, h: number, step: number): { x: number; y: number } {
+  const clampX = (v: number) => Math.min(Math.max(v, labelFrame.minX), Math.max(labelFrame.minX, labelFrame.maxX - w));
+  const clampY = (v: number) => Math.min(Math.max(v, labelFrame.minY), Math.max(labelFrame.minY, labelFrame.maxY - h));
+  const cx = clampX(x);
+  for (let ring = 0; ring <= 6; ring++) {
+    for (const dy of ring === 0 ? [0] : [-ring * step, ring * step]) {
+      const cy = clampY(y + dy);
+      if (!overlapsPlaced({ x: cx, y: cy, w, h })) {
+        labelBoxes.push({ x: cx, y: cy, w, h });
+        return { x: cx, y: cy };
+      }
+    }
+  }
+  const cy = clampY(y);
+  labelBoxes.push({ x: cx, y: cy, w, h });
+  return { x: cx, y: cy };
+}
+
+/** Zone tints and dashed outlines. Titles are drawn later — see drawZoneLabels. */
 function drawZones(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emphasize = false): void {
-  const placed: { x: number; y: number; w: number; h: number }[] = [];
   for (const z of p.zones) {
     if (z.hidden) continue;
     const x = t.X(z.x - z.width / 2), y = t.Y(z.z - z.depth / 2), w = z.width * t.s, h = z.depth * t.s;
@@ -471,21 +559,30 @@ function drawZones(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emphasiz
     ctx.fillRect(x, y, w, h);
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
+  }
+}
+
+/**
+ * Zone titles, drawn after the furniture and routes. They used to be painted
+ * with the zone tint, so the 報到桌 was then drawn straight over 報到區 and
+ * sliced the title in half — on the page a volunteer reads first.
+ */
+function drawZoneLabels(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emphasize = false): void {
+  for (const z of p.zones) {
+    if (z.hidden) continue;
+    const x = t.X(z.x - z.width / 2), y = t.Y(z.z - z.depth / 2), w = z.width * t.s, h = z.depth * t.s;
     ctx.fillStyle = TEXT;
     // 34px is the PHONE floor — on A4/A3 it blew labels up to 講師… ellipses.
     ctx.font = font(activePageSize === "phone" ? "700 34px" : "700 22px");
     const label = `${z.icon ? `${z.icon} ` : ""}${z.name}`;
     const labelW = Math.min(Math.max(w - 12, activePageSize === "phone" ? 300 : 240), Math.max(240, t.s * 6));
     const lineH = activePageSize === "phone" ? 42 : 26;
-    let labelY = y + (emphasize ? lineH : lineH - 4);
-    const labelH = lineH;
-    while (placed.some((r) => x + 6 < r.x + r.w && x + 6 + labelW > r.x && labelY - labelH < r.y + r.h && labelY > r.y)) {
-      const above = labelY - lineH;
-      const below = labelY + lineH;
-      labelY = above - labelH > 6 ? above : below;
-    }
-    ctx.fillText(fitText(ctx, label, labelW), x + 6, labelY);
-    placed.push({ x: x + 6, y: labelY - labelH, w: labelW, h: labelH });
+    // A zone shorter than its own title cannot hold it without covering the
+    // furniture inside — put the title just above the zone instead.
+    const insideTop = y + (emphasize ? lineH : lineH - 4) - lineH;
+    const anchorY = h >= lineH * 2 ? insideTop : y - lineH - 4;
+    const spot = placeLabel(x + 6, anchorY, labelW, lineH, lineH);
+    planText(ctx, fitText(ctx, label, labelW), spot.x, spot.y + lineH - 6, activePageSize === "phone" ? 6 : 4);
   }
 }
 
@@ -521,8 +618,18 @@ function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: b
       }
     }
     ctx.fillStyle = TEXT;
-    ctx.font = font("600 18px");
-    ctx.fillText(fitText(ctx, r.name, Math.max(180, t.s * 5)), t.X(r.points[0].x) + 20, t.Y(r.points[0].z) - 18);
+    const routeFont = activePageSize === "phone" ? 26 : 18;
+    ctx.font = font(`600 ${routeFont}px`);
+    const routeText = fitText(ctx, r.name, Math.max(180, t.s * 5));
+    const routeW = ctx.measureText(routeText).width;
+    const routeSpot = placeLabel(
+      t.X(r.points[0].x) + 20,
+      t.Y(r.points[0].z) - 18 - routeFont,
+      routeW,
+      routeFont,
+      routeFont + 6,
+    );
+    planText(ctx, routeText, routeSpot.x, routeSpot.y + routeFont - 4, activePageSize === "phone" ? 6 : 4);
   }
 }
 
@@ -715,8 +822,16 @@ function drawSwitch(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): vo
 
 function drawComputer(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): void {
   drawRectAt(ctx, o.x, o.z, o.width, o.depth, o.rotationDeg, t, "#38bdf8");
-  ctx.fillStyle = "#0369a1"; ctx.font = font("700 9px"); ctx.textAlign = "center";
-  ctx.fillText("電腦", t.X(o.x), t.Y(o.z) + 3.5); ctx.textAlign = "left";
+  // 9px was unreadable at any page size and still large enough to collide with
+  // the zone title above it. Size it with the page and let the shared placer
+  // move it clear.
+  const size = activePageSize === "phone" ? 22 : 14;
+  ctx.font = font(`700 ${size}px`);
+  const w = ctx.measureText("電腦").width;
+  const spot = placeLabel(t.X(o.x) - w / 2, t.Y(o.z) - size / 2, w, size, size + 4);
+  ctx.fillStyle = "#0369a1";
+  ctx.textAlign = "left";
+  planText(ctx, "電腦", spot.x, spot.y + size - 4);
 }
 
 function drawDimensions(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {

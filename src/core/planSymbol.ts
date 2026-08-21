@@ -106,7 +106,10 @@ export function planSymbolForSemantic(
     case "queue-barrier":
       return { kind: "queue-barrier", fill: color, showFacing: false };
     case "storage":
-      return { kind: "storage", label: "收納", fill: color, showFacing: true, icon: "收納" };
+      // Use the item's real name when the catalog has one: a volunteer looking
+      // for the 鞋架 on the 場刊圖 should not have to guess which grey "收納"
+      // box it is.
+      return { kind: "storage", label: name || "收納", fill: color, showFacing: true, icon: name || "收納" };
     case "payment-equipment":
       return { kind: "payment-box", label: "$", fill: color, showFacing: false, icon: "$" };
     default:
