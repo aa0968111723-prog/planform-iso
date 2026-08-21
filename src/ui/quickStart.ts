@@ -1,32 +1,37 @@
 /**
- * Quick Start wizard — the first thing a new user sees.
+ * New-project wizard.
  *
- * Two questions, zero engineering: 「今天要排什麼？」 pick a venue, then
- * 「這次活動需要什麼？」 tick needs + head count → a ready-to-edit plan.
- * Everything routes through core/quickStart.ts pure builders.
+ * This used to be a first-run "Quick Start" that built a plan and **replaced**
+ * whatever was on screen. That made the app single-plan by construction: there
+ * was no way to keep 「期初茶會」 and 「9/24 社課」 at the same time.
+ *
+ * It is now the front door of Project Home: name the event, pick a venue, tick
+ * what it needs — and the result becomes a brand new project with its own id.
+ * Nothing existing is touched.
+ *
+ * Note what is deliberately *not* here any more: saved 平面圖 (named layouts).
+ * A layout is a snapshot inside one project, not another project, and listing
+ * them next to venues was what made the two concepts blur together.
  */
 
-import type { App } from "../app/App";
+import type { Project } from "../core/model";
 import { buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
 import { BUILTIN_VENUE_PRESETS, listUserVenuePresets, type VenuePreset } from "../core/venues";
 import { button, el } from "./dom";
 
-export const QUICKSTART_KEY = "planform-iso:quickstart";
-
-export function quickStartSeen(): boolean {
-  try {
-    return !!localStorage.getItem(QUICKSTART_KEY);
-  } catch {
-    return true; // no storage → never block the app with a modal loop
-  }
+export interface NewProjectResult {
+  name: string;
+  project: Project;
+  venue: VenuePreset;
+  participants: number;
 }
 
-function markSeen(): void {
-  try {
-    localStorage.setItem(QUICKSTART_KEY, "1");
-  } catch {
-    /* ignore */
-  }
+export interface NewProjectWizardOptions {
+  onCreate: (result: NewProjectResult) => void;
+  /** Called when the user backs out without creating anything. */
+  onCancel: () => void;
+  /** Suggested name, e.g. derived from today's date. */
+  suggestedName?: string;
 }
 
 interface NeedOption {
@@ -35,7 +40,7 @@ interface NeedOption {
 }
 
 const NEED_OPTIONS: NeedOption[] = [
-  { key: "mats", label: "🟪 地墊" },
+  { key: "mats", label: "🧩 地墊" },
   { key: "checkin", label: "👋 報到" },
   { key: "payment", label: "💰 收費" },
   { key: "life", label: "🧺 生活組區" },
@@ -46,42 +51,91 @@ const NEED_OPTIONS: NeedOption[] = [
   { key: "staffRoute", label: "🦺 工作人員動線" },
 ];
 
-/** Show the Quick Start overlay. Returns the overlay element. */
-export function showQuickStart(app: App, onDone: () => void): HTMLElement {
+/** "9/24 活動" — a starting point the user will usually replace. */
+export function suggestProjectName(now = new Date()): string {
+  return `${now.getMonth() + 1}/${now.getDate()} 活動`;
+}
+
+/**
+ * Show the new-project wizard. Returns the overlay element; the caller mounts
+ * it and it removes itself on completion or cancel.
+ */
+export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement {
   const overlay = el("div", { class: "quickstart" });
   const card = el("div", { class: "quickstart__card" });
   overlay.append(card);
 
-  const close = (markDone: boolean) => {
-    if (markDone) markSeen();
+  let projectName = opts.suggestedName ?? suggestProjectName();
+
+  const finish = (result: NewProjectResult): void => {
     overlay.remove();
-    onDone();
+    opts.onCreate(result);
   };
 
-  /** Loading a wizard result replaces the current plan — ask when it has content. */
-  const confirmReplace = (): boolean => {
-    const p = app.store.getState();
-    const hasContent = p.objects.length > 0 || p.zones.length > 0 || p.groups.length > 0 || p.routes.length > 0;
-    if (!hasContent) return true;
-    return window.confirm("目前的場佈會被新的取代（建議先到「分享」把它存成平面圖）。確定繼續？");
+  const cancel = (): void => {
+    overlay.remove();
+    opts.onCancel();
   };
+
+  const stepHead = (step: number, title: string, sub?: string): HTMLElement[] => [
+    el("div", { class: "quickstart__step", text: `第 ${step} 步 / 共 3 步` }),
+    el("div", { class: "quickstart__title", text: title }),
+    ...(sub ? [el("p", { class: "hint", text: sub })] : []),
+  ];
+
+  // --- step 1: name ------------------------------------------------------
+
+  const renderNameStep = (): void => {
+    card.innerHTML = "";
+    card.append(...stepHead(1, "這場活動叫什麼？", "之後可以改。取一個你在 LINE 上認得出來的名字。"));
+
+    const input = el("input", {
+      type: "text",
+      class: "field__input quickstart__name",
+      value: projectName,
+      placeholder: "例如：9/24 禪學社社課",
+      "aria-label": "專案名稱",
+    }) as HTMLInputElement;
+    card.append(input);
+
+    const next = (): void => {
+      projectName = input.value.trim() || suggestProjectName();
+      renderVenueStep();
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") next();
+    });
+
+    card.append(
+      button("下一步：選場地", next, "btn btn--big btn--primary"),
+      el("div", { class: "quickstart__foot" }, [button("取消", cancel, "chip chip--sm")]),
+    );
+    // Focus without scrolling the overlay on a phone.
+    setTimeout(() => input.focus({ preventScroll: true }), 0);
+  };
+
+  // --- step 2: venue -----------------------------------------------------
 
   const renderVenueStep = (): void => {
     card.innerHTML = "";
-    card.append(el("div", { class: "quickstart__title", text: "今天要排什麼？" }));
-    card.append(el("p", { class: "hint", text: "選一個場地開始，之後所有尺寸都可以改。" }));
-    const tku = BUILTIN_VENUE_PRESETS[0];
-    const rect = BUILTIN_VENUE_PRESETS[1];
-    const blank = BUILTIN_VENUE_PRESETS[2];
+    card.append(...stepHead(2, "在哪裡辦？", `專案：${projectName}`));
+
+    const tku = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-classroom") ?? BUILTIN_VENUE_PRESETS[0];
+    const rect = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:rect-classroom");
+    const blank = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:blank");
     const e310 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e310");
+
     if (e310) {
       card.append(
         button(`🎤 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
         el("p", { class: "hint", text: e310.note }),
-        button("⚡ E310 演講範例（60 人）", () => {
-          if (!confirmReplace()) return;
-          app.startFromQuickStart(buildE310GoldenProject(e310));
-          close(true);
+        button("⚡ 直接用 E310 演講範例（60 人）", () => {
+          finish({
+            name: projectName,
+            project: buildE310GoldenProject(e310),
+            venue: e310,
+            participants: 60,
+          });
         }, "btn btn--big btn--primary"),
       );
     }
@@ -89,44 +143,32 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       button(`🏫 ${tku.name}`, () => renderNeedsStep(tku), "btn btn--big"),
       el("p", { class: "hint", text: tku.note }),
     );
-    const saved = [...listUserVenuePresets()];
-    const layouts = app.store.listLayouts();
-    if (saved.length || layouts.length) {
-      card.append(button("📁 使用我之前的場地", () => renderMineStep(saved, layouts), "btn btn--big btn--ghost"));
-    }
-    card.append(
-      button(`▭ ${rect.name}`, () => renderNeedsStep(rect), "btn btn--big btn--ghost"),
-      button(`⬜ ${blank.name}`, () => renderNeedsStep(blank), "btn btn--big btn--ghost"),
-      el("div", { class: "quickstart__foot" }, [
-        button("直接進編輯器", () => close(true), "chip chip--sm"),
-      ]),
-    );
-  };
 
-  const renderMineStep = (venues: VenuePreset[], layouts: string[]): void => {
-    card.innerHTML = "";
-    card.append(el("div", { class: "quickstart__title", text: "我的場地" }));
-    if (layouts.length) {
-      card.append(el("div", { class: "subhead", text: "已存的平面圖（直接載入整份場佈）" }));
-      for (const name of layouts) {
-        card.append(button(`📄 ${name}`, () => {
-          if (!confirmReplace()) return;
-          app.store.loadNamedLayout(name);
-          app.recenterView();
-          close(true);
-        }, "btn btn--ghost"));
-      }
+    const saved = listUserVenuePresets();
+    if (saved.length) {
+      card.append(button("📁 我的場地", () => renderMineStep(saved), "btn btn--big btn--ghost"));
     }
-    if (venues.length) {
-      card.append(el("div", { class: "subhead", text: "我的場地模板（只有場地，重新排場佈）" }));
-      for (const v of venues) {
-        card.append(button(`🏫 ${v.name}`, () => renderNeedsStep(v), "btn btn--ghost"));
-      }
-    }
+    if (rect) card.append(button(`▭ ${rect.name}`, () => renderNeedsStep(rect), "btn btn--big btn--ghost"));
+    if (blank) card.append(button(`⬜ ${blank.name}`, () => renderNeedsStep(blank), "btn btn--big btn--ghost"));
+
     card.append(el("div", { class: "quickstart__foot" }, [
-      button("← 返回", () => renderVenueStep(), "chip chip--sm"),
+      button("← 上一步", renderNameStep, "chip chip--sm"),
+      button("取消", cancel, "chip chip--sm"),
     ]));
   };
+
+  const renderMineStep = (venues: VenuePreset[]): void => {
+    card.innerHTML = "";
+    card.append(...stepHead(2, "我的場地", "你自己存過的場地尺寸。"));
+    for (const v of venues) {
+      card.append(button(`🏫 ${v.name}`, () => renderNeedsStep(v), "btn btn--ghost"));
+    }
+    card.append(el("div", { class: "quickstart__foot" }, [
+      button("← 上一步", renderVenueStep, "chip chip--sm"),
+    ]));
+  };
+
+  // --- step 3: needs + head count ---------------------------------------
 
   const renderNeedsStep = (venue: VenuePreset): void => {
     card.innerHTML = "";
@@ -138,15 +180,8 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       ? { ...DEFAULT_NEEDS, payment: true, life: true, teacher: true }
       : { ...DEFAULT_NEEDS };
     let centralAisle = true;
-    card.append(el("div", { class: "quickstart__title", text: "這次活動需要什麼？" }));
-    card.append(el("p", { class: "hint", text: `場地：${venue.name}（之後可改）` }));
 
-    const nameInput = el("input", {
-      type: "text",
-      class: "field__input",
-      placeholder: "活動名稱（例如：期初茶會）",
-    }) as HTMLInputElement;
-    card.append(nameInput);
+    card.append(...stepHead(3, "這次活動需要什麼？", `${projectName} · ${venue.name}（之後都能改）`));
 
     const grid = el("div", { class: "quickstart__needs" });
     for (const optDef of NEED_OPTIONS) {
@@ -163,8 +198,6 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
     }
     card.append(grid);
 
-    const countRow = el("div", { class: "row" });
-    countRow.append(el("span", { class: "field__label", text: "參加人數" }));
     const countInput = el("input", {
       type: "number",
       class: "field__input",
@@ -172,9 +205,12 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       min: "1",
       max: "300",
       inputmode: "numeric",
+      "aria-label": "參加人數",
     }) as HTMLInputElement;
-    countRow.append(countInput);
-    card.append(countRow);
+    card.append(el("div", { class: "row" }, [
+      el("span", { class: "field__label", text: "參加人數" }),
+      countInput,
+    ]));
     if (isE310) {
       card.append(el("p", { class: "hint", text: "已繳／現場繳的人數，之後在「▶ 模擬」裡填就可以。" }));
     }
@@ -184,33 +220,38 @@ export function showQuickStart(app: App, onDone: () => void): HTMLElement {
       aisleChip.textContent = `${centralAisle ? "✓ " : ""}留中央走道`;
       aisleChip.classList.toggle("chip--primary", centralAisle);
     }, "chip chip--primary");
-    card.append(el("div", { class: "row" }, [aisleChip, el("span", { class: "hint", text: "地墊之間留 90cm 走道" })]));
+    card.append(el("div", { class: "row" }, [
+      aisleChip,
+      el("span", { class: "hint", text: "地墊之間留 90cm 走道" }),
+    ]));
 
     card.append(
-      button("建立場佈", () => {
-        if (!confirmReplace()) return;
+      button("建立專案", () => {
         const participants = Math.max(1, Math.min(300, Number(countInput.value) || 30));
-        const project = buildQuickStartProject({
-          venue,
-          eventName: nameInput.value.trim() || "未命名活動",
+        finish({
+          name: projectName,
           participants,
-          needs,
-          centralAisle,
+          venue,
+          project: buildQuickStartProject({
+            venue,
+            eventName: projectName,
+            participants,
+            needs,
+            centralAisle,
+          }),
         });
-        app.startFromQuickStart(project);
-        close(true);
       }, "btn btn--big btn--primary"),
       el("div", { class: "quickstart__foot" }, [
-        button("← 返回", () => renderVenueStep(), "chip chip--sm"),
+        button("← 上一步", renderVenueStep, "chip chip--sm"),
+        button("取消", cancel, "chip chip--sm"),
       ]),
     );
   };
 
-  renderVenueStep();
-  // A tap outside dismisses WITHOUT marking "seen": an accidental tap on the
-  // first run should not hide the wizard forever.
+  renderNameStep();
+  // A tap on the backdrop is a cancel, never a silent create.
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close(false);
+    if (e.target === overlay) cancel();
   });
   return overlay;
 }

@@ -1,5 +1,6 @@
 import { createDefaultProject, type Project } from "../core/model";
 import { migrateProject } from "../core/migrate";
+import { ProjectRepository } from "./projectRepository";
 
 const AUTOSAVE_KEY = "planform-iso:autosave";
 const AUTOSAVE_BACKUP_KEY = "planform-iso:autosave-backup";
@@ -13,12 +14,20 @@ function clone<T>(v: T): T {
 type Listener = () => void;
 
 /**
- * Single source of truth for the project. Supports history-tracked mutations
- * (undo/redo), transient mutations for live dragging, autosave to
- * localStorage, and named local layouts.
+ * Single source of truth for **the one project currently being edited**.
+ * Supports history-tracked mutations (undo/redo), transient mutations for live
+ * dragging, autosave, and named local layouts.
+ *
+ * Having *many* projects is the ProjectRepository's job. When a project is
+ * bound here with `bindProject`, autosave writes to that project's own storage
+ * key, which is what makes switching between 「期初茶會」 and 「9/24 社課」 safe:
+ * saving one cannot overwrite the other. With nothing bound the Store falls
+ * back to the pre-multi-project global autosave key.
  */
 export class Store {
   private project: Project;
+  /** Which library project this Store is editing, if any. */
+  private projectId: string | null = null;
   private undoStack: Project[] = [];
   private redoStack: Project[] = [];
   private listeners = new Set<Listener>();
@@ -31,6 +40,34 @@ export class Store {
 
   getState(): Project {
     return this.project;
+  }
+
+  /**
+   * Point autosave at one library project. Any pending write for the previous
+   * project is flushed first, so switching never drops the last edit.
+   */
+  bindProject(id: string | null): void {
+    if (id === this.projectId) return;
+    if (this.projectId) this.flushAutosave();
+    this.projectId = id;
+  }
+
+  getProjectId(): string | null {
+    return this.projectId;
+  }
+
+  /**
+   * Swap in a different project's plan without recording it as an undo step of
+   * the previous one — switching projects is navigation, not an edit.
+   */
+  openBoundProject(id: string, project: Project): void {
+    this.flushAutosave();
+    this.projectId = id;
+    this.project = migrateProject(project);
+    this.undoStack = [];
+    this.redoStack = [];
+    this.pending = null;
+    this.emit();
   }
 
   subscribe(fn: Listener): () => void {
@@ -145,17 +182,29 @@ export class Store {
 
   saveAutosave(): void {
     if (typeof localStorage === "undefined") return;
-    try {
-      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(this.project));
+    const ok = this.projectId
+      ? ProjectRepository.saveProject(this.projectId, this.project)
+      : this.writeLegacyAutosave();
+    if (ok) {
       if (this.storageErrorReported) {
         this.storageErrorReported = false;
         this.onStorageRecovered?.();
       }
+      return;
+    }
+    if (!this.storageErrorReported) {
+      this.storageErrorReported = true;
+      this.onStorageError?.();
+    }
+  }
+
+  /** Pre-multi-project fallback: one global autosave key. */
+  private writeLegacyAutosave(): boolean {
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(this.project));
+      return true;
     } catch {
-      if (!this.storageErrorReported) {
-        this.storageErrorReported = true;
-        this.onStorageError?.();
-      }
+      return false;
     }
   }
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../src/state/store";
 import { createDefaultProject } from "../src/core/model";
+import { ProjectRepository } from "../src/state/projectRepository";
 
 function installLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -103,5 +104,113 @@ describe("autosave recovery", () => {
     storage.setItem = () => undefined;
     store.saveAutosave();
     expect(recovered).toBe(1);
+  });
+});
+
+describe("per-project autosave isolation", () => {
+  beforeEach(() => {
+    installLocalStorage();
+    ProjectRepository._resetForTests();
+  });
+
+  it("edits land in the bound project, not the global autosave key", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.name = "只屬於 A"), { history: false });
+    store.flushAutosave();
+
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok && opened.project.name).toBe("只屬於 A");
+    // The legacy single-project key must not be written any more.
+    expect(localStorage.getItem("planform-iso:autosave")).toBeNull();
+  });
+
+  it("editing A then switching to B leaves A intact — the P0 the brief named", () => {
+    const a = ProjectRepository.createProject({ name: "E310 30 人社課", project: createDefaultProject() });
+    const b = ProjectRepository.createProject({ name: "E310 60 人演講", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "A 的地墊改過了"), { history: false });
+
+    // Switch to B and edit it.
+    const openedB = ProjectRepository.openProject(b.id);
+    expect(openedB.ok).toBe(true);
+    if (openedB.ok) store.openBoundProject(b.id, openedB.project);
+    store.mutate((p) => (p.description = "B 的報到改過了"), { history: false });
+    store.flushAutosave();
+
+    // Back to A: it must be exactly as it was left.
+    const backToA = ProjectRepository.openProject(a.id);
+    expect(backToA.ok && backToA.project.description).toBe("A 的地墊改過了");
+    const stillB = ProjectRepository.openProject(b.id);
+    expect(stillB.ok && stillB.project.description).toBe("B 的報到改過了");
+  });
+
+  it("switching projects clears undo history rather than letting A undo into B", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const b = ProjectRepository.createProject({ name: "B", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.name = "A 改過"));
+    expect(store.canUndo()).toBe(true);
+
+    const openedB = ProjectRepository.openProject(b.id);
+    if (openedB.ok) store.openBoundProject(b.id, openedB.project);
+    expect(store.canUndo()).toBe(false);
+    expect(store.getProjectId()).toBe(b.id);
+  });
+
+  it("a full disk while bound still reports through onStorageError", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    let errors = 0;
+    store.onStorageError = () => void errors++;
+    const real = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (k: string, v: string) => {
+      if (k.includes("projects:prj_")) throw new Error("QuotaExceededError");
+      real(k, v);
+    };
+    store.mutate((p) => (p.name = "寫不進去"), { history: false });
+    store.flushAutosave();
+    expect(errors).toBe(1);
+  });
+});
+
+describe("leaving a project stops it being written to", () => {
+  beforeEach(() => {
+    installLocalStorage();
+    ProjectRepository._resetForTests();
+  });
+
+  it("unbinding means a later flush cannot rewrite the project you left", () => {
+    const a = ProjectRepository.createProject({ name: "離開的專案", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "編輯過"), { history: false });
+    store.flushAutosave();
+
+    // Leave: flush, then unbind (what App.leaveProject does).
+    store.flushAutosave();
+    store.bindProject(null);
+
+    // Something external changes the stored body — a corrupt blob, or another
+    // tab. The pagehide flush must NOT put the stale in-memory copy back.
+    localStorage.setItem(`planform-iso:projects:${a.id}`, "<<not json>>");
+    store.flushAutosave();
+    expect(localStorage.getItem(`planform-iso:projects:${a.id}`)).toBe("<<not json>>");
+  });
+
+  it("the last edit before leaving is still committed", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "離開前最後一筆"), { history: false });
+    // No explicit flush: bindProject(null) must flush the pending write itself.
+    store.bindProject(null);
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok && opened.project.description).toBe("離開前最後一筆");
   });
 });

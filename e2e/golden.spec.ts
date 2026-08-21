@@ -2,9 +2,9 @@
  * Golden Flows — the three real-usage scenarios Planform 1.0 must survive
  * end-to-end, one per workspace tier:
  *
- *   1. 30 人社課（phone 390×844）: Quick Start → 淡江模板 → 30 人 → 建立場佈
+ *   1. 30 人社課（phone 390×844）: 新建專案 → 淡江模板 → 30 人 → 建立專案
  *      → 畫報到動線 → 匯出場佈總覽 → 夥伴模式 → 存成圖
- *   2. 60 人＋收費（tablet 768×1024）: Quick Start（勾收費）→ 模擬 → 人話結果
+ *   2. 60 人＋收費（tablet 768×1024）: 新建專案（勾收費）→ 模擬 → 人話結果
  *      → ✦ 幫我改善 → 套用 → 匯出動線圖
  *   3. 完全自訂（desktop 1366×1024）: 空白場地 → 自訂尺寸/地磚/區域
  *      → 儲存為我的場地 → reload → 再次套用
@@ -13,23 +13,34 @@
 import { expect, test, type Page } from "@playwright/test";
 import { settle } from "./helpers";
 
-/** Open the app as a真 first-run user: wizard visible, storage clean. */
+/**
+ * Open the app as a true first-run user: empty project library, so Project Home
+ * appears and opens the new-project wizard on top of it.
+ */
 async function openFresh(page: Page): Promise<void> {
   await page.addInitScript(() => {
     // Only wipe on the FIRST load — a later reload must behave like a real
-    // returning user (autosave intact, wizard already seen).
+    // returning user (their projects intact).
     if (!sessionStorage.getItem("e2e-fresh-done")) {
       sessionStorage.setItem("e2e-fresh-done", "1");
-      localStorage.removeItem("planform-iso:quickstart");
-      localStorage.removeItem("planform-iso:autosave");
-      localStorage.removeItem("planform-iso:autosave-backup");
-      localStorage.removeItem("planform-iso:venues");
-      localStorage.removeItem("planform-iso:layouts");
+      localStorage.clear();
     }
   });
   await page.goto("/");
   await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
   await settle(page);
+}
+
+/**
+ * Step 1 of the wizard: name the event. Every golden flow now starts by
+ * creating a *project*, because the wizard no longer overwrites a plan.
+ */
+async function nameProject(page: Page, name: string): Promise<void> {
+  const card = page.locator(".quickstart__card");
+  await expect(card.locator(".quickstart__title")).toHaveText("這場活動叫什麼？");
+  await card.locator(".quickstart__name").fill(name);
+  await card.locator("button", { hasText: "下一步：選場地" }).click();
+  await expect(card.locator(".quickstart__title")).toHaveText("在哪裡辦？");
 }
 
 interface ProjectProbe {
@@ -75,7 +86,7 @@ async function fillNeedsAndCreate(page: Page, opts: { participants: number; togg
     }
   }
   await card.locator('input[type="number"]').fill(String(opts.participants));
-  await card.locator("button", { hasText: "建立場佈" }).click();
+  await card.locator("button", { hasText: "建立專案" }).click();
   await settle(page);
 }
 
@@ -85,8 +96,8 @@ test.describe("Golden Flow 1 — 30 人社課（手機）", () => {
   test("quick start → 場佈 → 畫動線 → 匯出 → 夥伴模式存圖", async ({ page }) => {
     await openFresh(page);
 
-    // Quick Start shows on first run; pick the 淡江 template.
-    await expect(page.locator(".quickstart__title")).toHaveText("今天要排什麼？");
+    // First run opens the new-project wizard over Project Home.
+    await nameProject(page, "30 人社課");
     await page.locator(".quickstart__card button", { hasText: "淡江教室模板" }).click();
     await fillNeedsAndCreate(page, { participants: 30 });
 
@@ -140,6 +151,7 @@ test.describe("Golden Flow 2 — 60 人＋收費（平板）", () => {
 
   test("模擬 → 人話結果 → 幫我改善 → 套用 → 匯出動線圖", async ({ page }) => {
     await openFresh(page);
+    await nameProject(page, "60 人收費演講");
     await page.locator(".quickstart__card button", { hasText: "淡江教室模板" }).click();
     await fillNeedsAndCreate(page, { participants: 60, togglePayment: true });
     const p = await probeProject(page);
@@ -181,6 +193,7 @@ test.describe("Golden Flow 3 — 完全自訂（桌機）", () => {
   test("空白場地 → 自訂尺寸/地磚/區域 → 儲存我的場地 → reload → 再用", async ({ page }) => {
     page.on("dialog", (d) => void d.accept());
     await openFresh(page);
+    await nameProject(page, "完全自訂測試");
     await page.locator(".quickstart__card button", { hasText: "空白自訂場地" }).click();
     await fillNeedsAndCreate(page, { participants: 10, untickAll: true });
     const p0 = await probeProject(page);
@@ -224,11 +237,13 @@ test.describe("Golden Flow 4 — E310 演講範例", () => {
 
   test("一鍵範例 → 模擬 → 匯出含走廊的場刊圖", async ({ page }) => {
     await openFresh(page);
+    await nameProject(page, "E310 演講範例專案");
     await page.locator(".quickstart__card button", { hasText: "E310 演講範例（60 人）" }).click();
     await settle(page);
 
     const p = await probeProject(page);
-    expect(p.name).toBe("E310 演講活動（範例）");
+    // The plan carries the name the user gave the project, not the template's.
+    expect(p.name).toBe("E310 演講範例專案");
     expect(p.groups.length).toBeGreaterThan(0);
     expect(p.routes.map((r) => r.type)).toContain("entry");
 
