@@ -407,7 +407,9 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
   const onsite = ids(["entrance", "guide", "queue", "checkin", "payment", "shoe", "backpack", "seating"]);
   const scenario: EventScenario = {
     id: uid("scn"), name: "E310 演講範例（60 人）", participantCount: 60,
-    arrivalWindowSeconds: 900, arrivalProfile: "front-loaded",
+    // 20 minutes: the golden scenario the release gate specifies is
+    // "60 人／20 分鐘陸續到達" (docs/field-research/REAL_REFERENCE_CONTRACT.md §8).
+    arrivalWindowSeconds: 1200, arrivalProfile: "front-loaded",
     profiles: [
       { id: "prepaid", ratio: 40 / 60, branch: prepaid },
       { id: "pay-on-site", ratio: 20 / 60, branch: onsite },

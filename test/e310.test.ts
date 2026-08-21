@@ -69,7 +69,8 @@ describe("E310 golden venue", () => {
     const p = buildE310GoldenProject(e310);
     const scenario = p.scenarios[0];
     expect(p.name).toBe("E310 演講活動（範例）");
-    expect(scenario).toMatchObject({ participantCount: 60, arrivalWindowSeconds: 900, arrivalProfile: "front-loaded" });
+    // 60 人 over a 20-minute arrival window — the specified golden scenario.
+    expect(scenario).toMatchObject({ participantCount: 60, arrivalWindowSeconds: 1200, arrivalProfile: "front-loaded" });
     expect(scenario.profiles).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "prepaid", ratio: 40 / 60 }),
       expect.objectContaining({ id: "pay-on-site", ratio: 20 / 60 }),

@@ -138,7 +138,15 @@ export function inventoryLines(project: Project): InventoryLine[] {
   }
   for (const g of project.groups) {
     if (g.hidden) continue;
-    add("▫", assetDef(g.sourceKind).displayName, g.rows * g.cols);
+    // Array groups carry a kind, not an assetId. Resolve the catalog entry and
+    // refine it by the size actually used, so the packing list reads
+    // "🧩 地墊（巧拼 60 × 60 cm） 96" instead of a generic "▫ 地墊 96" — the
+    // 場務組 has to know which mats to carry.
+    const entry = catalog.resolve(undefined, g.sourceKind);
+    const preset = entry.presets?.find(
+      (p) => Math.abs(p.width - g.itemWidth) < 1e-6 && Math.abs(p.depth - g.itemDepth) < 1e-6,
+    );
+    add(entry.icon, preset ? `${entry.name}（${preset.label}）` : entry.name, g.rows * g.cols);
   }
   return [...byName.values()].sort((a, b) => b.count - a.count);
 }

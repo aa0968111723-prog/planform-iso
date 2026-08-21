@@ -8,9 +8,11 @@
 
 import { describe, expect, it } from "vitest";
 import { BUILTIN_CATALOG } from "../src/core/catalog";
-import { BUILTIN_VENUE_PRESETS } from "../src/core/venues";
+import { BUILTIN_VENUE_PRESETS, venuePresetById } from "../src/core/venues";
 import { planSymbolForKind } from "../src/core/planSymbol";
 import { MATERIAL_PRESETS } from "../src/scene/materials";
+import { buildE310GoldenProject } from "../src/core/quickStart";
+import { inventoryLines } from "../src/export/constructionPlan";
 
 const entry = (id: string) => {
   const found = BUILTIN_CATALOG.find((e) => e.id === id);
@@ -109,4 +111,41 @@ describe("S-07/S-08/S-09 unverified kit stays removable, never fixed furniture",
       expect(item.allowCustomSize).not.toBe(false);
     });
   }
+});
+
+describe("物資清單 names the material the 場務組 has to carry", () => {
+  it("lists mat groups as 巧拼 60 × 60, not a generic 地墊", () => {
+    const project = buildE310GoldenProject(venuePresetById("venue:tku-e310")!);
+    const matLine = inventoryLines(project).find((l) => l.name.includes("地墊"));
+    expect(matLine).toBeDefined();
+    // The old code emitted the placeholder "▫" icon and the bare kind name.
+    expect(matLine!.icon).not.toBe("▫");
+    expect(matLine!.name).toContain("巧拼");
+    // The golden 60-person example lays a real field, not a handful of mats.
+    expect(matLine!.count).toBeGreaterThan(50);
+  });
+
+  it("still lists the service kit the example places", () => {
+    const names = inventoryLines(buildE310GoldenProject(venuePresetById("venue:tku-e310")!)).map((l) => l.name);
+    for (const expected of ["報到桌", "收費桌", "鞋架", "電腦"]) {
+      expect(names).toContain(expected);
+    }
+  });
+});
+
+describe("F-03 the golden scenario is 60 人 over a 20-minute arrival window", () => {
+  it("matches the spec in REAL_REFERENCE_CONTRACT §8", () => {
+    const project = buildE310GoldenProject(venuePresetById("venue:tku-e310")!);
+    const scenario = project.scenarios?.[0];
+    expect(scenario?.participantCount).toBe(60);
+    expect(scenario?.arrivalWindowSeconds).toBe(20 * 60);
+  });
+
+  it("splits 40 prepaid / 20 paying on site", () => {
+    const scenario = buildE310GoldenProject(venuePresetById("venue:tku-e310")!).scenarios![0];
+    const prepaid = scenario.profiles.find((p) => p.id === "prepaid")!;
+    const onsite = scenario.profiles.find((p) => p.id === "pay-on-site")!;
+    expect(Math.round(prepaid.ratio * scenario.participantCount)).toBe(40);
+    expect(Math.round(onsite.ratio * scenario.participantCount)).toBe(20);
+  });
 });
