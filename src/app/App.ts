@@ -85,6 +85,7 @@ import {
 import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
 import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
+import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
 import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
@@ -577,11 +578,94 @@ export class App {
     return ok;
   }
 
-  /** Load a Quick Start generated project and land the user in 場佈. */
-  startFromQuickStart(project: Project): void {
-    // The store keeps an undo checkpoint when replacing a non-empty plan; the
-    // wizard still confirms so the replacement is explicit.
-    this.store.loadProject(project);
+  // --- multi-project session ---------------------------------------------
+
+  /** The library project currently open in the editor, if any. */
+  get currentProjectId(): string | null {
+    return this.store.getProjectId();
+  }
+
+  currentProjectMeta(): ProjectMeta | null {
+    const id = this.currentProjectId;
+    return id ? ProjectRepository.getMeta(id) : null;
+  }
+
+  /**
+   * Open a project from the library. Returns false when its body is missing or
+   * unreadable, so the caller can keep the user on Project Home with an
+   * explanation instead of dropping them into a blank editor.
+   */
+  openProjectById(id: string): boolean {
+    const opened = ProjectRepository.openProject(id);
+    if (!opened.ok) return false;
+    this.store.openBoundProject(id, opened.project);
+    ProjectRepository.setActiveProjectId(id);
+    this.adoptProjectSettings(this.store.getState());
+    return true;
+  }
+
+  /**
+   * Create a new project from the wizard and open it. This adds to the
+   * library — it never replaces the project that was open before.
+   */
+  createProject(input: {
+    name: string;
+    project: Project;
+    venuePresetId?: string;
+    venueName?: string;
+    participants?: number;
+  }): ProjectMeta {
+    const meta = ProjectRepository.createProject(input);
+    // Read the stored body back rather than opening the caller's object: the
+    // repository normalises it (notably stamping the project name over the
+    // template's own). Opening the un-normalised original left the editor
+    // showing 「E310 演講活動（範例）」 while storage held the name the user
+    // typed — and the next autosave wrote the template name back over it.
+    const opened = ProjectRepository.openProject(meta.id);
+    this.store.openBoundProject(meta.id, opened.ok ? opened.project : input.project);
+    ProjectRepository.setActiveProjectId(meta.id);
+    this.adoptProjectSettings(this.store.getState());
+    this.toast("場佈起點已建立，直接拖曳調整即可");
+    return meta;
+  }
+
+  /**
+   * Let go of the open project without saving it — used when that project has
+   * just been deleted, so autosave cannot write it back into the library.
+   */
+  detachProject(): void {
+    this.stopSimulation();
+    this.store.bindProject(null);
+    ProjectRepository.setActiveProjectId(null);
+  }
+
+  /**
+   * Write pending edits and step out of the project.
+   *
+   * Order matters: flush while still bound so the last edit lands in the right
+   * project, then unbind and clear the active pointer.
+   *
+   * Unbinding is not tidiness. The pagehide handler flushes on every reload and
+   * tab close, and a Store still bound to a project the user had already left
+   * would rewrite that project's stored body from stale memory — which is
+   * exactly how a deliberately corrupted body silently repaired itself.
+   *
+   * Clearing the pointer means someone who walked back to 我的專案 and then
+   * reloaded is still on 我的專案, not dragged into what they just left.
+   */
+  leaveProject(): void {
+    this.stopSimulation();
+    this.store.flushAutosave();
+    this.store.bindProject(null);
+    ProjectRepository.setActiveProjectId(null);
+  }
+
+  /**
+   * Land the user in 場佈 with the session settings the plan implies: head
+   * count, arrival window and staffing come from the plan's own scenario so the
+   * mat arranger, the simulation and the AI all read one number.
+   */
+  private adoptProjectSettings(project: Project): void {
     const scenario = project.activeScenarioId
       ? project.scenarios.find((s) => s.id === project.activeScenarioId)
       : project.scenarios[0];
@@ -605,13 +689,12 @@ export class App {
       this.session.participants = scenario.participantCount;
     }
     this.setWorkflow("layout");
-    // Two flat purple slabs in a shallow isometric view read as nothing on a
-    // phone — compact devices open the plan top-down.
+    // Two flat slabs in a shallow isometric view read as nothing on a phone —
+    // compact devices open the plan top-down.
     if (typeof window !== "undefined" && window.matchMedia?.("(max-width: 600px)").matches) {
       this.setView("top");
     }
     this.recenterView();
-    this.toast("場佈起點已建立，直接拖曳調整即可");
   }
 
   // --- array groups ------------------------------------------------------

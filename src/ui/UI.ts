@@ -17,7 +17,9 @@ import { refreshSimPanel } from "./simPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
-import { quickStartSeen, showQuickStart } from "./quickStart";
+import { showNewProjectWizard } from "./quickStart";
+import { buildProjectHome, type ProjectHomeHandles } from "./projectHome";
+import { ProjectRepository } from "../state/projectRepository";
 import { BUILD_INFO } from "../buildInfo";
 import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
 import { Store } from "../state/store";
@@ -68,6 +70,7 @@ export class UI {
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false };
   private agentSheet: QuickAgentSheetHandles;
   private menu: MenuSheetHandles = buildMenuSheet();
+  private home: ProjectHomeHandles;
   private smartBox = el("div", { class: "list" });
   private simPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
@@ -144,6 +147,18 @@ export class UI {
       this.onModeMaybeChanged();
     });
 
+    this.home = buildProjectHome({
+      onOpen: (id) => this.openProject(id),
+      onNew: () => this.openNewProjectWizard(),
+      onDeleted: (id) => {
+        // Deleting the plan that is still open in the editor must not leave the
+        // Store writing to a dead key — that would resurrect it on next save.
+        if (this.app.currentProjectId === id) this.app.detachProject();
+      },
+      onToast: (msg) => this.showToast(msg),
+    });
+    root.append(this.home.root);
+
     this.buildNav();
     this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
@@ -157,7 +172,7 @@ export class UI {
     this.bindSheetGestures();
     this.applySheetState();
     this.update();
-    this.buildQuickStart();
+    this.bootRoute();
   }
 
   /** Measured workspace state — used by browser smoke tests and diagnostics. */
@@ -183,17 +198,89 @@ export class UI {
     return this.mode !== "desktop";
   }
 
-  private buildQuickStart(): void {
-    if (quickStartSeen()) return;
-    this.openQuickStart();
+  /**
+   * Where the app lands on load. An active project resumes straight into the
+   * editor — a 場務組 volunteer who refreshes mid-setup in E310 wants their
+   * plan back, not a list. With nothing open (first run, or they left from
+   * Project Home) 我的專案 is the landing screen.
+   */
+  private bootRoute(): void {
+    if (this.app.currentProjectId) {
+      this.enterEditor();
+      return;
+    }
+    this.goHome();
+    // A brand new install has nothing to list — go straight to creating one.
+    if (ProjectRepository.count() === 0) this.openNewProjectWizard();
   }
 
-  /** Open the Quick Start wizard (first run, or 更多 → 快速開始). */
-  openQuickStart(): void {
+  // --- project routing ----------------------------------------------------
+
+  /**
+   * Show 我的專案. Pending edits are flushed first so the card the user is
+   * about to look at already shows the work they just did.
+   */
+  goHome(): void {
+    // Close the editor chrome FIRST, then flush. Doing it the other way round
+    // let the teardown (sheet close -> update -> view mutation) schedule an
+    // autosave that landed after the flush, so the last write to storage was
+    // not the one we thought we had committed.
+    this.menu.close();
+    this.setSheet("none");
+    this.root.setAttribute("data-route", "home");
+    this.app.leaveProject();
+    this.home.show();
+  }
+
+  private enterEditor(): void {
+    this.home.hide();
+    this.root.setAttribute("data-route", "editor");
+    this.buildTopbar();
+    this.update();
+    this.viewport.schedule();
+  }
+
+  isHomeVisible(): boolean {
+    return this.home.isVisible();
+  }
+
+  private openProject(id: string): void {
+    if (!this.app.openProjectById(id)) {
+      this.showToast("這份專案需要復原，先下載原始資料再試", false);
+      this.home.refresh();
+      return;
+    }
+    this.enterEditor();
+    this.showToast(`已開啟「${this.app.store.getState().name}」`);
+  }
+
+  /** The new-project wizard. Creating never replaces the open project. */
+  openNewProjectWizard(): void {
     if (this.root.querySelector(".quickstart")) return;
-    const overlay = showQuickStart(this.app, () => {
-      this.viewport.schedule();
-      this.update();
+    const wasHome = this.home.isVisible();
+    const overlay = showNewProjectWizard({
+      onCreate: (result) => {
+        try {
+          this.app.createProject({
+            name: result.name,
+            project: result.project,
+            venuePresetId: result.venue.id,
+            venueName: result.venue.name,
+            participants: result.participants,
+          });
+        } catch {
+          this.showToast("儲存空間已滿，請先刪掉一些專案或匯出備份", false);
+          this.home.show();
+          return;
+        }
+        this.enterEditor();
+      },
+      onCancel: () => {
+        // Back where they came from: Project Home on a fresh start, the editor
+        // if they opened the wizard from 更多.
+        if (wasHome || !this.app.currentProjectId) this.goHome();
+        else this.update();
+      },
     });
     this.root.append(overlay);
   }
@@ -224,6 +311,7 @@ export class UI {
    */
   private buildCompactTopbar(): void {
     const title = el("div", { class: "topbar__title topbar__title--compact" });
+    const home = this.homeButton("←");
     const history = el("div", { class: "group" }, [
       button("↶", () => this.app.undo(), "chip chip--sm"),
       button("↷", () => this.app.redo(), "chip chip--sm"),
@@ -232,7 +320,7 @@ export class UI {
     const ai = button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent");
     const more = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     more.setAttribute("aria-label", "更多設定");
-    this.topbar.append(title, this.statusBadge, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
+    this.topbar.append(home, title, this.statusBadge, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
   }
 
   private buildDesktopTopbar(): void {
@@ -258,10 +346,19 @@ export class UI {
     const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
+      this.homeButton("← 我的專案"),
       el("div", { class: "topbar__title", text: "平面場 ISO" }),
       history, flows, views, more, el("div", { class: "topbar__spacer" }), team, moreBtn,
     );
     this.topbar.append(this.statusBadge);
+  }
+
+  /** Always-visible way back to 我的專案, on every screen size. */
+  private homeButton(label: string): HTMLButtonElement {
+    const b = button(label, () => this.goHome(), "chip chip--sm topbar__home");
+    b.setAttribute("aria-label", "回到我的專案");
+    b.title = "我的專案";
+    return b;
   }
 
   private openViewMenu(): void {
@@ -309,10 +406,15 @@ export class UI {
         ],
       },
       {
-        title: "活動",
+        title: "專案",
         items: [
-          { label: "🚀 快速開始", sub: "選場地、勾需求、自動排場佈", onSelect: () => this.openQuickStart() },
-          { label: "重新命名活動", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
+          { label: "← 我的專案", sub: "回到專案列表（會先存檔）", onSelect: () => this.goHome() },
+          {
+            label: "＋ 新建專案",
+            sub: "另外開一份，不會蓋掉現在這個",
+            onSelect: () => this.openNewProjectWizard(),
+          },
+          { label: "重新命名這個專案", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
         ],
       },
       {
@@ -954,7 +1056,7 @@ export class UI {
       el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
       textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
-      el("div", { class: "subhead", text: "我的平面圖（本機儲存）" }),
+      el("div", { class: "subhead", text: "這個專案的版本（方案 A／方案 B／最後版）" }),
       el("div", { class: "row" }, [layoutName, button("儲存", () => {
         const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
         if (saved) { refreshList(); this.showToast("已儲存平面圖"); }

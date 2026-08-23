@@ -4,8 +4,8 @@
  *   node scripts/prodSmoke.mjs [baseUrl]
  *
  * Verifies, on the REAL production bundle (no dev-only hooks):
- *   phone: quick start wizard → 建立場佈 → editor; service worker ready;
- *          OFFLINE reload still boots; /version.json is live
+ *   phone: Project Home → new-project wizard → 建立專案 → editor; service
+ *          worker ready; OFFLINE reload still boots; /version.json is live
  *   tablet: partner mode via More sheet
  *   desktop: all six 場刊圖 exports actually download
  * and saves screenshots + export PNGs into _smoke/ for the release PR.
@@ -26,14 +26,26 @@ function ok(name, pass, note = "") {
   console.log(`${pass ? "PASS" : "FAIL"}  ${name}${note ? ` — ${note}` : ""}`);
 }
 
-async function completeWizard(page, participants) {
+/**
+ * Drive the new-project wizard: name → venue → needs → 建立專案.
+ * (It used to open straight on the venue step and REPLACE the current plan;
+ * it now creates a project, so the name step comes first.)
+ */
+async function completeWizard(page, participants, name = "冒煙測試專案") {
+  await page.locator(".quickstart__card .quickstart__name").fill(name);
+  await page.locator(".quickstart__card button", { hasText: "下一步：選場地" }).click();
   await page.locator(".quickstart__card button", { hasText: "淡江教室模板" }).click();
   await page.locator('.quickstart__card input[type="number"]').fill(String(participants));
-  await page.locator(".quickstart__card button", { hasText: "建立場佈" }).click();
-  await page.waitForTimeout(600);
+  await page.locator(".quickstart__card button", { hasText: "建立專案" }).click();
+  await page.waitForSelector(".quickstart", { state: "detached" });
+  await page.waitForSelector(".projhome", { state: "hidden" });
+  await page.waitForTimeout(400);
 }
 
 const browser = await chromium.launch({
+  // Same seam as playwright.config.ts: let a machine with a preinstalled
+  // browser point at it instead of requiring `playwright install`.
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
   args: ["--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader"],
 });
 
@@ -46,9 +58,12 @@ const browser = await chromium.launch({
   const mode = await page.getAttribute("#app", "data-ws-mode");
   ok("phone workspace mode", mode === "phone", `data-ws-mode=${mode}`);
 
+  // A brand new install lands on 我的專案 with the new-project wizard on top.
+  await page.waitForSelector(".projhome", { state: "visible", timeout: 5000 });
+  ok("first run lands on Project Home", true);
   const wizard = page.locator(".quickstart__title");
   await wizard.waitFor({ timeout: 5000 });
-  ok("first-run quick start shows", (await wizard.innerText()) === "今天要排什麼？");
+  ok("new-project wizard shows", (await wizard.innerText()) === "這場活動叫什麼？");
   await page.screenshot({ path: `${OUT}phone-quickstart.png` });
 
   await completeWizard(page, 30);
