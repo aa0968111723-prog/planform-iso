@@ -1,6 +1,6 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import { calibrationComplete, calibrationPendingLabels, venueNeedsCalibration, type MeasurementType, type RouteType, type ViewName } from "../core/model";
+import { calibrationComplete, calibrationPendingLabels, planHasContent, venueNeedsCalibration, type MeasurementType, type RouteType, type ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
 import { ROUTE_PRESETS } from "../core/routes";
 import type { LayoutCandidate } from "../core/smartLayout";
@@ -227,12 +227,23 @@ export class UI {
     // not the one we thought we had committed.
     this.menu.close();
     this.setSheet("none");
+    // An AI preview belongs to the project it was drafted from. Left open, its
+    // 預覽就緒 bar (position: fixed, outside .agent-sheet) survives the trip
+    // through 我的專案 and reappears over the NEXT project's editor — where 套用
+    // commits this project's draft into that one, name and all. Closing rolls
+    // the draft back while the project it came from is still the bound one.
+    this.agentSheet.close();
     this.root.setAttribute("data-route", "home");
     this.app.leaveProject();
     this.home.show();
   }
 
   private enterEditor(): void {
+    // 更多 → ＋ 新建專案 binds a different project without passing through
+    // goHome(), so the same preview-crosses-projects leak has a second door.
+    // Rolling back here is safe: rollback only drops the draft, it never
+    // writes to whichever project is now bound.
+    this.agentSheet.close();
     this.home.hide();
     this.root.setAttribute("data-route", "editor");
     this.buildTopbar();
@@ -942,8 +953,7 @@ export class UI {
     importInput.addEventListener("change", async () => {
       const f = importInput.files?.[0]; if (!f) return;
       const current = this.app.store.getState();
-      const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
-        current.groups.length > 0 || current.routes.length > 0;
+      const hasContent = planHasContent(current);
       if (hasContent && !window.confirm("載入 JSON 會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) {
         importInput.value = "";
         return;
@@ -1065,8 +1075,7 @@ export class UI {
         button("載入", () => {
           if (!layoutList.value) return;
           const current = this.app.store.getState();
-          const hasContent = current.objects.length > 0 || current.zones.length > 0 ||
-            current.groups.length > 0 || current.routes.length > 0;
+          const hasContent = planHasContent(current);
           if (hasContent && !window.confirm("載入平面圖會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) return;
           if (this.app.store.loadNamedLayout(layoutList.value)) this.showToast("已載入平面圖");
         }, "btn btn--ghost"),
