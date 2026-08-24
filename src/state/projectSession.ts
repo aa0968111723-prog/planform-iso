@@ -119,6 +119,11 @@ export class ProjectSession {
     return this.repo.listProjects();
   }
 
+  /** Raw recovery bytes for one broken project; the Home screen owns delivery. */
+  corruptBody(id: string): string | null {
+    return this.repo.corruptBody(id);
+  }
+
   // --- boot ----------------------------------------------------------------
 
   /**

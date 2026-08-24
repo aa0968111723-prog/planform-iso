@@ -1,5 +1,16 @@
 # Grok Adversarial Findings（持續累積）
 
+## Round 6（2026-08-24，PR #19 Visual Realism）— 真正的 Grok 匿名圖像盲測
+
+Grok 僅收到三張匿名 PNG，沒有 repo、文件、產品名稱或預設答案。它正確識別
+E310 類大學教室、約 30 人禪修／冥想社課、綠色拼接巧拼，以及走廊入場後在
+教室內報到、放鞋與背包、進座區的流程。結論 **PASS WITH NOTES**，0 P0。
+
+它提出 7 個 P1：動線略過鞋區／穿越巧拼、右側標籤截斷、3D 背包標籤截斷、
+講台與巧拼同色、2D 投影幕不明、左右鞋區同色、門邊服務區關係不清。均已在
+本輪修正並重產六張 Golden 圖。完整方法、逐項處置與剩餘 P2 見
+`docs/agent-handoff/VISUAL_REALISM_REVIEW.md`。
+
 規則：每個 finding 標 P0（blocker）/ P1（serious）/ P2（polish），附重現步驟、預期、實際、建議修法。
 Grok 原始輸出落在 repo 外 scratch；由 Claude 整理進本檔並派工 Codex。
 

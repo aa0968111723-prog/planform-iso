@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyCalibrationPath } from "../src/core/calibration";
-import { buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS } from "../src/core/quickStart";
+import { buildE310ClubGoldenProject, buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS } from "../src/core/quickStart";
 import { groupMembers } from "../src/core/arrays";
 import { calibrationComplete, calibrationPendingLabels } from "../src/core/model";
 import { validateProject } from "../src/core/validation";
@@ -13,6 +13,20 @@ import { createProjectFromVenuePreset, venuePresetById } from "../src/core/venue
 const e310 = venuePresetById("venue:tku-e310")!;
 
 describe("E310 golden venue", () => {
+  it("30-person visual golden follows photographed club-class reality", () => {
+    const p = buildE310ClubGoldenProject(e310);
+    expect(p.name).toBe("E310 禪學社社課（30 人）");
+    expect(p.description).toContain("走廊淨空");
+    expect(p.groups).toHaveLength(1);
+    expect(p.zones.some((z) => z.type === "payment")).toBe(false);
+    expect(p.zones.some((z) => z.type === "registration")).toBe(true);
+    expect(p.objects.some((o) => o.assetId === "builtin:computer" && o.surface === "tabletop")).toBe(true);
+    expect(p.zones.every((z) => z.z < p.corridor.z)).toBe(true);
+    expect(p.routes).toHaveLength(1);
+    expect(p.routes[0].visible).toBe(false);
+    expect(validateProject(p).filter((issue) => issue.severity === "error")).toEqual([]);
+  });
+
   it.each([20, 30, 40, 60])("field candidate for %i people stays inside its usable bounds", (participants) => {
     const candidates = generateLayouts({
       participants, matWidth: 0.6, matDepth: 0.6, gap: 0, aisleWidth: 0.9,

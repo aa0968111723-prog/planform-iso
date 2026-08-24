@@ -220,28 +220,38 @@ test.describe("Golden Flow 3 — 完全自訂（桌機）", () => {
   });
 });
 
-test.describe("Golden Flow 4 — E310 演講範例", () => {
+test.describe("Golden Flow 4 — E310 30 人實景場佈", () => {
   test.use({ viewport: { width: 1366, height: 1024 } });
 
-  test("一鍵範例 → 模擬 → 匯出含走廊的場刊圖", async ({ page }) => {
+  test("一鍵實景範例 → 綠色連續巧拼 → 走廊淨空 → 匯出", async ({ page }) => {
     await openFresh(page);
-    await page.locator(".quickstart__card button", { hasText: "E310 演講範例（60 人）" }).click();
+    await page.locator(".quickstart__card button", { hasText: "建立 30 人實景場佈" }).click();
     await settle(page);
 
     const p = await probeProject(page);
-    expect(p.name).toBe("E310 演講活動（範例）");
+    expect(p.name).toBe("E310 禪學社社課（30 人）");
     expect(p.groups.length).toBeGreaterThan(0);
     expect(p.routes.map((r) => r.type)).toContain("entry");
-
-    await page.locator(".topbar .chip", { hasText: "動線" }).first().click();
-    await settle(page);
-    await page.locator(".left button", { hasText: "▶ 模擬" }).click();
-    await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible({ timeout: 20_000 });
+    expect(p.zones.map((z) => z.type)).not.toContain("payment");
 
     await page.locator(".topbar .chip", { hasText: "分享" }).first().click();
     await settle(page);
     const download = page.waitForEvent("download");
     await page.locator(".left button", { hasText: "場佈總覽圖" }).click();
     expect((await download).suggestedFilename()).toContain("場佈總覽");
+  });
+});
+
+test.describe("Golden Flow 5 — E310 60 人壓力流程", () => {
+  test.use({ viewport: { width: 1366, height: 1024 } });
+
+  test("壓力範例 → 模擬完成", async ({ page }) => {
+    await openFresh(page);
+    await page.locator(".quickstart__card button", { hasText: "壓力測試：E310 60 人流程" }).click();
+    await settle(page);
+    await page.locator(".topbar .chip", { hasText: "動線" }).first().click();
+    await settle(page);
+    await page.locator(".left button", { hasText: "▶ 模擬" }).click();
+    await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible({ timeout: 20_000 });
   });
 });

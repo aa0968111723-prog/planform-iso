@@ -1,5 +1,15 @@
 # CURRENT_STATE（Claude Lead checkpoint）
 
+## 2026-08-24 Codex Visual Realism checkpoint（PR #19）
+
+- PR #19 仍為選定 RC，**未 merge**。
+- 新增 30 人 E310 禪學社視覺 Golden；60 / 100 人保留為壓力測試。
+- Project Home、編輯器、俯視、3D、六張場刊圖已統一為照片支持的場景語意。
+- 9 組跨裝置／人數檢查通過；詳見 `VISUAL_REALISM_REVIEW.md`。
+- Grok 匿名盲測正確識別大學教室、禪修社課、30 人、綠色巧拼與入場流程；0 P0，P1 已修。
+- Claude CLI 2.1.241 可執行但本機未登入，因此沒有假稱 Claude review 已完成。
+- E310 尺寸、production / PWA / 真手機 smoke 仍是 release 前外部 gate。
+
 更新：2026-08-21 09:3x · 環境已更換（見 §0）
 
 ## 0. ⚠ 環境變更 — 接手者必讀

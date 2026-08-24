@@ -8,7 +8,7 @@
 
 import type { App } from "../app/App";
 import type { ProjectSession } from "../state/projectSession";
-import { buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
+import { buildE310ClubGoldenProject, buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
 import { BUILTIN_VENUE_PRESETS, listUserVenuePresets, type VenuePreset } from "../core/venues";
 import { button, el } from "./dom";
 
@@ -92,9 +92,21 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
     const e310 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e310");
     if (e310) {
       card.append(
-        button(`🎤 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
+        el("div", { class: "quickstart__recommended" }, [
+          el("span", { class: "quickstart__eyebrow", text: "實景推薦起點" }),
+          el("strong", { text: "E310 禪學社社課" }),
+          el("span", { class: "hint", text: "30 人・綠色連續巧拼・教室內報到・走廊淨空" }),
+          button("建立 30 人實景場佈", () => createOnce(() => {
+            session.createProject({
+              project: buildE310ClubGoldenProject(e310),
+              open: true,
+              adoptPristineActive: true,
+            });
+          }), "btn btn--big btn--primary"),
+        ]),
+        button(`🎤 自訂 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
         el("p", { class: "hint", text: e310.note }),
-        button("⚡ E310 演講範例（60 人）", () => createOnce(() => {
+        button("壓力測試：E310 60 人流程", () => createOnce(() => {
           // `name` is deliberately omitted: the builder already names it, and
           // `createProject` falls back to the body's own name.
           session.createProject({
@@ -102,7 +114,7 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
             open: true,
             adoptPristineActive: true,
           });
-        }), "btn btn--big btn--primary"),
+        }), "btn btn--big btn--ghost"),
       );
     }
     card.append(
@@ -144,12 +156,12 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
 
   const renderNeedsStep = (venue: VenuePreset): void => {
     card.innerHTML = "";
-    // E310 exists for one purpose — the club's real events there are lectures
-    // with on-site payment, a teacher zone and a life-crew corner. Default the
-    // ticks (and 60 people below) to that reality instead of a generic 30.
+    // E310 starts from the repeatedly photographed 30-person club-class setup.
+    // Payment remains optional: the evidence places fee collection later in
+    // small groups, not as an entrance checkpoint.
     const isE310 = venue.id === "venue:tku-e310";
     const needs: QuickStartNeeds = isE310
-      ? { ...DEFAULT_NEEDS, payment: true, life: true, teacher: true }
+      ? { ...DEFAULT_NEEDS, payment: false, life: true, teacher: true }
       : { ...DEFAULT_NEEDS };
     let centralAisle = true;
     card.append(el("div", { class: "quickstart__title", text: "這次活動需要什麼？" }));
@@ -182,7 +194,7 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
     const countInput = el("input", {
       type: "number",
       class: "field__input",
-      value: isE310 ? "60" : "30",
+      value: "30",
       min: "1",
       max: "300",
       inputmode: "numeric",

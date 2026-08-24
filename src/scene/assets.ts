@@ -158,19 +158,29 @@ function buildByKind(
   }
 }
 
-function buildChair(g: Group, w: number, d: number, h: number, tint: string, detail: boolean): void {
+function buildChair(g: Group, w: number, d: number, h: number, _tint: string, detail: boolean): void {
   const seatH = Math.min(0.45, h * 0.48);
   const legR = detail ? 0.022 : 0.028;
-  g.add(part(w * 0.92, 0.04, d * 0.88, "fabric", 0, seatH, 0.02, tint));
-  g.add(part(w * 0.92, h - seatH - 0.02, 0.04, "fabric", 0, (h + seatH) / 2, -d / 2 + 0.04, tint, -15));
+  // E310's fixed furniture is a grey plastic writing-tablet chair with a
+  // black steel frame and an under-seat basket, not a freestanding soft chair.
+  g.add(part(w * 0.9, 0.055, d * 0.82, "plastic-matte", 0, seatH, 0.02, "#7f8b91"));
+  g.add(part(w * 0.88, h - seatH - 0.04, 0.045, "plastic-matte", 0, (h + seatH) / 2, -d / 2 + 0.04, "#87949a", -8));
   if (detail) {
     g.add(part(w * 0.88, 0.03, 0.03, "brushed-metal", 0, seatH + 0.02, -d / 2 + 0.05));
   }
   const lx = w / 2 - legR - 0.01;
   const lz = d / 2 - legR - 0.01;
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    g.add(cyl(legR, legR * 0.9, seatH, "painted-metal", sx * lx, seatH / 2, sz * lz));
+    g.add(cyl(legR, legR * 0.9, seatH, "painted-metal", sx * lx, seatH / 2, sz * lz, "#1f2937"));
   }
+  const armX = w * 0.56;
+  g.add(cyl(0.018, 0.018, 0.24, "painted-metal", armX, seatH + 0.12, -d * 0.08, "#1f2937"));
+  const tablet = part(w * 0.7, 0.035, d * 0.58, "plastic-matte", armX - w * 0.18, seatH + 0.25, d * 0.12, "#e4e1d8");
+  tablet.rotation.y = -4 * D2R;
+  g.add(tablet);
+  // Basket silhouette: three slim rails are enough to read at overview zoom.
+  for (const z of [-0.11, 0, 0.11]) g.add(part(w * 0.66, 0.012, 0.012, "painted-metal", 0, seatH * 0.48, z, "#374151"));
+  for (const x of [-0.22, 0, 0.22]) g.add(part(0.012, 0.012, d * 0.55, "painted-metal", x, seatH * 0.48, 0, "#374151"));
 }
 
 function buildDesk(
@@ -183,29 +193,32 @@ function buildDesk(
   detail: boolean,
 ): void {
   const topT = detail ? 0.035 : 0.04;
-  const wood: MaterialPresetId = variant === "payment" ? "dark-wood" : "light-wood";
-  g.add(part(w, topT, d, wood, 0, h - topT / 2, 0, tint));
+  const serviceDesk = variant === "checkin" || variant === "payment";
+  const wood: MaterialPresetId = serviceDesk ? "plastic-matte" : "light-wood";
+  const topColor = serviceDesk ? "#eeeae0" : tint;
+  g.add(part(w, topT, d, wood, 0, h - topT / 2, 0, topColor));
   if (detail) {
-    g.add(part(w * 0.98, 0.01, d * 0.98, wood, 0, h - topT - 0.005, 0, tint, -20));
+    g.add(part(w * 0.98, 0.01, d * 0.98, wood, 0, h - topT - 0.005, 0, topColor, -10));
   }
   const legR = 0.035;
   const lx = w / 2 - legR - 0.03;
   const lz = d / 2 - legR - 0.03;
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    g.add(cyl(legR, legR, h - topT, "painted-metal", sx * lx, (h - topT) / 2, sz * lz));
+    g.add(cyl(legR, legR, h - topT, "painted-metal", sx * lx, (h - topT) / 2, sz * lz, "#252b2d"));
   }
-  if (variant === "checkin" || variant === "payment") {
-    g.add(part(w * 0.96, h - topT - 0.12, 0.025, wood, 0, (h - topT) / 2 + 0.02, d / 2 - 0.02, tint, -12));
-    const boardColor = variant === "payment" ? "#fef3c7" : "#f8fafc";
-    g.add(part(w * 0.45, 0.16, 0.025, "paper", 0, h + 0.12, d / 2 - 0.02, boardColor));
-    g.add(part(w * 0.45, 0.02, 0.03, "painted-metal", 0, h + 0.03, d / 2 - 0.02));
+  if (serviceDesk) {
+    // Loose forms / name tags on the photographed folding table. Avoid a tall
+    // fascia or readable sign that would invent a booth absent from the room.
+    g.add(part(w * 0.28, 0.008, d * 0.3, "paper", -w * 0.18, h + 0.006, 0, "#fafafa"));
+    g.add(part(w * 0.2, 0.012, d * 0.2, "paper", w * 0.18, h + 0.009, -d * 0.12, variant === "payment" ? "#c9a97a" : "#e8edf0"));
   }
 }
 
 function buildStagePlatform(g: Group, w: number, d: number, h: number, detail: boolean): void {
   const top = Math.min(0.06, h * 0.35);
-  g.add(part(w, h - top, d, "dark-wood", 0, (h - top) / 2, 0, "#315b45"));
-  g.add(part(w, top, d, "dark-wood", 0, h - top / 2, 0, "#3f7658"));
+  g.add(part(w, h - top, d, "dark-wood", 0, (h - top) / 2, 0, "#182d26"));
+  g.add(part(w, top, d, "dark-wood", 0, h - top / 2, 0, "#2f6348"));
+  g.add(part(w * 0.99, Math.min(0.13, h * 0.55), 0.035, "rubber", 0, h * 0.36, d / 2 + 0.012, "#111827"));
   if (detail) {
     // A low front fascia makes the raised platform legible in the isometric view.
     g.add(part(w * 0.98, 0.025, 0.025, "painted-metal", 0, h + 0.012, d / 2 + 0.012, "#9cc6a8"));
@@ -221,14 +234,15 @@ function buildLectern(g: Group, w: number, d: number, h: number, detail: boolean
 }
 
 function buildComputer(g: Group, w: number, d: number, h: number, tint: string, detail: boolean): void {
-  const baseH = 0.015;
-  g.add(part(w * 0.45, baseH, d * 0.7, "brushed-metal", 0, baseH / 2, d * 0.12, tint, -20));
-  g.add(cyl(0.02, 0.025, h * 0.4, "brushed-metal", 0, h * 0.22, d * 0.12));
-  const screen = part(w, h * 0.52, detail ? 0.02 : 0.03, "plastic-matte", 0, h * 0.7, 0, tint, 20);
-  screen.rotation.x = -8 * D2R;
+  // Laptop clamshell used on the check-in table in the activity photos.
+  const baseH = detail ? 0.018 : 0.024;
+  g.add(part(w, baseH, d * 0.78, "brushed-metal", 0, baseH / 2, d * 0.08, "#747b80"));
+  g.add(part(w * 0.72, 0.006, d * 0.48, "plastic-matte", 0, baseH + 0.004, d * 0.08, "#2f3639"));
+  const screen = part(w, h * 0.72, detail ? 0.018 : 0.024, "brushed-metal", 0, h * 0.42, -d * 0.3, tint, 8);
+  screen.rotation.x = -14 * D2R;
   g.add(screen);
-  const glass = part(w * 0.92, h * 0.46, 0.008, "screen-glass", 0, h * 0.7, 0.012, "#64748b");
-  glass.rotation.x = -8 * D2R;
+  const glass = part(w * 0.9, h * 0.62, 0.006, "screen-glass", 0, h * 0.42, -d * 0.286, "#334155");
+  glass.rotation.x = -14 * D2R;
   g.add(glass);
 }
 

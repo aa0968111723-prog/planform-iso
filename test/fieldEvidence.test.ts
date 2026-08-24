@@ -127,11 +127,12 @@ describe("物資清單 names the material the 場務組 has to carry", () => {
     expect(matLine!.count).toBeGreaterThan(50);
   });
 
-  it("still lists the service kit the example places", () => {
+  it("lists evidenced service kit and does not invent a shoe rack", () => {
     const names = inventoryLines(buildE310GoldenProject(venuePresetById("venue:tku-e310")!)).map((l) => l.name);
-    for (const expected of ["報到桌", "收費桌", "鞋架", "電腦"]) {
+    for (const expected of ["報到桌", "收費桌", "電腦"]) {
       expect(names).toContain(expected);
     }
+    expect(names).not.toContain("鞋架");
   });
 });
 

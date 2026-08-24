@@ -255,7 +255,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const fadeFurniture = opt.preset === "route" || opt.preset === "staff" || opt.preset === "zones" || opt.preset === "mats";
 
   drawFloors(ctx, project, t);
-  withAlpha(ctx, showTilesFaint ? 0.4 : 1, () => drawTiles(ctx, project, t, minX, minZ, maxX, maxZ));
+  withAlpha(ctx, showTilesFaint ? 0.4 : 1, () => drawTiles(ctx, project, t));
   drawZones(ctx, project, t, emphasizeZones);
 
   if (opt.preset !== "route") {
@@ -285,11 +285,16 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
     });
   }
 
-  withAlpha(ctx, emphasizeRoutes ? 1 : opt.preset === "mats" ? 0.5 : 0.85, () =>
-    drawRoutes(ctx, project, t, showRouteBadges));
-
-  // Titles last: everything that could paint over them is already down.
-  drawZoneLabels(ctx, project, t, emphasizeZones);
+  if (emphasizeRoutes) {
+    // Route/partner sheets prioritise numbered stops. Draw zone names first so
+    // a long label cannot erase a stop badge (the previous 背包 label hid ④).
+    drawZoneLabels(ctx, project, t, emphasizeZones);
+    drawRoutes(ctx, project, t, showRouteBadges);
+  } else {
+    withAlpha(ctx, opt.preset === "mats" ? 0.5 : 0.85, () => drawRoutes(ctx, project, t, showRouteBadges));
+    // On non-route sheets labels remain the topmost communication layer.
+    drawZoneLabels(ctx, project, t, emphasizeZones);
+  }
 
   if (opt.dims) drawDimensions(ctx, project, t);
   const subtitle = opt.titleSuffix
@@ -446,7 +451,9 @@ function renderMiniPlan(project: Project, w: number, h: number): HTMLCanvasEleme
     if (!o.hidden) drawObject(ctx, o, t, "full", project);
   }
   drawGroups(ctx, project, t, false);
-  drawZoneLabels(ctx, project, t, false);
+  // The inventory page already lists every zone and object at full size above.
+  // Repeating all labels inside this small locator map turns it into an
+  // unreadable knot; retain the geometry and the field label only.
   labelBoxes = hostBoxes;
   labelFrame = hostFrame;
   return canvas;
@@ -460,30 +467,42 @@ function withAlpha(ctx: CanvasRenderingContext2D, a: number, fn: () => void): vo
 }
 
 function drawFloors(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {
+  const e310 = p.venuePresetId === "venue:tku-e310";
   for (const a of [p.classroom, p.corridor]) {
-    ctx.fillStyle = a.id === "classroom" ? "#ffffff" : "#f1f5f9";
-    ctx.strokeStyle = "#0f172a";
+    ctx.fillStyle = e310
+      ? (a.id === "classroom" ? "#e2ded5" : "#d2a0a2")
+      : (a.id === "classroom" ? "#ffffff" : "#f1f5f9");
+    ctx.strokeStyle = e310 ? "#465552" : "#0f172a";
     ctx.lineWidth = 3;
     const x = t.X(a.x), y = t.Y(a.z), w = a.length * t.s, h = a.width * t.s;
     ctx.fillRect(x, y, w, h);
     ctx.strokeRect(x, y, w, h);
-    ctx.fillStyle = "#64748b";
+    ctx.fillStyle = e310 ? "#455853" : "#64748b";
     ctx.font = font("600 20px");
     planText(ctx, fitText(ctx, a.name, Math.max(120, w - 16)), x + 8, y + 24);
   }
+  if (e310) {
+    const k = p.corridor;
+    ctx.fillStyle = "#d7ad38";
+    ctx.fillRect(t.X(k.x + k.length * 0.06), t.Y(k.z + k.width * 0.67), k.length * 0.72 * t.s, 0.26 * t.s);
+  }
 }
 
-function drawTiles(ctx: CanvasRenderingContext2D, p: Project, t: Xform, minX: number, minZ: number, maxX: number, maxZ: number): void {
-  ctx.strokeStyle = "#e2e8f0";
-  ctx.lineWidth = 1;
+function drawTiles(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {
   const w = Math.max(p.tile.width, 0.05);
   const d = Math.max(p.tile.depth, 0.05);
-  ctx.beginPath();
-  let sx = p.tile.originX; while (sx > minX) sx -= w;
-  for (let x = sx; x <= maxX + 1e-6; x += w) { ctx.moveTo(t.X(x), t.Y(minZ)); ctx.lineTo(t.X(x), t.Y(maxZ)); }
-  let sz = p.tile.originZ; while (sz > minZ) sz -= d;
-  for (let z = sz; z <= maxZ + 1e-6; z += d) { ctx.moveTo(t.X(minX), t.Y(z)); ctx.lineTo(t.X(maxX), t.Y(z)); }
-  ctx.stroke();
+  const e310 = p.venuePresetId === "venue:tku-e310";
+  for (const area of [p.classroom, p.corridor]) {
+    const minX = area.x, minZ = area.z, maxX = area.x + area.length, maxZ = area.z + area.width;
+    ctx.strokeStyle = e310 ? (area.id === "classroom" ? "rgba(96,91,84,.25)" : "rgba(112,63,68,.28)") : "#e2e8f0";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let sx = p.tile.originX; while (sx > minX) sx -= w;
+    for (let x = sx; x <= maxX + 1e-6; x += w) { ctx.moveTo(t.X(x), t.Y(minZ)); ctx.lineTo(t.X(x), t.Y(maxZ)); }
+    let sz = p.tile.originZ; while (sz > minZ) sz -= d;
+    for (let z = sz; z <= maxZ + 1e-6; z += d) { ctx.moveTo(t.X(minX), t.Y(z)); ctx.lineTo(t.X(maxX), t.Y(z)); }
+    ctx.stroke();
+  }
 }
 
 interface LabelBox { x: number; y: number; w: number; h: number }
@@ -578,8 +597,12 @@ function drawZoneLabels(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emp
     ctx.fillStyle = TEXT;
     // 34px is the PHONE floor — on A4/A3 it blew labels up to 講師… ellipses.
     ctx.font = font(activePageSize === "phone" ? "700 34px" : "700 22px");
-    const label = `${z.icon ? `${z.icon} ` : ""}${z.name}`;
-    const labelW = Math.min(Math.max(w - 12, activePageSize === "phone" ? 300 : 240), Math.max(240, t.s * 6));
+    const displayName = z.type === "backpack" ? "背包" : z.name;
+    const label = `${z.icon ? `${z.icon} ` : ""}${displayName}`;
+    const labelW = Math.min(
+      Math.max(w - 12, activePageSize === "phone" ? 260 : 150),
+      activePageSize === "phone" ? 420 : 300,
+    );
     const lineH = activePageSize === "phone" ? 42 : 26;
     // A zone shorter than its own title cannot hold it without covering the
     // furniture inside — put the title just above the zone instead.
@@ -592,7 +615,9 @@ function drawZoneLabels(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emp
 
 function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: boolean): void {
   for (const r of p.routes) {
-    if (!r.visible || r.points.length < 2) continue;
+    // Photo-grounded Golden Scenes may hide editing overlays by default; a
+    // dedicated route/partner sheet must still be able to reveal the route.
+    if ((!r.visible && !bold) || r.points.length < 2) continue;
     ctx.strokeStyle = r.color;
     ctx.lineWidth = bold ? 5 : 3;
     ctx.beginPath();
@@ -680,26 +705,41 @@ function isFieldMatGroup(g: Project["groups"][number]): boolean {
 }
 
 function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][number], t: Xform, seatMap = false): void {
-  const points = groupMembers(g).flatMap((m) => rectCorners(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
+  const members = groupMembers(g);
+  const points = members.flatMap((m) => rectCorners(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
   if (!points.length) return;
   const minX = Math.min(...points.map((p) => p.x));
   const maxX = Math.max(...points.map((p) => p.x));
   const minZ = Math.min(...points.map((p) => p.z));
   const maxZ = Math.max(...points.map((p) => p.z));
   const x = t.X(minX), y = t.Y(minZ), w = (maxX - minX) * t.s, h = (maxZ - minZ) * t.s;
-  const color = assetDef(g.sourceKind).color;
-  ctx.fillStyle = hexA(color, 0.12);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([10, 6]);
+  const color = "#3f8f71";
+  ctx.fillStyle = hexA(color, seatMap ? 0.72 : 0.88);
+  ctx.strokeStyle = "#205c49";
+  ctx.lineWidth = 3.5;
   ctx.fillRect(x, y, w, h);
   ctx.strokeRect(x, y, w, h);
-  ctx.setLineDash([]);
+
+  // Draw every 60 cm EVA seam and a small joint mark. The overall field stays
+  // visually continuous while still reading as interlocking pieces.
+  ctx.strokeStyle = "rgba(18, 78, 61, .58)";
+  ctx.lineWidth = 1.5;
+  for (const member of members) {
+    const corners = rectCorners(member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg);
+    ctx.beginPath();
+    ctx.moveTo(t.X(corners[0].x), t.Y(corners[0].z));
+    for (let i = 1; i < corners.length; i++) ctx.lineTo(t.X(corners[i].x), t.Y(corners[i].z));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(t.X(corners[0].x), t.Y(corners[0].z), Math.max(2, t.s * 0.025), 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   if (seatMap) {
     const rows = new Map<number, ReturnType<typeof groupMembers>[number]>();
-    for (const member of groupMembers(g)) {
-      drawRectAt(ctx, member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg, t, color, undefined, 0.08, 2.5);
+    for (const member of members) {
+      drawRectAt(ctx, member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg, t, color, undefined, 0.13, 2.5);
       if (!rows.has(member.row)) rows.set(member.row, member);
     }
     ctx.fillStyle = TEXT;
@@ -818,6 +858,14 @@ function drawScreen(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): vo
   ctx.lineTo(t.X(o.x + tangent.x * 0.15), t.Y(o.z + tangent.z * 0.15));
   ctx.lineTo(t.X(tip.x), t.Y(tip.z));
   ctx.closePath(); ctx.fill();
+  ctx.font = font(activePageSize === "phone" ? "700 30px" : "700 16px");
+  const label = "投影幕";
+  const labelW = ctx.measureText(label).width;
+  const labelX = t.X(o.x) - labelW / 2;
+  const labelY = t.Y(o.z + f.z * 0.52) - (activePageSize === "phone" ? 34 : 18);
+  const spot = placeLabel(labelX, labelY, labelW, activePageSize === "phone" ? 34 : 18, 20);
+  ctx.fillStyle = "#1e40af";
+  planText(ctx, label, spot.x, spot.y + (activePageSize === "phone" ? 28 : 15));
 }
 
 function drawSwitch(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): void {

@@ -17,6 +17,7 @@ import {
   OrthographicCamera,
   Plane,
   PlaneGeometry,
+  PCFShadowMap,
   Raycaster,
   Scene,
   Sprite,
@@ -155,6 +156,8 @@ export class SceneManager {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     applyRendererLook(this.renderer);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFShadowMap;
 
     this.scene = new Scene();
     this.scene.background = new Color(this.palette.background);
@@ -196,7 +199,9 @@ export class SceneManager {
     const d = 60;
     const t = this.target;
     switch (view) {
-      case "iso": this.camera.position.set(t.x + d, d, t.z + d); this.controls.enableRotate = true; break;
+      // A slightly elevated isometric angle keeps the plan readable while the
+      // stage, desks and classroom chairs still show their real volume.
+      case "iso": this.camera.position.set(t.x + d, d * 1.32, t.z + d * 0.92); this.controls.enableRotate = true; break;
       case "top": this.camera.position.set(t.x, d, t.z + 0.001); this.controls.enableRotate = false; break;
       case "front": this.camera.position.set(t.x, 4, t.z + d); this.controls.enableRotate = true; break;
       case "left": this.camera.position.set(t.x - d, 4, t.z); this.controls.enableRotate = true; break;
@@ -451,41 +456,46 @@ export class SceneManager {
     const { tile } = project;
     this.floorGroup.visible = this.layersState.areas;
     this.tileGroup.visible = this.layersState.tiles && tile.visible && !simplify;
-    const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile });
+    const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile, venue: project.venuePresetId, theme: this.theme });
     if (sig === this.lastAreaSig) return;
     this.lastAreaSig = sig;
     if (!this.hasCentered) { this.recenter(project); this.hasCentered = true; }
     clearGroup(this.floorGroup);
     clearGroup(this.tileGroup);
+    const e310 = project.venuePresetId === "venue:tku-e310";
     for (const area of [project.classroom, project.corridor]) {
       const areaGroup = new Group();
       const floor = new Mesh(
-        new PlaneGeometry(area.length, area.width),
+        new BoxGeometry(area.length, 0.055, area.width),
         new MeshStandardMaterial({
-          color: area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor,
-          roughness: 1,
-          side: DoubleSide,
+          color: e310 && this.theme === "light"
+            ? (area.id === "classroom" ? "#ddd9d0" : "#c99698")
+            : (area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor),
+          roughness: area.id === "classroom" ? 0.84 : 0.94,
         }),
       );
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.set(area.x + area.length / 2, 0, area.z + area.width / 2);
+      floor.position.set(area.x + area.length / 2, -0.03, area.z + area.width / 2);
+      floor.receiveShadow = true;
       areaGroup.add(floor);
       areaGroup.add(this.buildAreaWalls(area));
       const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
-      label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
-      label.sprite.scale.set(1.8, 0.42, 1);
-      label.sprite.position.set(area.x + area.length / 2, 0.14, area.z + area.width / 2);
+      label.set(area.name, e310 && this.theme === "light" ? "#43534f" : (area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor));
+      label.sprite.scale.set(1.55, 0.36, 1);
+      label.sprite.position.set(area.x + 1.25, 0.14, area.z + 0.55);
       areaGroup.add(label.sprite);
       this.floorGroup.add(areaGroup);
     }
-    this.tileGroup.add(this.buildTileGrid(project));
+    if (e310) this.floorGroup.add(this.buildE310Fixtures(project));
+    this.tileGroup.add(this.buildTileGrid(project, project.classroom, e310 ? 0x8b918c : 0x64748b, e310 ? 0.26 : 0.42));
+    this.tileGroup.add(this.buildTileGrid(project, project.corridor, e310 ? 0x8f5f64 : 0x64748b, e310 ? 0.3 : 0.42));
   }
 
   /** Raised, thick wall rails make an empty classroom and its corridor legible. */
   private buildAreaWalls(area: Project["classroom"]): Group {
     const walls = new Group();
-    const material = new MeshBasicMaterial({
+    const material = new MeshStandardMaterial({
       color: area.id === "classroom" ? this.palette.wallClassroom : this.palette.wallCorridor,
+      roughness: 0.88,
     });
     const thickness = 0.1;
     const height = 0.12;
@@ -498,17 +508,17 @@ export class SceneManager {
     for (const [width, depth, x, z] of rails) {
       const wall = new Mesh(new BoxGeometry(width, height, depth), material);
       wall.position.set(x, height / 2, z);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
       walls.add(wall);
     }
     return walls;
   }
 
-  private buildTileGrid(project: Project): Object3D {
-    const { classroom, corridor, tile } = project;
-    const minX = Math.min(classroom.x, corridor.x);
-    const minZ = Math.min(classroom.z, corridor.z);
-    const maxX = Math.max(classroom.x + classroom.length, corridor.x + corridor.length);
-    const maxZ = Math.max(classroom.z + classroom.width, corridor.z + corridor.width);
+  private buildTileGrid(project: Project, area: Project["classroom"], color: number, opacity: number): Object3D {
+    const { tile } = project;
+    const minX = area.x, minZ = area.z;
+    const maxX = area.x + area.length, maxZ = area.z + area.width;
     const positions: number[] = [];
     const w = Math.max(tile.width, 0.05);
     const d = Math.max(tile.depth, 0.05);
@@ -518,10 +528,49 @@ export class SceneManager {
     for (let z = sz; z <= maxZ + 1e-6; z += d) positions.push(minX, 0, z, maxX, 0, z);
     const geo = new BufferGeometry();
     geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
-    const grid = new LineSegments(geo, new LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.5 }));
+    const grid = new LineSegments(geo, new LineBasicMaterial({ color, transparent: true, opacity }));
     grid.position.y = 0.003;
     grid.rotation.y = tile.rotationDeg * D2R;
     return grid;
+  }
+
+  /** Low-cost architectural cues copied from the E310 field photographs. */
+  private buildE310Fixtures(project: Project): Group {
+    const g = new Group();
+    const c = project.classroom, k = project.corridor;
+    const trim = new MeshStandardMaterial({ color: 0x8c9aa0, roughness: 0.92 });
+    const curtain = new MeshStandardMaterial({ color: 0x7f929b, roughness: 1 });
+    const glass = new MeshStandardMaterial({ color: 0xc9dde0, roughness: 0.28, metalness: 0.04 });
+    // Blue-grey lower wall band and a few curtain/window bays, kept low enough
+    // that the editable floor remains unobstructed from the iso camera.
+    for (const [len, dep, x, z] of [
+      [c.length, 0.06, c.x + c.length / 2, c.z],
+      [0.06, c.width, c.x, c.z + c.width / 2],
+    ] as const) {
+      const base = new Mesh(new BoxGeometry(len, 0.3, dep), trim);
+      base.position.set(x, 0.15, z);
+      base.receiveShadow = true;
+      g.add(base);
+    }
+    for (let i = 0; i < 3; i++) {
+      const z = c.z + 1.5 + i * 2.05;
+      const pane = new Mesh(new BoxGeometry(0.035, 1.28, 1.55), glass);
+      pane.position.set(c.x + 0.02, 0.95, z);
+      g.add(pane);
+      const drape = new Mesh(new BoxGeometry(0.08, 1.46, 0.24), curtain);
+      drape.position.set(c.x + 0.08, 0.9, z - 0.74);
+      drape.castShadow = true;
+      g.add(drape);
+    }
+    // Yellow tactile strip crossing the pink-tiled open corridor lobby.
+    const tactile = new Mesh(
+      new BoxGeometry(Math.max(1.2, k.length * 0.72), 0.018, 0.28),
+      new MeshStandardMaterial({ color: 0xd8ad35, roughness: 0.82 }),
+    );
+    tactile.position.set(k.x + k.length * 0.42, 0.014, k.z + k.width * 0.72);
+    tactile.receiveShadow = true;
+    g.add(tactile);
+    return g;
   }
 
   private syncObjects(project: Project, showLabels: boolean, simplify: boolean): void {
@@ -543,7 +592,13 @@ export class SceneManager {
           quality,
         );
         group.userData = { type: "object", id: o.id };
-        group.traverse((m) => { if (m instanceof Mesh) m.userData = { type: "object", id: o.id }; });
+        group.traverse((m) => {
+          if (m instanceof Mesh) {
+            m.userData = { type: "object", id: o.id };
+            m.castShadow = o.kind !== "mat";
+            m.receiveShadow = true;
+          }
+        });
         // Enlarged invisible pick proxy for thin wall assets (easier touch targets).
         if (catalogEntry.placementType === "wall") {
           const pw = Math.max(o.width, 0.5), ph = Math.max(o.height, 1.0), pd = Math.max(o.depth, 0.45);
@@ -568,7 +623,7 @@ export class SceneManager {
       if (entry.label) {
         entry.label.sprite.visible = showLabels && !o.hidden;
         if (showLabels) {
-          entry.label.set(catalogEntry.name, "#e2e8f0");
+          entry.label.set(catalogEntry.name, this.theme === "light" ? "#334155" : "#e2e8f0");
           entry.label.sprite.position.set(o.x, o.elevation + o.height + 0.35, o.z);
         }
       }
@@ -601,11 +656,13 @@ export class SceneManager {
         const geom = buildMergedGeometry(g.sourceKind, { width: g.itemWidth, depth: g.itemDepth, height: g.itemHeight });
         const material = assetInstanceMaterial(g.sourceKind).clone();
         if (isFieldMatGroup(g)) {
-          // The individual meshes remain pickable, but the field itself reads
-          // as a plan rather than a single purple slab.
-          material.transparent = true;
-          material.opacity = 0.08;
-          material.depthWrite = false;
+          // Opaque teal EVA with slight piece-to-piece variation reads as the
+          // photographed continuous puzzle-mat field, not a transparent zone.
+          material.color.set("#ffffff");
+          material.roughness = 0.96;
+          material.vertexColors = true;
+          material.emissive.set("#2d8064");
+          material.emissiveIntensity = 0.92;
         }
         const mesh = new InstancedMesh(geom, material, Math.max(members.length, 1));
         mesh.count = members.length;
@@ -615,8 +672,13 @@ export class SceneManager {
           dummy.rotation.set(0, members[i].rotationDeg * D2R, 0);
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
+          if (isFieldMatGroup(g)) {
+            mesh.setColorAt(i, new Color(i % 3 === 0 ? "#65ae91" : i % 3 === 1 ? "#70b99b" : "#5fa589"));
+          }
         }
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        mesh.receiveShadow = true;
         const overlay = this.buildArrayOverlay(g, members);
         this.arrayGroupRoot.add(mesh);
         this.arrayGroupRoot.add(overlay);
@@ -657,11 +719,11 @@ export class SceneManager {
     }
     const geo = new BufferGeometry();
     geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
-    overlay.add(new LineSegments(geo, new LineBasicMaterial({ color: 0xf5d0fe, transparent: true, opacity: 0.95 })));
+    overlay.add(new LineSegments(geo, new LineBasicMaterial({ color: 0x174f40, transparent: true, opacity: 0.72 })));
 
     const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
     const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
-    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, "#f8fafc");
+    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, this.theme === "light" ? "#134e4a" : "#d1fae5");
     label.sprite.scale.set(3.25, 0.52, 1);
     const center = groupCenter(g);
     label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
@@ -678,7 +740,7 @@ export class SceneManager {
       seen.add(zone.id);
       // Partner labels are drawn at a higher texture resolution, so the mode
       // is part of the signature and the node is rebuilt when it changes.
-      const sig = `${zone.width}|${zone.depth}|${partner ? "partner" : "editor"}`;
+      const sig = `${zone.type}|${zone.width}|${zone.depth}|${partner ? "partner" : "editor"}`;
       let entry = this.zoneNodes.get(zone.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.zoneGroup.remove(entry.group); entry.label.dispose(); }
@@ -715,7 +777,7 @@ export class SceneManager {
         fillMat.opacity = 0.2;
         edgeMat.opacity = 0.9;
         entry.label.sprite.visible = true;
-        entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), "#e2e8f0");
+        entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), this.theme === "light" ? "#334155" : "#e2e8f0");
       }
     }
     for (const [id, entry] of this.zoneNodes) {
@@ -742,6 +804,7 @@ export class SceneManager {
     edges.position.y = 0.02;
     edges.name = "edges";
     group.add(edges);
+    group.add(this.buildZoneProps(zone));
     const label = partner
       ? new TextLabel({ width: 640, height: 140, fontSize: 62 })
       : new TextLabel();
@@ -749,6 +812,40 @@ export class SceneManager {
     label.sprite.position.y = 0.5;
     group.add(label.sprite);
     return { group, label, sig };
+  }
+
+  /** Small non-interactive props make operational zones recognizable at a glance. */
+  private buildZoneProps(zone: Zone): Group {
+    const props = new Group();
+    const addBox = (w: number, h: number, d: number, x: number, y: number, z: number, color: string, rotation = 0) => {
+      const mesh = new Mesh(new BoxGeometry(w, h, d), new MeshStandardMaterial({ color, roughness: 0.9 }));
+      mesh.position.set(x, y, z);
+      mesh.rotation.y = rotation;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      props.add(mesh);
+    };
+    if (zone.type === "shoe") {
+      const count = Math.max(2, Math.min(5, Math.floor(zone.depth / 0.55)));
+      for (let i = 0; i < count; i++) {
+        const z = -zone.depth / 2 + 0.3 + i * ((zone.depth - 0.6) / Math.max(count - 1, 1));
+        const tone = i % 2 ? "#d9d4ca" : "#313a3d";
+        addBox(0.12, 0.065, 0.25, -0.09, 0.045, z, tone, -0.12);
+        addBox(0.12, 0.065, 0.25, 0.09, 0.045, z, tone, 0.12);
+      }
+    } else if (zone.type === "backpack") {
+      for (let i = -1; i <= 1; i++) {
+        const z = i * Math.min(0.72, zone.depth / 3.4);
+        addBox(0.34, 0.42, 0.2, 0, 0.23, z, i === 0 ? "#b85b42" : "#3f6670");
+        addBox(0.2, 0.07, 0.08, 0, 0.47, z, i === 0 ? "#8f4332" : "#304e57");
+      }
+    } else if (zone.type === "meditation") {
+      addBox(Math.min(0.72, zone.width * 0.22), 0.035, Math.min(1.5, zone.depth * 0.72), 0, 0.035, 0, "#38785f");
+    } else if (zone.type === "life") {
+      addBox(0.55, 0.25, 0.42, -0.35, 0.14, 0, "#b88b53");
+      addBox(0.55, 0.2, 0.42, 0.35, 0.11, 0, "#d0aa72");
+    }
+    return props;
   }
 
   private syncRoutes(project: Project, focusRouteId: string | null): void {
@@ -1198,7 +1295,7 @@ export class SceneManager {
       this.applyPalette(EXPORT_PALETTE);
       this.syncAreasAndTiles(project, false);
       this.renderer.render(this.scene, this.camera);
-      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background);
+      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background, project.name);
     } finally {
       editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
       this.applyPalette(scenePalette(this.theme));
@@ -1258,7 +1355,7 @@ export class SceneManager {
   }
 
   /** Remove the solid scene background around the fitted plan. */
-  private cropExportBackground(source: HTMLCanvasElement, background: number): string {
+  private cropExportBackground(source: HTMLCanvasElement, background: number, projectName: string): string {
     const raster = document.createElement("canvas");
     raster.width = source.width;
     raster.height = source.height;
@@ -1282,11 +1379,23 @@ export class SceneManager {
     const margin = 24;
     minX = Math.max(0, minX - margin); minY = Math.max(0, minY - margin);
     maxX = Math.min(source.width - 1, maxX + margin); maxY = Math.min(source.height - 1, maxY + margin);
-    const cropped = document.createElement("canvas");
-    cropped.width = maxX - minX + 1;
-    cropped.height = maxY - minY + 1;
-    cropped.getContext("2d")!.putImageData(image, -minX, -minY);
-    return cropped.toDataURL("image/png");
+    const croppedW = maxX - minX + 1;
+    const croppedH = maxY - minY + 1;
+    const headerH = 118;
+    const framed = document.createElement("canvas");
+    framed.width = croppedW;
+    framed.height = croppedH + headerH;
+    const out = framed.getContext("2d")!;
+    out.fillStyle = "#e9eef5";
+    out.fillRect(0, 0, framed.width, framed.height);
+    out.fillStyle = "#0f172a";
+    out.font = "700 42px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+    out.fillText(projectName, 34, 51);
+    out.fillStyle = "#64748b";
+    out.font = "600 24px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+    out.fillText("3D 場佈圖 · 微立體視角 · 尺寸待現場校正", 34, 88);
+    out.drawImage(source, minX, minY, croppedW, croppedH, 0, headerH, croppedW, croppedH);
+    return framed.toDataURL("image/png");
   }
 }
 

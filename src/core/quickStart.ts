@@ -280,7 +280,8 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
     if (existing) project.zones.splice(project.zones.indexOf(existing), 1);
     for (const [side, x] of [["左", fieldMinX - 0.45], ["右", fieldMaxX + 0.45]] as [string, number][]) {
       const zone = makeZone("shoe", inX(x, 0.35), inZ(midZ, stripDepth / 2));
-      zone.name = `鞋子（${side}側）`;
+      zone.name = `鞋子｜${side}側`;
+      zone.color = side === "左" ? "#eab308" : "#f59e0b";
       zone.width = 0.7;
       zone.depth = stripDepth;
       project.zones.push(zone);
@@ -296,7 +297,7 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
       const fieldMaxX = matField.anchorX + matField.cols * matField.itemWidth;
       bag.x = inX(fieldMaxX + 1.3, bag.width / 2);
       bag.z = inZ((matField.anchorZ + matField.anchorZ + matField.rows * matField.itemDepth) / 2, bag.depth / 2);
-      bag.name = "背包（放課桌椅上）";
+      bag.name = "背包｜課桌椅";
       // 三張課桌椅當載體，背包實際就是放在這些板子上。
       for (let i = -1; i <= 1; i++) {
         project.objects.push(deskChairObject(bag.x, inZ(bag.z + i * 0.95, 0.3)));
@@ -357,6 +358,56 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   project.description = `${config.participants} 人`;
   // Open in the 3D isometric view so the result reads as a real room, not a
   // flat diagram; 俯視 stays one tap away in 視角.
+  project.view = "iso";
+  return project;
+}
+
+/**
+ * Photo-grounded 30-person Zen club setup used as the visual release baseline.
+ *
+ * Unlike the 60-person flow stress case below, this scene only contains what
+ * the activity photos repeatedly show: one continuous green mat field, an
+ * in-room check-in desk, paired shoes on the bare side strips, bags on the
+ * classroom's writing-tablet chairs, a teacher strip and a small life-crew
+ * corner.  The corridor stays physically clear and payment is deliberately
+ * absent because the evidence places fee collection later in small groups.
+ */
+export function buildE310ClubGoldenProject(venue: VenuePreset): Project {
+  const project = buildQuickStartProject({
+    venue,
+    eventName: "E310 禪學社社課（30 人）",
+    participants: 30,
+    needs: {
+      mats: true, checkin: true, payment: false, life: true,
+      shoe: true, backpack: true, teacher: true, groups: false, staffRoute: false,
+    },
+    centralAisle: true,
+  });
+  const checkin = project.objects.find((o) => o.serviceRole === "checkin");
+  if (checkin) project.objects.push(tabletopObject("builtin:computer", checkin));
+  const route = project.routes[0];
+  const door = project.objects.find((o) => o.kind === "door");
+  const checkinZone = project.zones.find((z) => z.type === "registration");
+  const shoes = project.zones.filter((z) => z.type === "shoe");
+  const backpack = project.zones.find((z) => z.type === "backpack");
+  const field = project.groups.find((g) => g.sourceKind === "mat");
+  if (route && checkinZone && shoes.length && backpack && field) {
+    const nearShoe = shoes.reduce((best, zone) => Math.abs(zone.x - (door?.x ?? checkinZone.x)) < Math.abs(best.x - (door?.x ?? checkinZone.x)) ? zone : best);
+    const rearZ = field.anchorZ + field.rows * field.itemDepth + 0.28;
+    const rightLaneX = Math.max(nearShoe.x, backpack.x);
+    route.points = [
+      { x: door?.x ?? checkinZone.x, z: project.classroom.z + project.classroom.width - 0.28 },
+      { x: checkinZone.x, z: checkinZone.z },
+      { x: nearShoe.x, z: nearShoe.z + Math.min(0.8, nearShoe.depth * 0.3) },
+      { x: backpack.x, z: backpack.z - Math.min(0.8, backpack.depth * 0.3) },
+      { x: rightLaneX, z: rearZ },
+      { x: field.anchorX + field.cols * field.itemWidth / 2, z: rearZ },
+    ];
+  }
+  // Keep the everyday editor view photographic and uncluttered. The route is
+  // still part of the project and appears in the dedicated route export.
+  for (const route of project.routes) route.visible = false;
+  project.description = "30 人社課｜綠色連續巧拼｜教室內報到｜走廊淨空";
   project.view = "iso";
   return project;
 }
