@@ -93,4 +93,5 @@ Grok 只收到匿名檔名 `scene-a.png`、`scene-b.png`、`scene-c.png`，未�
 - E310 地磚、門寬、房間長寬仍需現場校正。
 - Claude CLI 需使用者登入後補跑獨立審稿。
 - production URL、PWA、離線與真手機觸控需在部署後 smoke。
+- 本輪期間 `main` 已合併 #18 與 #20（另一套多專案實作），GitHub 因此把 #19 標為 `DIRTY`。讀-only merge-tree 顯示十多個核心檔案衝突；未在沒有架構取捨授權時擅自合併兩套實作。
 - PR #19 保持 open，未 merge。
