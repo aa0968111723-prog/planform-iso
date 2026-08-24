@@ -561,8 +561,31 @@ export class ProjectRepository {
 
   // --- corruption escape hatches -------------------------------------------
 
+  /**
+   * Raw bytes for a project that failed to parse.
+   *
+   * Prefer the quarantine backup. When the backup write itself failed (quota
+   * full), `quarantine` intentionally left the only copy in the primary body
+   * key — fall back to that. Only return primary bytes when they truly do not
+   * parse as a healthy project, so 「下載這份的原始資料」 never hands out a
+   * working plan under a recovery label.
+   */
   corruptBody(id: string): string | null {
-    return readRaw(projectBackupKey(id));
+    const backup = readRaw(projectBackupKey(id));
+    if (backup !== null && backup !== "") return backup;
+
+    const primary = readRaw(projectBodyKey(id));
+    if (primary === null || primary === "") return null;
+
+    try {
+      const parsed: unknown = JSON.parse(primary);
+      if (!isRecord(parsed)) return primary;
+      migrateProject(parsed as Partial<Project>);
+      // Healthy project sitting in the primary key — not recovery material.
+      return null;
+    } catch {
+      return primary;
+    }
   }
 
   corruptLayouts(projectId: string): string | null {

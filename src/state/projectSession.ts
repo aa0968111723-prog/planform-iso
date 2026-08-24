@@ -8,7 +8,15 @@
  * vanishes with no error anywhere.
  */
 
-import { createDefaultProject, type Project } from "../core/model";
+import {
+  createDefaultProject,
+  type AreaConfig,
+  type Calibration,
+  type LayerVisibility,
+  type Project,
+  type TileConfig,
+  type ValidationSettings,
+} from "../core/model";
 import { migrateProject } from "../core/migrate";
 import type { Store } from "./store";
 import {
@@ -428,22 +436,99 @@ export class ProjectSession {
 }
 
 /**
- * Does this plan hold anything the user would miss?
+ * Does this plan hold anything the user would miss if we replaced it?
  *
- * One predicate, two callers, on purpose. Measurements and scenarios count:
- * someone who walked the venue and recorded 尺寸線 before placing a single
- * object, or who configured an event-flow 情境, has real work here. The
- * four-array version of this test is exactly the unsound check that the
+ * Semantic comparison against a pristine `createDefaultProject()`, covering
+ * every user-editable field — not just the furniture arrays. Room dimensions,
+ * tile calibration, description, layers, custom catalog, validation settings,
+ * venue identity and event date all count: someone who spent ten minutes
+ * measuring the classroom before placing a single chair has real work here.
+ *
+ * Identity (`id`) and pure camera `view` are ignored — ambient, not work.
+ *
+ * One predicate, two callers (`canAdoptPristine` / `applyLayout`), on purpose.
+ * The four-array version of this test is exactly the unsound check that the
  * deleted `confirmReplace()` used to wipe plans with — it must not grow back.
  */
-function planHasContent(p: Project): boolean {
+export function planHasContent(p: Project): boolean {
+  const d = createDefaultProject();
+
+  if (p.zones.length > 0) return true;
+  if (p.objects.length > 0) return true;
+  if (p.groups.length > 0) return true;
+  if (p.routes.length > 0) return true;
+  if (p.measurements.length > 0) return true;
+  if ((p.scenarios?.length ?? 0) > 0) return true;
+  if ((p.catalogExtras?.length ?? 0) > 0) return true;
+
+  if ((p.description ?? "").trim() !== "") return true;
+  if (p.venuePresetId) return true;
+  if (p.eventDate) return true;
+  if (p.activeScenarioId) return true;
+
+  // Anything other than the blank default name is a deliberate user decision.
+  const name = (p.name ?? "").trim();
+  if (name && name !== DEFAULT_PROJECT_NAME && name !== d.name) return true;
+
+  if (!areaConfigEqual(p.classroom, d.classroom)) return true;
+  if (!areaConfigEqual(p.corridor, d.corridor)) return true;
+  if (!tileConfigEqual(p.tile, d.tile)) return true;
+  if (!calibrationEqual(p.calibration, d.calibration)) return true;
+  if (!layersEqual(p.layers, d.layers)) return true;
+  if (!validationEqual(p.validationSettings, d.validationSettings)) return true;
+
+  return false;
+}
+
+function areaConfigEqual(a: AreaConfig, b: AreaConfig): boolean {
   return (
-    p.zones.length > 0 ||
-    p.objects.length > 0 ||
-    p.groups.length > 0 ||
-    p.routes.length > 0 ||
-    p.measurements.length > 0 ||
-    (p.scenarios?.length ?? 0) > 0
+    a.id === b.id &&
+    a.name === b.name &&
+    a.length === b.length &&
+    a.width === b.width &&
+    a.x === b.x &&
+    a.z === b.z
+  );
+}
+
+function tileConfigEqual(a: TileConfig, b: TileConfig): boolean {
+  return (
+    a.width === b.width &&
+    a.depth === b.depth &&
+    a.originX === b.originX &&
+    a.originZ === b.originZ &&
+    a.rotationDeg === b.rotationDeg &&
+    a.visible === b.visible
+  );
+}
+
+function calibrationEqual(a: Calibration, b: Calibration): boolean {
+  return (
+    a.referenceLength === b.referenceLength &&
+    (a.note ?? "") === (b.note ?? "") &&
+    !!a.confirmed?.tile === !!b.confirmed?.tile &&
+    !!a.confirmed?.door === !!b.confirmed?.door &&
+    !!a.confirmed?.room === !!b.confirmed?.room
+  );
+}
+
+function layersEqual(a: LayerVisibility, b: LayerVisibility): boolean {
+  return (
+    a.areas === b.areas &&
+    a.zones === b.zones &&
+    a.objects === b.objects &&
+    a.tiles === b.tiles &&
+    a.routes === b.routes
+  );
+}
+
+function validationEqual(a: ValidationSettings, b: ValidationSettings): boolean {
+  return (
+    a.minAisleWidth === b.minAisleWidth &&
+    a.doorFrontClearance === b.doorFrontClearance &&
+    a.matWallClearance === b.matWallClearance &&
+    a.checkScreenView === b.checkScreenView &&
+    a.checkZoneRouteIntrusion === b.checkZoneRouteIntrusion
   );
 }
 
