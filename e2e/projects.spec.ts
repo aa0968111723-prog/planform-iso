@@ -262,6 +262,62 @@ test.describe("project management", () => {
     expect(await cardNames(page)).toEqual(expect.arrayContaining(["會被刪掉的", "留下來的"]));
   });
 
+  test("deleting two in a row can still get the first one back", async ({ page }) => {
+    // Tidying up several old plans is one gesture, not two unrelated ones.
+    // With a single undo slot the first project's bytes were already off disk
+    // and the second delete dropped the only copy left — silently.
+    await openProjectHome(page);
+    await createProject(page, "舊的一", /空白/);
+    await goHome(page);
+    await createProject(page, "舊的二", /空白/);
+    await goHome(page);
+    await createProject(page, "留著的", /空白/);
+    await goHome(page);
+
+    page.once("dialog", (d) => void d.accept());
+    await card(page, "舊的一").getByRole("button", { name: "刪除" }).click();
+    page.once("dialog", (d) => void d.accept());
+    await card(page, "舊的二").getByRole("button", { name: "刪除" }).click();
+    expect(await page.locator(".projcard").count()).toBe(1);
+
+    // One undo row per delete, newest first.
+    const bars = page.locator(".projhome__undo");
+    await expect(bars).toHaveCount(2);
+    await expect(bars.first()).toContainText("舊的二");
+
+    await bars.last().getByRole("button", { name: "復原" }).click();
+    await bars.first().getByRole("button", { name: "復原" }).click();
+    expect(await cardNames(page)).toEqual(
+      expect.arrayContaining(["舊的一", "舊的二", "留著的"]),
+    );
+  });
+
+  test("an AI preview does not follow you into the next project", async ({ page }) => {
+    // 預覽就緒 is position:fixed and lives outside .agent-sheet, so it used to
+    // survive the trip through 我的專案 — and 套用 commits the draft into
+    // whatever project is bound by then, name and all.
+    await openProjectHome(page);
+    await createProject(page, "先開這個", /E310/);
+    await goHome(page);
+    await createProject(page, "後開這個", /空白/);
+    const untouched = await objectCount(page);
+    await goHome(page);
+
+    await openCard(page, "先開這個");
+    await page.getByRole("button", { name: /AI/ }).first().click();
+    await page.getByRole("button", { name: /幫我排場佈/ }).click();
+    await expect(page.locator(".agent-preview-bar")).toBeVisible();
+
+    await goHome(page);
+    await openCard(page, "後開這個");
+
+    await expect(page.locator(".agent-preview-bar")).toBeHidden();
+    expect(await currentName(page)).toBe("後開這個");
+    // The blank venue ships its own fixtures, so "unchanged" is the number this
+    // project was created with — not zero.
+    expect(await objectCount(page)).toBe(untouched);
+  });
+
   test("＋ 新建專案 from inside the editor does not overwrite the open project", async ({ page }) => {
     await openProjectHome(page);
     await createProject(page, "原本這個", /E310/);

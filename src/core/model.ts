@@ -382,6 +382,23 @@ export function createDefaultProject(): Project {
   };
 }
 
+/**
+ * Is there work in this plan that replacing it would throw away?
+ *
+ * Counts everything the user builds by hand, not just the furniture: a plan
+ * holding only 尺寸線 (a measured-up room, before anything is placed) or only
+ * saved 情境 is exactly the kind of work that used to be replaced with no
+ * confirmation at all, because the check looked at objects/zones/groups/routes.
+ */
+export function planHasContent(project: Project): boolean {
+  return project.objects.length > 0
+    || project.zones.length > 0
+    || project.groups.length > 0
+    || project.routes.length > 0
+    || project.measurements.length > 0
+    || project.scenarios.length > 0;
+}
+
 export function venueNeedsCalibration(project: Project): boolean {
   return project.venuePresetId === "venue:tku-e310";
 }

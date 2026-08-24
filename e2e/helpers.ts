@@ -91,15 +91,20 @@ export async function settle(page: Page): Promise<void> {
       const n = document.querySelector(sel);
       return n ? Math.round(n.getBoundingClientRect().top) : 0;
     }).join(","));
+  // Stability, not equality with a single sample. The previous version read an
+  // "expected" position once, 350ms in, and then waited for the panels to come
+  // back to it. Taken while a sheet was still animating, that value was a
+  // position the panel passed through and never returned to, so the poll ran
+  // out the clock — a failure with nothing to do with the test that hit it.
+  let previous = await read();
   await expect
-    .poll(read, { timeout: 5000, intervals: [100, 100, 100, 150, 200] })
-    .toBe(await page.evaluate(async () => {
-      await new Promise((r) => setTimeout(r, 350));
-      return [".left", ".right", ".partnersheet"].map((sel) => {
-        const n = document.querySelector(sel);
-        return n ? Math.round(n.getBoundingClientRect().top) : 0;
-      }).join(",");
-    }));
+    .poll(async () => {
+      const current = await read();
+      const unchanged = current === previous;
+      previous = current;
+      return unchanged;
+    }, { timeout: 5000, intervals: [100, 100, 100, 150, 200] })
+    .toBe(true);
 }
 
 export async function probe(page: Page): Promise<WorkspaceProbe> {

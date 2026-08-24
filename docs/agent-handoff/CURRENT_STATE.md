@@ -136,3 +136,50 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium-1194/chrome-linux/chrom
 - egress proxy 白名單外一律 403：`registry.npmjs.org` 通，`x.ai`／zeabur 不通
 - production build 的 debug hook 需要 `?e2e` query flag 才會掛上 `window.planform`
 - e2e helper：`openWorkspace` 會種一個專案直接進編輯器；`openProjectHome` 從空的專案庫開始
+
+## 8. 2026-08-23：#18 已 merge，#19 的處置與後續修補
+
+- **PR #18 已於 2026-08-23 21:23:39Z 由使用者本人 merge**（main = `654d039`）。
+  merge 前 21:23:15Z 先把 draft 拿掉；CodeRabbit 因此從
+  `Review skipped: draft pull request` 變成
+  `Review skipped: manual review required for this OSS repository`
+  （這個 repo 星數 < 10，不會自動 review，要留言手動觸發）。
+
+- **PR #19 是另一個 session（`session_016yiNyVEh37ZM98thZ7iQ7y`）在
+  `release/planform-1.0-rc` 上做的同一份規格**，#18 merge 之後對 main 產生衝突：
+  14 個檔案，其中 5 個是 **add/add**（`src/state/projectRepository.ts`、
+  `src/ui/projectHome.ts`、`e2e/projects.spec.ts`、`test/projectRepository.test.ts`、
+  `docs/agent-handoff/MULTI_PROJECT_REVIEW.md`）。
+  這不是一般的 conflict —— 是**同一個子系統的兩套實作**（`planform-iso:projects:<id>`
+  對上 `planform-iso:project:{id}`，兩套 migration、兩個 Project Home）。
+  「解衝突」在這裡等於「選一套」，不是把兩邊縫起來。
+
+### #19 的 8 個 review finding，逐條對 main 驗證
+
+| # | #19 的說法 | 對 main 成立？ |
+|---|---|---|
+| 1 | 連刪兩個，第一個永久遺失 | ✅ **成立** — `projectHome.ts` 只有一個 `lastDeleted` 槽 |
+| 6 | AI 預覽跨專案套用 | ✅ **成立** — 已用 e2e 實測看到預覽列出現在下一個專案的編輯器上 |
+| 7 | `hasContent` 漏了 measurements／scenarios | ✅ 成立（較輕）— 只有尺寸線的專案不會跳確認 |
+| 2 | boot 失敗時儲存橫幅不出現 | ❌ 不成立 — main 每次寫入失敗都會 `onStorageError` |
+| 3 | 兩分頁 flush index 互蓋 | ❌ 不成立 — main 每次寫前都重讀 index |
+| 4 | 精靈送出鈕沒防連點 | ❌ 不成立 — `overlay.remove()` 先執行 ＋ `.quickstart` 存在就不再開 |
+| 5 | `autoKeepName()` 撞名覆蓋 | ❌ N/A — main 沒有載入前自動存檔這條路徑 |
+| 8 | 從 Home 開啟時鏡頭框錯 | ❌ N/A — main 開啟專案時根本不重新框 |
+
+→ 成立的三條已修在 `claude/planform-1-0-rc-release-8iph8h`，
+   兩條資料遺失級的都附 e2e，並**實測「拿掉修法就會紅」**。
+
+### 順手修掉的既有 flake
+
+`e2e/helpers.ts` 的 `settle()`：舊版在 350ms 取一次「期望位置」再等面板回到那個值。
+若當下面板還在動，取到的是它經過、之後再也不會回去的中間值 → 5 秒超時。
+完整跑一輪時 `Golden Flow 1` 就是這樣紅的（#19 也記錄到同一條）。
+改成**連續兩次讀值相同**才算穩定。
+
+### 本輪品質基線（本容器實跑）
+
+```
+lint ✅  typecheck ✅  test ✅ 290/290  build ✅
+e2e ✅ 91/91   prodSmoke（本機 preview）✅ 16/16
+```

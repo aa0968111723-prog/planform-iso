@@ -74,36 +74,50 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
     ]),
   ]);
 
-  /** Undo buffer for the most recent delete, so a mis-tap is recoverable. */
-  let lastDeleted: { meta: ProjectMeta; body: string | null } | null = null;
-  let undoTimer: number | null = null;
+  /**
+   * Undo buffers for recent deletes — one per delete, not one in total.
+   * A single slot lost data: after 刪除 A the storage key is already gone and
+   * the snapshot in memory is the only copy left, so deleting B before pressing
+   * 復原 threw A away for good, silently. Tidying up several old plans in a row
+   * is exactly when that happens.
+   */
+  interface PendingDelete {
+    snapshot: { meta: ProjectMeta; body: string | null };
+    timer: number | null;
+  }
+  const pendingDeletes: PendingDelete[] = [];
+  const MAX_PENDING_DELETES = 10;
 
   const toast = (message: string, ok = true): void => cb.onToast?.(message, ok);
 
-  const clearUndo = (): void => {
-    lastDeleted = null;
-    if (undoTimer !== null && typeof window !== "undefined") {
-      window.clearTimeout(undoTimer);
-      undoTimer = null;
-    }
+  const clearTimer = (pending: PendingDelete): void => {
+    if (pending.timer !== null && typeof window !== "undefined") window.clearTimeout(pending.timer);
+    pending.timer = null;
   };
 
-  const renderUndoBar = (): HTMLElement | null => {
-    if (!lastDeleted) return null;
-    const name = lastDeleted.meta.name;
-    return el("div", { class: "projhome__undo" }, [
-      el("span", { text: `已刪除「${name}」` }),
-      button("復原", () => {
-        if (!lastDeleted) return;
-        const restoredId = lastDeleted.meta.id;
-        const ok = ProjectRepository.restoreProject(lastDeleted);
-        if (ok) cb.onRestored?.(restoredId);
-        clearUndo();
-        refresh();
-        toast(ok ? `已復原「${name}」` : "無法復原這份專案", ok);
-      }, "chip chip--accent"),
-    ]);
+  /** Drop one pending delete (restored, or its window expired). */
+  const forget = (id: string): void => {
+    const at = pendingDeletes.findIndex((p) => p.snapshot.meta.id === id);
+    if (at < 0) return;
+    clearTimer(pendingDeletes[at]);
+    pendingDeletes.splice(at, 1);
   };
+
+  const renderUndoBars = (): HTMLElement[] =>
+    // Newest first: the one most likely to be a mis-tap sits nearest the top.
+    [...pendingDeletes].reverse().map((pending) => {
+      const { meta } = pending.snapshot;
+      return el("div", { class: "projhome__undo" }, [
+        el("span", { text: `已刪除「${meta.name}」` }),
+        button("復原", () => {
+          const ok = ProjectRepository.restoreProject(pending.snapshot);
+          if (ok) cb.onRestored?.(meta.id);
+          forget(meta.id);
+          refresh();
+          toast(ok ? `已復原「${meta.name}」` : "無法復原這份專案", ok);
+        }, "chip chip--accent"),
+      ]);
+    });
 
   const promptRename = (meta: ProjectMeta): void => {
     const next = window.prompt("專案名稱", meta.name);
@@ -136,12 +150,17 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
       return;
     }
     cb.onDeleted?.(meta.id);
-    clearUndo();
-    lastDeleted = snapshot;
+    const pending: PendingDelete = { snapshot, timer: null };
+    pendingDeletes.push(pending);
+    // Only a runaway tap streak reaches the cap; evicting the oldest is the
+    // one case where bytes are still let go, and it takes 11 deletes in 20s.
+    while (pendingDeletes.length > MAX_PENDING_DELETES) {
+      const evicted = pendingDeletes.shift();
+      if (evicted) clearTimer(evicted);
+    }
     if (typeof window !== "undefined") {
-      undoTimer = window.setTimeout(() => {
-        lastDeleted = null;
-        undoTimer = null;
+      pending.timer = window.setTimeout(() => {
+        forget(meta.id);
         refresh();
       }, 20_000);
     }
@@ -217,8 +236,7 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
   const refresh = (): void => {
     const projects = ProjectRepository.listProjects();
     body.innerHTML = "";
-    const undo = renderUndoBar();
-    if (undo) body.append(undo);
+    for (const bar of renderUndoBars()) body.append(bar);
 
     if (!projects.length) {
       body.append(renderEmpty());
@@ -233,17 +251,23 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
     );
   };
 
+  /** Leaving 我的專案 ends every undo window, as it always has. */
+  const forgetAll = (): void => {
+    for (const pending of pendingDeletes) clearTimer(pending);
+    pendingDeletes.length = 0;
+  };
+
   return {
     root,
     refresh,
     show: () => {
-      clearUndo();
+      forgetAll();
       refresh();
       root.style.display = "block";
       root.scrollTop = 0;
     },
     hide: () => {
-      clearUndo();
+      forgetAll();
       root.style.display = "none";
     },
     isVisible: () => root.style.display !== "none",
