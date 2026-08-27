@@ -362,4 +362,140 @@ describe("ProjectSession", () => {
     expect(session.repo.getMeta(a.id)?.broken).toBe(true);
     expect(session.repo.getMeta(b.id)?.broken).toBeUndefined();
   });
+
+  /**
+   * PR #19 review P1 — 「Preserve venue-only edits before replacing the project」.
+   *
+   * Someone who spent ten minutes measuring the classroom, calibrating the tile
+   * grid or writing the activity description has done REAL WORK, even with not
+   * one object on the floor. Both callers of `planHasContent` must see it:
+   * the wizard must open a new project rather than fill this one, and loading a
+   * saved arrangement must auto-keep what is on screen first.
+   *
+   * Table-driven on purpose: the failure mode this guards against is somebody
+   * adding a user-editable Project field and forgetting the predicate, so every
+   * field the review named gets its own row.
+   */
+  describe("只改場地設定也算有內容", () => {
+    const VENUE_ONLY_EDITS: { label: string; edit: (p: Project) => void; check: (p: Project) => void }[] = [
+      {
+        label: "教室尺寸",
+        edit: (p) => void (p.classroom.length = 13.5),
+        check: (p) => expect(p.classroom.length).toBe(13.5),
+      },
+      {
+        label: "走廊尺寸",
+        edit: (p) => void (p.corridor.width = 2.8),
+        check: (p) => expect(p.corridor.width).toBe(2.8),
+      },
+      {
+        label: "地磚尺寸",
+        edit: (p) => void (p.tile.width = 0.4),
+        check: (p) => expect(p.tile.width).toBe(0.4),
+      },
+      {
+        label: "現場校正",
+        edit: (p) => {
+          p.calibration.referenceLength = 0.62;
+          p.calibration.confirmed = { tile: true };
+        },
+        check: (p) => expect(p.calibration.confirmed.tile).toBe(true),
+      },
+      {
+        label: "活動說明",
+        edit: (p) => void (p.description = "9/24 社課，教室內報到"),
+        check: (p) => expect(p.description).toContain("9/24"),
+      },
+      {
+        label: "圖層顯示",
+        edit: (p) => void (p.layers.tiles = false),
+        check: (p) => expect(p.layers.tiles).toBe(false),
+      },
+      {
+        label: "檢查門檻",
+        edit: (p) => void (p.validationSettings.minAisleWidth = 1.2),
+        check: (p) => expect(p.validationSettings.minAisleWidth).toBe(1.2),
+      },
+      {
+        label: "自訂素材",
+        edit: (p) => {
+          p.catalogExtras = [{
+            id: "custom:社旗",
+            name: "社旗",
+            semanticType: "other",
+            sourceType: "builtin-procedural",
+            category: "custom",
+            placementType: "floor",
+            dimensions: { width: 0.6, depth: 0.1, height: 1.8 },
+            defaultFacingDeg: 0,
+            clearanceFront: 0,
+            blocksFlow: false,
+            kind: "chair",
+            icon: "🚩",
+            color: "#f1f5f9",
+            visualRef: "proc:other",
+            tags: ["custom"],
+            createdBy: "builtin",
+            version: 1,
+          }];
+        },
+        check: (p) => expect(p.catalogExtras).toHaveLength(1),
+      },
+      {
+        label: "場地模板",
+        edit: (p) => void (p.venuePresetId = "venue:tku-e310"),
+        check: (p) => expect(p.venuePresetId).toBe("venue:tku-e310"),
+      },
+      {
+        label: "活動日期",
+        edit: (p) => void (p.eventDate = "2026-09-24"),
+        check: (p) => expect(p.eventDate).toBe("2026-09-24"),
+      },
+    ];
+
+    for (const { label, edit, check } of VENUE_ONLY_EDITS) {
+      it(`只改${label}時，精靈開新專案而不是覆蓋`, () => {
+        session.bootstrap();
+        expect(session.listProjects()).toHaveLength(1);
+        store.mutate((p) => edit(p));
+
+        session.createProject({ project: plan("新的活動"), open: true, adoptPristineActive: true });
+
+        // Two projects: the wizard minted its own instead of eating this one.
+        expect(session.listProjects()).toHaveLength(2);
+        const kept = session.listProjects().find((m) => m.name !== "新的活動");
+        expect(kept, `只改${label}的那份專案被覆蓋了`).toBeDefined();
+        const reopened = session.repo.openProject(kept!.id);
+        expect(reopened.ok).toBe(true);
+        if (reopened.ok) check(reopened.project);
+      });
+
+      it(`只改${label}時，載入其他排法前也會先保留`, () => {
+        session.createProject({ project: plan(`只改${label}`), open: true });
+        store.mutate((p) => void p.zones.push(zone("暫時")));
+        session.saveLayout("有東西的版本");
+        store.mutate((p) => {
+          p.zones = [];
+          edit(p);
+        });
+
+        expect(session.applyLayout("有東西的版本")).toBe(true);
+
+        const autoKept = session.listLayouts().find((n) => n.startsWith("自動保留"));
+        expect(autoKept, `只改${label}的排法沒有被保留`).toBeDefined();
+        const kept = session.repo.readLayout(session.activeId!, autoKept!);
+        expect(kept).toBeTruthy();
+        check(kept!);
+      });
+    }
+
+    it("完全沒動過的專案，精靈仍然直接沿用那一份", () => {
+      session.bootstrap();
+      session.createProject({ project: plan("新的活動"), open: true, adoptPristineActive: true });
+
+      // The whole point of the pristine path: no ghost card left behind.
+      expect(session.listProjects()).toHaveLength(1);
+      expect(session.listProjects()[0].name).toBe("新的活動");
+    });
+  });
 });
