@@ -268,12 +268,24 @@ export function queuePlacement(
       available = Math.max(leftRoom, rightRoom);
     }
   }
-  const capacity = Number.isFinite(available)
-    ? Math.max(1, lanes * Math.floor(Math.max(0, available - 0.3) / spacing))
+  const perLane = Number.isFinite(available)
+    ? Math.max(1, Math.floor(Math.max(0, available - 0.3) / spacing))
     : Number.POSITIVE_INFINITY;
+  const capacity = Number.isFinite(perLane) ? Math.max(1, lanes * perLane) : Number.POSITIVE_INFINITY;
+
+  // Place people the way the capacity was counted. Capacity said the line may
+  // double up in a wide corridor; placement ran strictly single-file, so a
+  // 30-person queue was drawn seven metres outside the building while the tool
+  // reported it as fitting. Now the line wraps into the same lanes the capacity
+  // was computed from, and once every lane is full it is honestly an overflow.
+  const lane = Number.isFinite(perLane) ? Math.floor(queueIndex / perLane) : 0;
+  const inLane = Number.isFinite(perLane) ? queueIndex % perLane : queueIndex;
+  // Lanes stack across the room, away from its centre line, so the first lane
+  // is the one nearest the wall and the walking lane stays open.
+  const lateral = lane === 0 ? 0 : (lane % 2 === 1 ? 1 : -1) * Math.ceil(lane / 2) * 0.6;
   const point = {
-    x: station.x + direction.x * spacing * (queueIndex + 1),
-    z: station.z + direction.z * spacing * (queueIndex + 1),
+    x: station.x + direction.x * spacing * (inLane + 1),
+    z: station.z + lateral,
   };
   return { point, capacity, overflow: queueIndex + 1 > capacity };
 }

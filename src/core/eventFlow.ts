@@ -177,6 +177,16 @@ export function allocateProfiles(count: number, profiles: ParticipantProfile[]):
   return normalized.flatMap((profile, index) => Array.from({ length: counts[index] }, () => profile));
 }
 
+/** Fisher-Yates on a copy, driven by the scenario's own seeded rng. */
+function shuffled<T>(items: T[], rng: () => number): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 function arrivalTimes(
   count: number,
   windowSeconds: number,
@@ -271,7 +281,14 @@ export function runDiscreteEvent(
     scenario.arrivalProfile,
     rng,
   );
-  const assignedProfiles = allocateProfiles(scenario.participantCount, profiles);
+  // Shuffled, because `allocateProfiles` returns them grouped — every prepaid
+  // attendee, then every pay-on-site one — and arrivals are sorted ascending
+  // before the two are zipped positionally. Unshuffled, a 40/20 mix meant the
+  // payment desk sat idle for two thirds of the arrival window and was then hit
+  // by twenty consecutive payers. That is not how a 40/20 mix arrives, and it
+  // is the exact input to the 同桌／分桌 staffing comparison the user is asked
+  // to trust. Seeded, so the run stays reproducible.
+  const assignedProfiles = shuffled(allocateProfiles(scenario.participantCount, profiles), rng);
 
   const agents: AgentRuntime[] = [];
   const events: SimEvent[] = [];

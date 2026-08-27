@@ -733,6 +733,13 @@ export class App {
         ...this.session.simQuick,
         participants: scenario.participantCount,
         arrivalWindowSeconds: scenario.arrivalWindowSeconds,
+        // Carried too, or ▶ 模擬 writes the session default back over it. The
+        // shipped E310 example is authored 快開始才到 (front-loaded); without
+        // this line one press of ▶ silently reran it as 陸續到, understating
+        // the average wait by 47% and changing which station it names as the
+        // worst — while the 進階 toggle still read 「陸續到」, so nothing on
+        // screen revealed the substitution.
+        arrivalProfile: scenario.arrivalProfile,
         prepaidRatio: prepaid,
         hasOnsitePayment: scenario.profiles.some((p) => p.id === "pay-on-site" && p.ratio > 0),
         // The example ships a 2-person check-in desk — the quick panel must
