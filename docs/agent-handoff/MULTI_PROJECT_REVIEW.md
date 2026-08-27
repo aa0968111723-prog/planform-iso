@@ -129,4 +129,6 @@ E310 preset、golden scenario builder、巧拼 field、校正三路徑、模擬�
 - **Thumbnail 產生**：欄位與渲染都已就緒，只差產圖。§13 明講若影響穩定性可延到 P2 ——
   產一張縮圖要跑一次 `renderConstructionPlan`，成本與時機（何時產、產幾次）需要另外評估，
   本輪不做，卡片以字符佔位。
-- **eventDate 的 UI**：repository 已支援 `setEventDate`，Project Home 尚未提供輸入。
+- **eventDate 的 UI**：repository 已支援 `setEventDate`。卡片「活動日期」與
+  分享 → 活動資訊 現在可以填；縮圖自動產圖仍未做。完整清單見
+  `docs/PRODUCT_LIMITATIONS.md`。

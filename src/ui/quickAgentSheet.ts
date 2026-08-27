@@ -101,7 +101,10 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
 
   body.append(
     el("div", { class: "agent-sheet__title", text: "✦ AI 幫我" }),
-    el("p", { class: "hint", text: "用一句話說需求，先看預覽再決定要不要套用。例：「入口這邊要報到，20 個人會現場繳費」。" }),
+    el("p", {
+      class: "hint",
+      text: "離線規則／關鍵字，不是雲端模型。沒金鑰也能用。先看預覽再決定要不要套用。例：「入口這邊要報到，20 個人會現場繳費」。",
+    }),
     actions,
     input,
     el("div", { class: "row wrap", style: "gap:6px;margin-top:8px" }, [runBtn, closeBtn]),

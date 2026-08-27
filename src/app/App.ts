@@ -86,6 +86,7 @@ import { Store } from "../state/store";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
 import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
 import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
+import { normalizeEventDate } from "../core/productLimitations";
 import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
@@ -613,6 +614,7 @@ export class App {
     project: Project;
     venuePresetId?: string;
     venueName?: string;
+    eventDate?: string;
     participants?: number;
   }): ProjectMeta {
     const meta = ProjectRepository.createProject(input);
@@ -1151,6 +1153,15 @@ export class App {
     this.render();
   }
   updateDescription(text: string): void { this.store.mutate((p) => (p.description = text), { history: false }); }
+
+  /** Card / 分享「活動日期」. Empty clears. Invalid YYYY-MM-DD is ignored. */
+  setEventDate(raw: string | undefined): ProjectMeta | null {
+    const id = this.store.getProjectId();
+    if (!id) return null;
+    const next = normalizeEventDate(raw);
+    if (next === null) return null;
+    return ProjectRepository.setEventDate(id, next);
+  }
   updateZoneCapacity(capacity: number | null): void { this.updateSelectedZone({ capacity }); }
 
   // --- route presets + zone links ---------------------------------------

@@ -40,7 +40,7 @@ function render(app: App): HTMLElement {
   const setup = section("模擬活動", [
     el("p", {
       class: "hint",
-      text: "填人數與人力，按「▶ 模擬」看會不會塞車。不用網路、不用 AI。",
+      text: "填人數與人力，按「▶ 模擬」看會不會塞車。不用網路、不用 AI。沒有 A–E 報到流程精靈或一鍵分流。",
     }),
     el("div", { class: "row wrap" }, [
       num("人數", q.participants, 5, (v) => app.updateSimQuick({ participants: Math.max(1, Math.round(v)) }), 1),

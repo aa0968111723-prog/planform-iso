@@ -11,6 +11,7 @@
  */
 
 import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
+import { normalizeEventDate } from "../core/productLimitations";
 import { venuePresetById } from "../core/venues";
 import { button, el } from "./dom";
 
@@ -119,6 +120,23 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
       ]);
     });
 
+  const promptEventDate = (meta: ProjectMeta): void => {
+    const next = window.prompt("活動日期（YYYY-MM-DD，空白則清除）", meta.eventDate ?? "");
+    if (next === null) return;
+    const normalized = normalizeEventDate(next);
+    if (normalized === null) {
+      toast("日期請用 YYYY-MM-DD", false);
+      return;
+    }
+    const updated = ProjectRepository.setEventDate(meta.id, normalized);
+    if (!updated) {
+      toast("找不到這份專案", false);
+      return;
+    }
+    refresh();
+    toast(updated.eventDate ? `活動日期 ${updated.eventDate}` : "已清除活動日期");
+  };
+
   const promptRename = (meta: ProjectMeta): void => {
     const next = window.prompt("專案名稱", meta.name);
     if (next === null) return;
@@ -173,7 +191,11 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
 
     const thumb = meta.thumbnail
       ? el("img", { class: "projcard__thumb", src: meta.thumbnail, alt: "" })
-      : el("div", { class: "projcard__thumb projcard__thumb--empty", text: broken ? "⚠" : "▦" });
+      : el("div", {
+        class: "projcard__thumb projcard__thumb--empty",
+        title: "卡片會顯示縮圖，但不會自動產圖",
+        text: broken ? "⚠" : "▦",
+      });
 
     const open = (): void => {
       if (broken) {
@@ -201,6 +223,7 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
       : [
         button("開啟", open, "chip chip--sm chip--primary"),
         button("重新命名", () => promptRename(meta), "chip chip--sm"),
+        button("活動日期", () => promptEventDate(meta), "chip chip--sm"),
         button("複製", () => doDuplicate(meta), "chip chip--sm"),
         button("刪除", () => doDelete(meta), "chip chip--sm chip--danger"),
       ]);

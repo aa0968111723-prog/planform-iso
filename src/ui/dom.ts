@@ -49,6 +49,19 @@ export function textField(
   ]) as HTMLLabelElement;
 }
 
+export function dateField(
+  label: string,
+  value: string,
+  onChange: (v: string) => void,
+): HTMLLabelElement {
+  const input = el("input", { type: "date", value, class: "field__input" });
+  input.addEventListener("change", () => onChange(input.value));
+  return el("label", { class: "field" }, [
+    el("span", { class: "field__label", text: label }),
+    input,
+  ]) as HTMLLabelElement;
+}
+
 export function button(
   label: string,
   onClick: () => void,

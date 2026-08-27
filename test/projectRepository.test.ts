@@ -117,6 +117,14 @@ describe("creating projects", () => {
     expect(meta.createdAt).toBeGreaterThan(0);
   });
 
+  it("setEventDate writes the card field and can clear it", () => {
+    const meta = ProjectRepository.createProject({ name: "社課", project: plan("社課") });
+    expect(ProjectRepository.setEventDate(meta.id, "2026-09-24")?.eventDate).toBe("2026-09-24");
+    expect(ProjectRepository.getMeta(meta.id)?.eventDate).toBe("2026-09-24");
+    expect(ProjectRepository.setEventDate(meta.id, undefined)?.eventDate).toBeUndefined();
+    expect(ProjectRepository.getMeta(meta.id)?.eventDate).toBeUndefined();
+  });
+
   it("lists most-recently-updated first", () => {
     const a = ProjectRepository.createProject({ name: "A", project: plan("A") }, 1000);
     const b = ProjectRepository.createProject({ name: "B", project: plan("B") }, 2000);

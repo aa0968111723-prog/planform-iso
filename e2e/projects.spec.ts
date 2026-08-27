@@ -241,6 +241,16 @@ test.describe("project management", () => {
     expect(await currentName(page)).toBe("9/1 社課");
   });
 
+  test("event date has a product entry and shows on the card", async ({ page }) => {
+    await openProjectHome(page);
+    await createProject(page, "9/24 社課", /空白/);
+    await goHome(page);
+
+    page.once("dialog", (d) => void d.accept("2026-09-24"));
+    await card(page, "9/24 社課").getByRole("button", { name: "活動日期" }).click();
+    await expect(card(page, "9/24 社課").locator(".projcard__sub")).toContainText("2026-09-24");
+  });
+
   test("delete asks first, and can be undone", async ({ page }) => {
     await openProjectHome(page);
     await createProject(page, "會被刪掉的", /空白/);

@@ -15,6 +15,7 @@ import { buildCustomAssetFlow } from "./customAssetFlow";
 import { buildVenueCaptureFlow } from "./venueCapture";
 import { refreshSimPanel } from "./simPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
+import { buildLimitationsSheet, type LimitationsSheetHandles } from "./limitationsSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
 import { showNewProjectWizard } from "./quickStart";
@@ -24,7 +25,7 @@ import { BUILD_INFO } from "../buildInfo";
 import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
-import { button, el, num, section, selectField, textField } from "./dom";
+import { button, dateField, el, num, section, selectField, textField } from "./dom";
 
 const VIEWS: { id: ViewName; label: string }[] = [
   { id: "top", label: "俯視" }, { id: "iso", label: "立體" }, { id: "front", label: "正視" },
@@ -70,6 +71,7 @@ export class UI {
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false };
   private agentSheet: QuickAgentSheetHandles;
   private menu: MenuSheetHandles = buildMenuSheet();
+  private limitations: LimitationsSheetHandles = buildLimitationsSheet();
   private home: ProjectHomeHandles;
   private smartBox = el("div", { class: "list" });
   private simPanelRoot = el("div", { class: "sim-panel-host" });
@@ -98,7 +100,7 @@ export class UI {
     });
     root.append(
       this.topbar, this.calibrationBanner, this.left, this.right, this.nav, this.placebar, this.measurebar,
-      this.box, this.toast, this.ctxbar, this.menu.root,
+      this.box, this.toast, this.ctxbar, this.menu.root, this.limitations.root,
       this.partner.top, this.partner.dock, this.partner.sheet,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
@@ -226,6 +228,7 @@ export class UI {
     // autosave that landed after the flush, so the last write to storage was
     // not the one we thought we had committed.
     this.menu.close();
+    this.limitations.close();
     this.setSheet("none");
     // An AI preview belongs to the project it was drafted from. Left open, its
     // 預覽就緒 bar (position: fixed, outside .agent-sheet) survives the trip
@@ -244,6 +247,7 @@ export class UI {
     // Rolling back here is safe: rollback only drops the draft, it never
     // writes to whichever project is now bound.
     this.agentSheet.close();
+    this.limitations.close();
     this.home.hide();
     this.root.setAttribute("data-route", "editor");
     this.buildTopbar();
@@ -431,6 +435,11 @@ export class UI {
       {
         title: "關於",
         items: [
+          {
+            label: "已知限制",
+            sub: "1.1 待辦、只有欄位、掃描／AI 是示範",
+            onSelect: () => this.limitations.open(),
+          },
           {
             label: `版本 ${BUILD_INFO.version}`,
             sub: `${BUILD_INFO.commit}${BUILD_INFO.builtAt ? ` · ${BUILD_INFO.builtAt.slice(0, 16).replace("T", " ")}` : ""}`,
@@ -1065,8 +1074,15 @@ export class UI {
       planSection,
       el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
+      dateField("活動日期", ProjectRepository.getMeta(this.app.store.getProjectId() ?? "")?.eventDate ?? "", (v) => {
+        if (!this.app.setEventDate(v)) this.showToast("日期請用日曆選，或留空清除", false);
+      }),
       textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
       el("div", { class: "subhead", text: "這個專案的版本（方案 A／方案 B／最後版）" }),
+      el("p", {
+        class: "hint",
+        text: "名稱存在本機共用清單，不是專案內版本。同名會蓋掉其他專案存的方案。",
+      }),
       el("div", { class: "row" }, [layoutName, button("儲存", () => {
         const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
         if (saved) { refreshList(); this.showToast("已儲存平面圖"); }

@@ -502,6 +502,25 @@ html, body {
 #app[data-ws-mode="desktop"] .menusheet { align-items: center; }
 #app[data-ws-mode="desktop"] .menusheet__panel { border-radius: 16px; border-bottom: 1px solid var(--border); }
 
+.limitsheet { z-index: 61; }
+.limitsheet__list { display: flex; flex-direction: column; gap: 10px; }
+.limitsheet__item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+.limitsheet__item-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+}
+.limitsheet__title { font-size: 14px; }
+.limitsheet__kind {
+  flex: 0 0 auto;
+  font-size: 11px; color: var(--text-dim);
+  letter-spacing: .02em;
+}
+.limitsheet__summary { margin: 6px 0 0; font-size: 13px; color: var(--text-dim); }
+
 /* --- partner mode ------------------------------------------------------- */
 /*
  * Partner Mode is a different application surface, not a skin: the editor

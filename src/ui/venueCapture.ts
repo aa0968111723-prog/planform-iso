@@ -35,6 +35,10 @@ export function buildVenueCaptureFlow(app: App): HTMLElement {
           class: "hint",
           text: "拍攝或上傳場地照片 → 檢視偵測 → 校正比例 → 確認後才寫入場佈（可復原）。",
         }),
+        el("p", {
+          class: "hint venue-capture__limit",
+          text: "目前是示範偵測（假資料），不會真的認照片裡的門桌。",
+        }),
         button("📷 掃描場地", () => fileInput.click(), "btn"),
       );
       return;
