@@ -7,15 +7,27 @@
  * v4 → v5: Asset Catalog assetId / serviceRole / catalogExtras
  * v5 → v6: Event Flow scenarios / ServiceStations
  * v6 → v7: venue identity + independent field-calibration confirmations
+ *
+ * The outdoor booth fields are version-less: a file without them is a
+ * classroom project and stays one, and a booth file opened by a build that
+ * predates them keeps its objects, zones and routes.
  */
 
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
+import { BOOTH_ZONE_ROLES } from "./boothCatalog";
+import { BOOTH_STATION_TYPES, defaultBoothParams } from "./boothFlow";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
   PROJECT_VERSION,
   ZONE_DEFAULTS,
   type ArrayGroup,
+  type BoothConfig,
+  type BoothParams,
+  type BoothScenarioId,
+  type BoothStation,
+  type BoothStationType,
+  type BoothZoneRole,
   type EventScenario,
   type MeasurementAnnotation,
   type ObjectKind,
@@ -31,6 +43,9 @@ import {
   uid,
 } from "./model";
 import { buildSimulationSpatial } from "./simSpatial";
+
+const BOOTH_ZONE_ROLE_SET: ReadonlySet<string> = new Set(Object.keys(BOOTH_ZONE_ROLES));
+const BOOTH_STATION_TYPE_SET: ReadonlySet<string> = new Set(Object.keys(BOOTH_STATION_TYPES));
 
 const KINDS: ReadonlySet<string> = new Set<ObjectKind>([
   "computer",
@@ -136,7 +151,8 @@ function migrateGroup(g: Partial<ArrayGroup>): ArrayGroup | null {
 
 function migrateZone(z: Zone): Zone {
   const def = ZONE_DEFAULTS[z.type] ?? ZONE_DEFAULTS.group;
-  return { ...z, icon: z.icon ?? def.icon, capacity: z.capacity ?? null };
+  const boothRole = BOOTH_ZONE_ROLE_SET.has(String(z.boothRole)) ? (z.boothRole as BoothZoneRole) : undefined;
+  return { ...z, icon: z.icon ?? def.icon, capacity: z.capacity ?? null, boothRole };
 }
 
 function migrateRoute(r: Route): Route {
@@ -146,6 +162,58 @@ function migrateRoute(r: Route): Route {
     startZoneId: r.startZoneId,
     endZoneId: r.endZoneId,
     waypointZoneIds: Array.isArray(r.waypointZoneIds) ? r.waypointZoneIds : undefined,
+    boothRole: r.boothRole === "visitor" || r.boothRole === "staff" ? r.boothRole : undefined,
+  };
+}
+
+function migrateBoothStation(raw: Partial<BoothStation>): BoothStation | null {
+  if (!raw || !BOOTH_STATION_TYPE_SET.has(String(raw.boothType))) return null;
+  const boothType = raw.boothType as BoothStationType;
+  const def = BOOTH_STATION_TYPES[boothType];
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : uid("st"),
+    name: typeof raw.name === "string" && raw.name ? raw.name : def.label,
+    // Booth stations always sit in the "custom" StationType bucket so an older
+    // build reading this file does not choke on an unknown station type.
+    type: "custom",
+    boothType,
+    x: raw.x ?? 0,
+    z: raw.z ?? 0,
+    staffCount: Math.max(0, raw.staffCount ?? 1),
+    parallelServers: Math.max(1, raw.parallelServers ?? def.servers),
+    meanServiceSeconds: Math.max(0, raw.meanServiceSeconds ?? def.dwell),
+    queueCapacity: Math.max(1, raw.queueCapacity ?? def.queueCapacity),
+    enabled: raw.enabled !== false,
+  };
+}
+
+/**
+ * A booth block survives round-tripping; a project without one stays without
+ * one. Booth data is never invented for a classroom plan — the 模擬 tab is
+ * only offered on a project that actually has a booth.
+ */
+function migrateBooth(raw: Partial<BoothConfig> | undefined): BoothConfig | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const stations = (Array.isArray(raw.stations) ? raw.stations : [])
+    .map((s) => migrateBoothStation(s as Partial<BoothStation>))
+    .filter((s): s is BoothStation => s !== null);
+  if (!stations.length) return undefined;
+  const scenarioId: BoothScenarioId = raw.scenarioId === "peak" ? "peak" : "normal";
+  const base = defaultBoothParams(scenarioId);
+  const p: Partial<BoothParams> = raw.params ?? {};
+  return {
+    stations,
+    scenarioId,
+    params: {
+      visitorCount: Math.max(1, Math.round(p.visitorCount ?? base.visitorCount)),
+      arrivalPerMin: Math.max(0.1, p.arrivalPerMin ?? base.arrivalPerMin),
+      talkSeconds: Math.max(1, p.talkSeconds ?? base.talkSeconds),
+      queueCapacity: Math.max(1, Math.round(p.queueCapacity ?? base.queueCapacity)),
+      deskStaff: Math.max(1, Math.round(p.deskStaff ?? base.deskStaff)),
+      boardDwell: Math.max(0, p.boardDwell ?? base.boardDwell),
+      gameDwell: Math.max(0, p.gameDwell ?? base.gameDwell),
+      balk: p.balk !== false,
+    },
   };
 }
 
@@ -482,6 +550,10 @@ export function migrateProject(input: Partial<Project>): Project {
   if (p.activeScenarioId && !p.scenarios.some((s) => s.id === p.activeScenarioId)) {
     p.activeScenarioId = p.scenarios[0]?.id ?? null;
   }
+
+  // Outdoor booth (optional; absent on every classroom project).
+  p.booth = migrateBooth(input.booth);
+  if (!p.booth) delete p.booth;
 
   return p;
 }

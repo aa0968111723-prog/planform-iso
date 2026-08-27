@@ -32,6 +32,7 @@ describe("venue presets", () => {
       "一般矩形教室",
       "空白自訂場地",
       "E310＋走廊（待現場校正）",
+      "戶外攤位（3×3 帳篷）",
     ]);
     for (const p of BUILTIN_VENUE_PRESETS) {
       expect(p.builtin).toBe(true);

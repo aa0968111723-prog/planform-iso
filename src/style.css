@@ -725,6 +725,21 @@ html, body {
 .section:has(.sim-panel-host) .sim-panel-host { order: -1; }
 .sim-transport { margin: 6px 0; }
 .sim-panel .readout { margin-top: 6px; }
+
+/* Booth 模擬: label left, number right, so a glance finds the number. */
+.readout__row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+/* Opacity, not a colour: the readout paints its own panel in each theme, and a
+   fixed dim colour disappeared into it. */
+.readout__label { opacity: 0.75; }
+.readout__value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.booth-panel .list__row { flex-wrap: nowrap; gap: 8px; align-items: flex-end; }
+.booth-panel .list__row .field { flex: 0 0 auto; width: 76px; }
+.booth-panel .list__row .field__input { width: 100%; }
+.booth-panel .list__grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 480px) {
+  .booth-panel .list__row { flex-wrap: wrap; }
+  .booth-panel .list__grow { flex-basis: 100%; }
+}
 .sim-result { position: sticky; top: 0; z-index: 2; background: var(--panel-solid); }
 .chip--accent { border-color: var(--accent); color: var(--accent-text); }
 

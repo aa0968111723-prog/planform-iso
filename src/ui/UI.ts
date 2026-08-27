@@ -14,6 +14,7 @@ import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentS
 import { buildCustomAssetFlow } from "./customAssetFlow";
 import { buildVenueCaptureFlow } from "./venueCapture";
 import { refreshSimPanel } from "./simPanel";
+import { refreshBoothSimPanel } from "./boothSimPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
@@ -39,13 +40,25 @@ const WORKFLOWS: { id: Workflow; label: string; icon: string }[] = [
   { id: "site", label: "場地", icon: "▦" }, { id: "layout", label: "場佈", icon: "▤" },
   { id: "route", label: "動線", icon: "↝" }, { id: "export", label: "分享", icon: "↗" },
 ];
+/** Outdoor booth plans get a fifth slot: 場地 / 場佈 / 動線 / 模擬 / 分享. */
+const BOOTH_SIM_WORKFLOW: { id: Workflow; label: string; icon: string } = { id: "sim", label: "模擬", icon: "▶" };
 const WORKFLOW_LABELS: Record<Workflow, string> = {
-  site: "場地", layout: "場佈", route: "動線", check: "檢查", export: "分享",
+  site: "場地", layout: "場佈", route: "動線", sim: "模擬", check: "檢查", export: "分享",
 };
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
 
-const PRIMARY_WORKFLOWS = WORKFLOWS;
+/**
+ * A 模擬 tab on a classroom plan would be an empty room: the crowd model for
+ * a classroom already lives inside 動線 (模擬活動). The tab appears only when
+ * the open project actually has a booth to simulate.
+ */
+function primaryWorkflows(app: App): { id: Workflow; label: string; icon: string }[] {
+  if (!app.isBoothPlan()) return WORKFLOWS;
+  const out = [...WORKFLOWS];
+  out.splice(out.length - 1, 0, BOOTH_SIM_WORKFLOW);
+  return out;
+}
 
 /** Which sheet, if any, currently covers part of the canvas on a compact layout. */
 type SheetKind = "none" | "workflow" | "inspector";
@@ -65,6 +78,7 @@ export class UI {
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
+  private navSig: string | null = null;
   private lastMode: Mode | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
@@ -73,6 +87,7 @@ export class UI {
   private menu: MenuSheetHandles = buildMenuSheet();
   private smartBox = el("div", { class: "list" });
   private simPanelRoot = el("div", { class: "sim-panel-host" });
+  private boothPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
   private sheet: SheetKind = "none";
   private placebarKind: "place" | "route" | "zone" | null = null;
@@ -159,7 +174,7 @@ export class UI {
       this.onModeMaybeChanged();
     });
 
-    this.buildNav();
+    this.syncNav();
     this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
@@ -298,7 +313,7 @@ export class UI {
     const views = el("div", { class: "group", "data-group": "views" },
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
     const flows = el("div", { class: "group group--flows", "data-group": "flows" },
-      PRIMARY_WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
+      primaryWorkflows(this.app).map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
     const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
     for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
     snapSel.value = this.app.session.snap;
@@ -424,8 +439,19 @@ export class UI {
 
   // --- bottom navigation --------------------------------------------------
 
+  /** Rebuild the bottom nav only when its slot list actually changed. */
+  private syncNav(): void {
+    const sig = primaryWorkflows(this.app).map((w) => w.id).join(",");
+    if (sig === this.navSig) return;
+    this.navSig = sig;
+    this.nav.innerHTML = "";
+    this.buildNav();
+    // Adding or removing the 模擬 slot also changes the desktop 流程 chips.
+    if (!this.compact) this.buildTopbar();
+  }
+
   private buildNav(): void {
-    this.nav.append(...PRIMARY_WORKFLOWS.map((it) =>
+    this.nav.append(...primaryWorkflows(this.app).map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.id }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
@@ -551,7 +577,10 @@ export class UI {
       buildCustomAssetFlow(this.app),
     );
     else if (wf === "route") this.left.append(this.routeSection());
-    else if (wf === "check") this.left.append(this.validationSection());
+    else if (wf === "sim") {
+      refreshBoothSimPanel(this.boothPanelRoot, this.app);
+      this.left.append(this.boothPanelRoot);
+    } else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());
   }
 
@@ -1119,7 +1148,7 @@ export class UI {
     if (homeName) homeName.textContent = this.app.projects.activeMeta?.name || s.name || "我的專案";
     if (!this.compact) {
       setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-      setPressed(this.topbar, "flows", (b) => PRIMARY_WORKFLOWS[b].id === sess.workflow);
+      setPressed(this.topbar, "flows", (b) => primaryWorkflows(this.app)[b]?.id === sess.workflow);
       setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
       if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     }
@@ -1127,6 +1156,7 @@ export class UI {
     const viewBtn = this.topbar.querySelector(".topbar__view");
     if (viewBtn) viewBtn.textContent = viewLabel;
 
+    this.syncNav();
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
       b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow && this.sheet === "workflow")));
 
@@ -1141,6 +1171,8 @@ export class UI {
 
     // Smart layout + simulation live boxes.
     this.updateSmartBox();
+    // 模擬 is refreshed by rebuildLeft, which knows not to blow away a field
+    // the user is typing in — an extra refresh here would eat the caret.
     if (sess.workflow === "route") refreshSimPanel(this.simPanelRoot, this.app);
 
     // Partner Mode shell (replaces the editor chrome entirely).

@@ -9,7 +9,7 @@
 import type { App } from "../app/App";
 import type { ProjectSession } from "../state/projectSession";
 import { buildE310ClubGoldenProject, buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
-import { BUILTIN_VENUE_PRESETS, listUserVenuePresets, type VenuePreset } from "../core/venues";
+import { BUILTIN_VENUE_PRESETS, createProjectFromVenuePreset, listUserVenuePresets, type VenuePreset } from "../core/venues";
 import { button, el } from "./dom";
 
 export const QUICKSTART_KEY = "planform-iso:quickstart";
@@ -121,6 +121,21 @@ export function showQuickStart(app: App, session: ProjectSession, onDone: () => 
       button(`🏫 ${tku.name}`, () => renderNeedsStep(tku), "btn btn--big"),
       el("p", { class: "hint", text: tku.note }),
     );
+    const booth = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-booth");
+    if (booth) {
+      // The booth template ships its own furniture, zones, flows and stations,
+      // so it skips the 勾需求 step entirely — there is nothing to tick.
+      card.append(
+        button(`⛺ ${booth.name}`, () => createOnce(() => {
+          session.createProject({
+            project: createProjectFromVenuePreset(booth, "戶外攤位"),
+            open: true,
+            adoptPristineActive: true,
+          });
+        }), "btn btn--big"),
+        el("p", { class: "hint", text: booth.note }),
+      );
+    }
     const saved = [...listUserVenuePresets()];
     if (saved.length) {
       card.append(button("📁 我的場地模板", () => renderMineStep(saved), "btn btn--big btn--ghost"));

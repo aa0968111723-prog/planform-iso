@@ -12,6 +12,12 @@
  * v8: stable project identity (`id`) + optional event date — a project library
  *     needs a key that is not the display name, because two events can share a
  *     name and a rename must not orphan the file.
+ *
+ * Outdoor booth simulation (攤位模擬) adds NO version: every field it needs is
+ * optional (`Project.booth`, `Zone.boothRole`, `Route.boothRole`) and its
+ * assets are `custom:*` catalogExtras whose `kind` stays inside the original
+ * eight. An older build reading a booth file ignores the extra fields and
+ * still draws the tent, tables, zones and routes.
  */
 
 export const PROJECT_VERSION = 8;
@@ -180,6 +186,11 @@ export interface Zone {
   icon: string;
   /** Optional people capacity, shown on the zone label for quick comprehension. */
   capacity: number | null;
+  /**
+   * Booth semantics (optional). A build without booth support reads these
+   * zones as plain `type: "custom"` areas and still draws them correctly.
+   */
+  boothRole?: BoothZoneRole;
 }
 
 export interface RoutePoint {
@@ -201,6 +212,8 @@ export interface Route {
   startZoneId?: string;
   endZoneId?: string;
   waypointZoneIds?: string[];
+  /** Booth: whose flow this is, so visitor and staff lines can be toggled together. */
+  boothRole?: "visitor" | "staff";
 }
 
 export type ViewName = "iso" | "top" | "front" | "left" | "right";
@@ -288,6 +301,59 @@ export interface EventScenario {
   spatial?: SimulationSpatial;
 }
 
+// --- Outdoor booth (攤位模擬) ---------------------------------------------
+//
+// Everything here is optional on Project. The booth prototype models an
+// outdoor 3×3 m tent stall rather than a classroom, but reuses the same
+// objects / zones / routes so export, import, partner mode and the plan
+// exporters all keep working without a single special case.
+
+export type BoothZoneRole =
+  | "staff" | "visitor" | "queue" | "interact" | "calm" | "entry" | "exit";
+
+export type BoothStationType =
+  | "board" | "queue" | "talk" | "flyer" | "game" | "form" | "cushion" | "photo";
+
+export interface BoothStation {
+  id: string;
+  name: string;
+  /** Reuses the existing StationType bucket; booth stations are always "custom". */
+  type: StationType;
+  /** Booth-specific role. An older build ignores it and sees a custom station. */
+  boothType: BoothStationType;
+  x: number; // meters
+  z: number;
+  staffCount: number;
+  /** How many visitors this station can serve at once. */
+  parallelServers: number;
+  /** Mean dwell / service time in seconds. */
+  meanServiceSeconds: number;
+  queueCapacity: number;
+  /** Defaults to true; false takes the station out of the visitor journey. */
+  enabled?: boolean;
+}
+
+export interface BoothParams {
+  visitorCount: number;
+  arrivalPerMin: number;
+  /** Mean seconds at the 與工作人員對談 station. */
+  talkSeconds: number;
+  queueCapacity: number;
+  deskStaff: number;
+  boardDwell: number;
+  gameDwell: number;
+  /** When false nobody gives up: everyone queues to the end. */
+  balk: boolean;
+}
+
+export type BoothScenarioId = "normal" | "peak";
+
+export interface BoothConfig {
+  stations: BoothStation[];
+  scenarioId: BoothScenarioId;
+  params: BoothParams;
+}
+
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
 export interface ProjectCatalogExtra {
   id: string;
@@ -349,6 +415,8 @@ export interface Project {
   /** v6: event-flow simulation scenarios (DES). */
   scenarios: EventScenario[];
   activeScenarioId: string | null;
+  /** Outdoor booth simulation. Absent on classroom projects. */
+  booth?: BoothConfig;
 }
 
 let idCounter = 0;

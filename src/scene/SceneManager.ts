@@ -30,6 +30,7 @@ import {
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { AssetCatalog } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
+import { isBoothProject } from "../core/boothFlow";
 import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
 import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
@@ -75,6 +76,8 @@ interface SessionView {
   bottlenecks?: { x: number; z: number; count: number; name?: string; kind?: "door" | "corridor" | "route" }[];
   simQueues?: Record<string, number>;
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
+  /** Playback draws a station badge per stop; route names on top are soup. */
+  hideRouteLabels?: boolean;
   /** Non-null in Partner Mode: emphasis per entity plus red/orange/green marks. */
   partner?: PartnerPresentation | null;
 }
@@ -90,6 +93,12 @@ const MARK_COLOR: Record<PartnerMark["tone"], string> = {
   bad: "#ef4444",
   warn: "#f59e0b",
   ok: "#22c55e",
+};
+
+/** Ground colours for an outdoor booth: grass under the pitch, paving alongside. */
+const OUTDOOR_GROUND: Record<ThemeName, { pitch: number; paving: number }> = {
+  light: { pitch: 0xb9c7a8, paving: 0xc3cad2 },
+  dark: { pitch: 0x33402f, paving: 0x2a3340 },
 };
 
 const SIMPLIFY_HIDE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["switch", "computer"]);
@@ -193,6 +202,8 @@ export class SceneManager {
   // --- camera ------------------------------------------------------------
 
   setView(view: ViewName): void {
+    this.currentView = view;
+    this.applyRoofVisibility();
     // Whatever sat at the centre of the *visible* canvas should still be there
     // after the camera swings around; the framing offset differs per basis.
     const anchor = this.getFocusAnchor();
@@ -226,6 +237,20 @@ export class SceneManager {
 
   setControlsEnabled(enabled: boolean): void {
     this.controls.enabled = enabled;
+  }
+
+  private currentView: ViewName = "iso";
+
+  /**
+   * A top view is a floor plan: a tent canopy has to come off, or the table
+   * and stools underneath it are neither visible nor selectable. Hidden meshes
+   * are also skipped by the raycast, so this fixes picking as well as drawing.
+   */
+  private applyRoofVisibility(): void {
+    const hide = this.currentView === "top";
+    this.objectGroup.traverse((m) => {
+      if (m instanceof Mesh && m.userData.roof) m.visible = !hide;
+    });
   }
 
   private resize(): void {
@@ -361,7 +386,7 @@ export class SceneManager {
     this.syncObjects(project, session.showLabels, simplify);
     this.syncArrays(project);
     this.syncZones(project);
-    this.syncRoutes(project, session.focusRouteId ?? null);
+    this.syncRoutes(project, session.focusRouteId ?? null, session.hideRouteLabels ?? false);
     this.syncGhost(session.ghost);
     this.syncMeasurements(project, simplify);
     this.syncOverlay(project, session);
@@ -463,21 +488,26 @@ export class SceneManager {
     clearGroup(this.floorGroup);
     clearGroup(this.tileGroup);
     const e310 = project.venuePresetId === "venue:tku-e310";
+    // An outdoor pitch is grass and paving, and it has no walls — a raised
+    // wall rail around it would read as a room the stall is standing inside.
+    const outdoor = isBoothProject(project);
     for (const area of [project.classroom, project.corridor]) {
       const areaGroup = new Group();
       const floor = new Mesh(
         new BoxGeometry(area.length, 0.055, area.width),
         new MeshStandardMaterial({
-          color: e310 && this.theme === "light"
-            ? (area.id === "classroom" ? "#ddd9d0" : "#c99698")
-            : (area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor),
+          color: outdoor
+            ? (area.id === "classroom" ? OUTDOOR_GROUND[this.theme].pitch : OUTDOOR_GROUND[this.theme].paving)
+            : e310 && this.theme === "light"
+              ? (area.id === "classroom" ? "#ddd9d0" : "#c99698")
+              : (area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor),
           roughness: area.id === "classroom" ? 0.84 : 0.94,
         }),
       );
       floor.position.set(area.x + area.length / 2, -0.03, area.z + area.width / 2);
       floor.receiveShadow = true;
       areaGroup.add(floor);
-      areaGroup.add(this.buildAreaWalls(area));
+      areaGroup.add(outdoor ? this.buildAreaOutline(area) : this.buildAreaWalls(area));
       const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
       label.set(area.name, e310 && this.theme === "light" ? "#43534f" : (area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor));
       label.sprite.scale.set(1.55, 0.36, 1);
@@ -488,6 +518,26 @@ export class SceneManager {
     if (e310) this.floorGroup.add(this.buildE310Fixtures(project));
     this.tileGroup.add(this.buildTileGrid(project, project.classroom, e310 ? 0x8b918c : 0x64748b, e310 ? 0.26 : 0.42));
     this.tileGroup.add(this.buildTileGrid(project, project.corridor, e310 ? 0x8f5f64 : 0x64748b, e310 ? 0.3 : 0.42));
+  }
+
+  /**
+   * Outdoors the pitch boundary is paint on the ground, not a rail: a flat
+   * outline says "this is your 攤位範圍" without inventing a wall.
+   */
+  private buildAreaOutline(area: Project["classroom"]): Group {
+    const g = new Group();
+    const y = 0.014;
+    const color = this.theme === "light" ? 0x475569 : 0xcbd5e1;
+    const positions = [
+      area.x, y, area.z, area.x + area.length, y, area.z,
+      area.x + area.length, y, area.z, area.x + area.length, y, area.z + area.width,
+      area.x + area.length, y, area.z + area.width, area.x, y, area.z + area.width,
+      area.x, y, area.z + area.width, area.x, y, area.z,
+    ];
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    g.add(new LineSegments(geo, new LineBasicMaterial({ color, transparent: true, opacity: 0.8 })));
+    return g;
   }
 
   /** Raised, thick wall rails make an empty classroom and its corridor legible. */
@@ -591,10 +641,12 @@ export class SceneManager {
           o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined,
           quality,
         );
-        group.userData = { type: "object", id: o.id };
+        group.userData = { ...group.userData, type: "object", id: o.id };
         group.traverse((m) => {
           if (m instanceof Mesh) {
-            m.userData = { type: "object", id: o.id };
+            // Spread, not replace: the tent canopy tags itself `roof` at build
+            // time and that tag has to survive being adopted into the scene.
+            m.userData = { ...m.userData, type: "object", id: o.id };
             m.castShadow = o.kind !== "mat";
             m.receiveShadow = true;
           }
@@ -635,6 +687,7 @@ export class SceneManager {
         this.objectNodes.delete(id);
       }
     }
+    this.applyRoofVisibility();
   }
 
   private syncArrays(project: Project): void {
@@ -848,7 +901,7 @@ export class SceneManager {
     return props;
   }
 
-  private syncRoutes(project: Project, focusRouteId: string | null): void {
+  private syncRoutes(project: Project, focusRouteId: string | null, hideLabels = false): void {
     this.routeGroup.visible = this.layersState.routes;
     this.routeNodeMeshes = [];
     const seen = new Set<string>();
@@ -869,7 +922,9 @@ export class SceneManager {
       // In the 全部 overview the arrows, colours and ①②③ badges carry the flow;
       // adding four route names on top is what made a phone-sized plan
       // unreadable. Names come back as soon as a role narrows the picture.
-      entry.label.sprite.visible = partner ? partner.role !== "all" && !dim : true;
+      entry.label.sprite.visible = hideLabels
+        ? false
+        : partner ? partner.role !== "all" && !dim : true;
       entry.label.set(partner ? `${routeIcon(route)} ${route.name}` : route.name, dim ? "#64748b" : route.color);
       entry.group.traverse((o) => { if (o instanceof Mesh && o.userData.type === "routeNode") this.routeNodeMeshes.push(o); });
     }

@@ -3,6 +3,10 @@ import {
   ZONE_DEFAULTS,
   type ArrayGroup,
   type ArrivalProfile,
+  type BoothParams,
+  type BoothScenarioId,
+  type BoothStation,
+  type BoothZoneRole,
   type EventScenario,
   type MeasurementAnnotation,
   type MeasurementType,
@@ -18,6 +22,15 @@ import {
 } from "../core/model";
 import { assetDef } from "../core/assets";
 import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
+import { BOOTH_ZONE_ROLES } from "../core/boothCatalog";
+import {
+  BoothSim,
+  BOOTH_STEP_SECONDS,
+  defaultBoothParams,
+  isBoothProject,
+  runBoothHeadless,
+  type BoothStats,
+} from "../core/boothFlow";
 import { catalogFromProject, createDefaultScenario, resolveScenarioBindings } from "../core/migrate";
 import { applySnap, type SnapMode } from "../core/units";
 import {
@@ -90,7 +103,8 @@ import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
-export type Workflow = "site" | "layout" | "route" | "check" | "export";
+/** `sim` is the outdoor-booth crowd simulation; `check` still lives inside 分享. */
+export type Workflow = "site" | "layout" | "route" | "sim" | "check" | "export";
 
 const TABLE_KINDS: ReadonlySet<string> = new Set(["table", "regTable"]);
 const MEASURE_COLOR = "#facc15";
@@ -143,6 +157,17 @@ export interface Session {
     checkinStaff: number;
     paymentStaff: number;
   };
+  /** Outdoor booth playback. Independent of the classroom event-flow state. */
+  booth: BoothSession;
+}
+
+export interface BoothSession {
+  playing: boolean;
+  /** Simulated seconds per wall-clock second. */
+  speed: number;
+  stats: BoothStats | null;
+  /** 正常 vs 尖峰 run on the same layout, or null before 比較 is pressed. */
+  compare: { a: BoothStats; b: BoothStats } | null;
 }
 
 /** Live state of Partner Mode — the visual-first, read-only view of a plan. */
@@ -243,6 +268,7 @@ export class App {
       checkinStaff: 1,
       paymentStaff: 1,
     },
+    booth: { playing: false, speed: 15, stats: null, compare: null },
   };
 
   readonly quickAgent: QuickAgent;
@@ -270,6 +296,9 @@ export class App {
   private pointers = new Map<number, { x: number; y: number; type: string }>();
   private validationTimer: number | null = null;
   private simState: SimState | null = null;
+  private boothSim: BoothSim | null = null;
+  private boothRaf: number | null = null;
+  private boothLast = 0;
   private simRaf: number | null = null;
   private simLast = 0;
   private lastPanelSync = 0;
@@ -354,14 +383,26 @@ export class App {
       simPositions: this.session.simPositions,
       bottlenecks: this.session.bottlenecks,
       simQueues: this.session.simQueues,
-      simStations: this.activeScenario()?.stations.map((s) => ({
-        id: s.id,
-        name: s.name,
-        x: s.x,
-        z: s.z,
-        queue: this.session.simQueues[s.id] ?? 0,
-      })),
+      simStations: this.overlayStations(),
+      // A booth is 7 m across with eight station badges on it — the flow names
+      // on top of that make the plan unreadable exactly when you are watching
+      // the crowd. The ribbons and arrows stay; only the names step aside.
+      hideRouteLabels: !!this.boothSim,
     });
+  }
+
+  /** Station badges drawn on the canvas: booth stations when this is a booth. */
+  private overlayStations(): { id: string; name: string; x: number; z: number; queue: number }[] | undefined {
+    const source = this.boothSim
+      ? this.viewState.booth?.stations.filter((s) => s.enabled !== false)
+      : this.activeScenario()?.stations;
+    return source?.map((s) => ({
+      id: s.id,
+      name: s.name,
+      x: s.x,
+      z: s.z,
+      queue: this.session.simQueues[s.id] ?? 0,
+    }));
   }
   private render(): void { this.syncScene(); this.notifyUi(); }
 
@@ -381,6 +422,9 @@ export class App {
     if (w !== "route") { this.session.activeRouteId = null; if (this.session.mode === "route") this.session.mode = "select"; }
     if (w === "check") this.runValidation();
     if (w === "route" && this.session.mode !== "route") this.session.mode = "select";
+    // Leaving 模擬 stops the clock rather than letting people keep walking
+    // behind a panel nobody is looking at.
+    if (w !== "sim" && this.session.booth.playing) this.pauseBoothSim();
     this.cancelPlacement();
     this.notifyUi();
   }
@@ -564,6 +608,9 @@ export class App {
     const preset = venuePresetById(id);
     if (!preset) return false;
     this.store.mutate((p) => applyVenuePreset(p, preset, { withFixtures: true }));
+    // A booth template brings its own stations, so any playback of the old
+    // layout is stale the moment it lands.
+    if (this.isBoothPlan()) this.resetBoothSim();
     this.recenterView();
     this.toast(`已套用「${preset.name}」（可復原）`, true);
     return true;
@@ -606,6 +653,13 @@ export class App {
     this.session.matCandidates = [];
     this.session.issues = [];
     this.session.focusRouteId = null;
+    // A booth playback belongs to the plan it was started on.
+    this.stopBoothLoopOnly();
+    this.boothSim = null;
+    this.session.booth = { playing: false, speed: this.session.booth.speed, stats: null, compare: null };
+    this.session.simQueues = {};
+    this.session.bottlenecks = [];
+    if (this.session.workflow === "sim" && !isBoothProject(project)) this.session.workflow = "layout";
 
     const scenario = project.activeScenarioId
       ? project.scenarios.find((s) => s.id === project.activeScenarioId)
@@ -641,8 +695,12 @@ export class App {
     }
     this.setWorkflow("layout");
     // Two flat purple slabs in a shallow isometric view read as nothing on a
-    // phone — compact devices open the plan top-down.
-    if (typeof window !== "undefined" && window.matchMedia?.("(max-width: 600px)").matches) {
+    // phone — compact devices open the plan top-down. A booth is the exception:
+    // its subject is a 2.5 m tent, and from directly above that is a white
+    // rectangle, so it keeps the 立體 view its template asked for.
+    if (typeof window !== "undefined"
+      && window.matchMedia?.("(max-width: 600px)").matches
+      && !isBoothProject(project)) {
       this.setView("top");
     }
     // Best effort now (correct when the editor is already on screen), and
@@ -1322,6 +1380,173 @@ export class App {
     return cmp;
   }
 
+  // --- outdoor booth simulation ------------------------------------------
+
+  /** True when this project carries booth data, i.e. the 模擬 tab applies. */
+  isBoothPlan(): boolean {
+    return isBoothProject(this.state);
+  }
+
+  boothStations(): BoothStation[] {
+    return this.state.booth?.stations ?? [];
+  }
+
+  /** Add a booth zone (工作人員區, 排隊區 …) at the centre of the pitch. */
+  addBoothZone(role: BoothZoneRole): void {
+    const def = BOOTH_ZONE_ROLES[role];
+    const c = this.centerOfClassroom();
+    const zone: Zone = {
+      id: uid("zone"),
+      type: "custom",
+      boothRole: role,
+      name: def.label,
+      x: Math.round(c.x * 100) / 100,
+      z: Math.round((c.z + 1.4) * 100) / 100,
+      width: 2,
+      depth: 1.5,
+      color: def.color,
+      locked: false,
+      hidden: false,
+      icon: def.icon,
+      capacity: 4,
+    };
+    this.store.mutate((p) => { p.zones.push(zone); });
+    this.session.selection = new Set([zone.id]);
+    this.render();
+  }
+
+  applyBoothScenario(id: BoothScenarioId): void {
+    this.store.mutate((p) => {
+      if (!p.booth) return;
+      p.booth.scenarioId = id;
+      p.booth.params = defaultBoothParams(id);
+    });
+    this.resetBoothSim();
+  }
+
+  setBoothParams(patch: Partial<BoothParams>): void {
+    this.store.mutate((p) => {
+      if (p.booth) Object.assign(p.booth.params, patch);
+    }, { history: false });
+    this.resetBoothSim();
+  }
+
+  setBoothStationEnabled(id: string, enabled: boolean): void {
+    this.store.mutate((p) => {
+      const st = p.booth?.stations.find((s) => s.id === id);
+      if (st) st.enabled = enabled;
+    });
+    this.resetBoothSim();
+  }
+
+  updateBoothStation(id: string, patch: Partial<BoothStation>): void {
+    this.store.mutate((p) => {
+      const st = p.booth?.stations.find((s) => s.id === id);
+      if (st) Object.assign(st, patch);
+    });
+    this.resetBoothSim();
+  }
+
+  playBoothSim(): void {
+    if (!this.isBoothPlan()) {
+      this.toast("這個專案沒有攤位資料，請用「戶外攤位」場地模板建立");
+      return;
+    }
+    this.stopBoothLoopOnly();
+    if (!this.boothSim || this.boothSim.done) this.boothSim = new BoothSim(this.state);
+    this.session.booth.playing = true;
+    this.session.simMode = "off";
+    this.focusSimulation();
+    this.boothLast = performance.now();
+    this.applyBoothFrame();
+    this.notifyUi();
+    this.boothLoop();
+  }
+
+  pauseBoothSim(): void {
+    this.stopBoothLoopOnly();
+    this.session.booth.playing = false;
+    this.notifyUi();
+  }
+
+  resetBoothSim(): void {
+    this.stopBoothLoopOnly();
+    this.session.booth.playing = false;
+    this.boothSim = this.isBoothPlan() ? new BoothSim(this.state) : null;
+    this.session.booth.stats = this.boothSim?.stats() ?? null;
+    this.session.simPositions = [];
+    this.session.simQueues = {};
+    this.session.bottlenecks = [];
+    this.render();
+  }
+
+  setBoothSpeed(speed: number): void {
+    this.session.booth.speed = Math.max(1, Math.min(120, speed));
+    this.notifyUi();
+  }
+
+  /** Run 正常 and 尖峰 headless on the current layout and keep both readouts. */
+  compareBoothScenarios(): { a: BoothStats; b: BoothStats } | null {
+    if (!this.isBoothPlan()) return null;
+    const compare = {
+      a: runBoothHeadless(this.state, defaultBoothParams("normal")),
+      b: runBoothHeadless(this.state, defaultBoothParams("peak")),
+    };
+    this.session.booth.compare = compare;
+    this.notifyUi();
+    return compare;
+  }
+
+  private stopBoothLoopOnly(): void {
+    if (this.boothRaf !== null) {
+      cancelAnimationFrame(this.boothRaf);
+      this.boothRaf = null;
+    }
+  }
+
+  private applyBoothFrame(): void {
+    const sim = this.boothSim;
+    if (!sim) return;
+    this.session.simPositions = sim.crowd();
+    this.session.simQueues = sim.queueLengths();
+    this.session.simTime = sim.time;
+    this.session.bottlenecks = this.boothStations()
+      .filter((s) => (this.session.simQueues[s.id] ?? 0) >= 3)
+      .map((s) => ({ x: s.x, z: s.z, count: this.session.simQueues[s.id] ?? 0 }));
+    this.syncScene();
+  }
+
+  private boothLoop(): void {
+    if (!this.session.booth.playing || !this.boothSim) return;
+    const now = performance.now();
+    // Cap one tick's worth of simulated time so a background tab or a hitch
+    // teleports nobody; the loop just catches up over the next few frames.
+    const elapsed = Math.min(0.25, (now - this.boothLast) / 1000);
+    this.boothLast = now;
+    let remain = elapsed * this.session.booth.speed;
+    while (remain > 0) {
+      const step = Math.min(BOOTH_STEP_SECONDS, remain);
+      this.boothSim.step(step);
+      remain -= step;
+    }
+    this.applyBoothFrame();
+    if (now - this.lastPanelSync > 200) {
+      this.lastPanelSync = now;
+      this.session.booth.stats = this.boothSim.stats();
+      this.notifyUi();
+    }
+    if (this.boothSim.done) {
+      this.stopBoothLoopOnly();
+      this.session.booth.playing = false;
+      this.session.booth.stats = this.boothSim.stats();
+      this.session.simPositions = [];
+      this.session.bottlenecks = [];
+      this.render();
+      return;
+    }
+    this.boothRaf = requestAnimationFrame(() => this.boothLoop());
+  }
+
   startSimulation(params?: Partial<SimParams>): void {
     // Prefer DES when we can build a scenario; else fall back to route-walk.
     const scn = this.ensureEventScenario(false);
@@ -1413,6 +1638,9 @@ export class App {
 
   stopSimulation(): void {
     this.stopSimLoopOnly();
+    this.stopBoothLoopOnly();
+    this.session.booth.playing = false;
+    this.boothSim = null;
     this.session.simPlaying = false;
     this.session.simPaused = false;
     this.session.simMode = "off";
@@ -1574,8 +1802,12 @@ export class App {
    */
   focusSimulation(): void {
     const points: { x: number; z: number }[] = [];
+    const booth = this.boothStations().filter((s) => s.enabled !== false);
+    if (booth.length) {
+      for (const st of booth) points.push({ x: st.x, z: st.z });
+    }
     const scn = this.activeScenario();
-    if (this.session.simMode !== "route-walk" && scn) {
+    if (points.length < 2 && this.session.simMode !== "route-walk" && scn) {
       for (const st of scn.stations) points.push({ x: st.x, z: st.z });
     }
     if (points.length < 2) {

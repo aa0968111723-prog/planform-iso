@@ -6,6 +6,7 @@
 import {
   BoxGeometry,
   BufferGeometry,
+  ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
@@ -114,10 +115,156 @@ export function buildVisualGroup(
     case "proc:payment-box":
       buildPaymentBox(g, w, d, h);
       break;
+    case "proc:booth-tent":
+      buildTent(g, w, d, h, "#eef1f4");
+      break;
+    case "proc:neighbor-booth":
+      buildTent(g, w, d, h, "#b3452f");
+      break;
+    case "proc:tent-leg":
+      buildTentLeg(g, w, h);
+      break;
+    case "proc:booth-table":
+      buildBoothTable(g, w, d, h);
+      break;
+    case "proc:red-stool":
+      buildStool(g, w, d, h);
+      break;
+    case "proc:red-chair":
+      buildPlasticChair(g, w, d, h);
+      break;
+    case "proc:display-board":
+      buildDisplayBoard(g, w, d, h);
+      break;
+    case "proc:blank-standee":
+      buildStandee(g, w, h);
+      break;
+    case "proc:banner":
+      buildBanner(g, w, d, h);
+      break;
+    case "proc:flyer-tray":
+      buildFlyerTray(g, w, d);
+      break;
+    case "proc:table-prop":
+      buildTableProp(g, w, d, h);
+      break;
+    case "proc:token-disc":
+      buildTokenDisc(g, w, h);
+      break;
     default:
       buildByKind(g, kind, w, d, h, tint, door, detail);
   }
   return g;
+}
+
+// --- outdoor booth ---------------------------------------------------------
+//
+// Low-poly primitives only, ≤ 12 meshes each, no textures. Boards, banners
+// and standees are BLANK: the mesh named `replaceable-surface` is where a
+// club graphic goes later. Nothing here bakes in a name or a logo.
+//
+// Everything that forms the tent's canopy is tagged `userData.roof`, because
+// a top view is a floor plan — leave the roof on and the table and stools
+// underneath it are neither visible nor clickable.
+
+function markRoof(m: Mesh, name: string): Mesh {
+  m.userData.roof = true;
+  m.name = name;
+  return m;
+}
+
+function buildTent(g: Group, w: number, d: number, h: number, canopy: string): void {
+  const roof = new Mesh(new ConeGeometry(Math.hypot(w, d) / 2, 0.45, 4), materialFromPreset("fabric", canopy));
+  roof.rotation.y = Math.PI / 4;
+  roof.position.y = h - 0.12;
+  g.add(markRoof(roof, "canopy"));
+  g.add(markRoof(part(w, 0.1, d, "fabric", 0, h - 0.34, 0, canopy, -6), "canopy-slab"));
+  // Valance: the fabric skirt hanging off each side. Blank on purpose.
+  for (const [sx, sz, vw, vd] of [
+    [0, -d / 2, w, 0.02], [0, d / 2, w, 0.02], [-w / 2, 0, 0.02, d], [w / 2, 0, 0.02, d],
+  ] as const) {
+    g.add(markRoof(part(vw, 0.3, vd, "fabric", sx, h - 0.52, sz, canopy, -3), "valance"));
+  }
+  const legH = Math.max(0.2, h - 0.4);
+  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(cyl(0.03, 0.03, legH, "painted-metal", lx * (w / 2 - 0.05), legH / 2, lz * (d / 2 - 0.05), "#98a1ad"));
+  }
+}
+
+function buildTentLeg(g: Group, w: number, h: number): void {
+  const r = Math.max(0.02, w / 2);
+  g.add(cyl(r, r, h, "painted-metal", 0, h / 2, 0, "#98a1ad"));
+}
+
+function buildBoothTable(g: Group, w: number, d: number, h: number): void {
+  // A folding table under a floor-length cloth: no visible legs, which is what
+  // the photographs show and what makes it read as a stall rather than a desk.
+  const cloth = "#1e3a5f";
+  g.add(part(w, 0.03, d, "fabric", 0, h - 0.015, 0, cloth));
+  g.add(part(w, h - 0.02, 0.02, "fabric", 0, (h - 0.02) / 2, d / 2 - 0.005, cloth, 6));
+  g.add(part(w * 0.98, h - 0.02, d * 0.9, "fabric", 0, (h - 0.02) / 2, 0, "#24476f"));
+}
+
+function buildStool(g: Group, w: number, d: number, h: number): void {
+  const red = "#c0392b";
+  g.add(part(w, 0.035, d, "plastic-matte", 0, h - 0.018, 0, red));
+  const legH = Math.max(0.05, h - 0.035);
+  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(part(0.035, legH, 0.035, "plastic-matte", lx * (w / 2 - 0.04), legH / 2, lz * (d / 2 - 0.04), red, -14));
+  }
+}
+
+function buildPlasticChair(g: Group, w: number, d: number, h: number): void {
+  const red = "#c0392b";
+  const seatH = Math.min(0.44, h * 0.55);
+  g.add(part(w, 0.04, d, "plastic-matte", 0, seatH, 0, red));
+  g.add(part(w, Math.max(0.1, h - seatH), 0.04, "plastic-matte", 0, seatH + (h - seatH) / 2, -d / 2 + 0.03, red, -8));
+  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(part(0.032, seatH, 0.032, "plastic-matte", lx * (w / 2 - 0.04), seatH / 2, lz * (d / 2 - 0.04), red, -14));
+  }
+}
+
+function buildDisplayBoard(g: Group, w: number, d: number, h: number): void {
+  const standH = Math.min(0.35, h * 0.3);
+  const panelH = Math.max(0.1, h - standH);
+  g.add(part(w, panelH, 0.035, "paper", 0, standH + panelH / 2, 0, "#f4f6f8"));
+  const face = part(w * 0.9, panelH * 0.94, 0.01, "paper", 0, standH + panelH / 2, 0.024, "#fdfdfe");
+  face.name = "replaceable-surface";
+  g.add(face);
+  for (const sx of [-1, 1] as const) {
+    g.add(part(0.05, standH, Math.max(d, 0.08), "painted-metal", sx * (w / 2 - 0.08), standH / 2, 0, "#cbd3dc"));
+  }
+}
+
+function buildStandee(g: Group, w: number, h: number): void {
+  // Two blank faces leaning together — an A-frame with nothing printed on it.
+  for (const [sz, name] of [[-0.06, "replaceable-surface"], [0.06, "replaceable-surface-back"]] as const) {
+    const face = part(w, h, 0.03, "paper", 0, h / 2, sz, "#f8fafc");
+    face.name = name;
+    g.add(face);
+  }
+}
+
+function buildBanner(g: Group, w: number, d: number, h: number): void {
+  const face = part(w, h, Math.max(d, 0.02), "fabric", 0, h / 2, 0, "#fbfcfd");
+  face.name = "replaceable-surface";
+  g.add(face);
+}
+
+function buildFlyerTray(g: Group, w: number, d: number): void {
+  g.add(part(w, 0.012, d, "plastic-matte", 0, 0.006, 0, "#e9edf2"));
+  g.add(part(w * 0.8, 0.02, d * 0.72, "paper", 0, 0.022, 0.01, "#fbfcfd"));
+  g.add(part(w * 0.7, 0.02, d * 0.6, "paper", 0.03, 0.042, -0.02, "#f5f7fa"));
+}
+
+function buildTableProp(g: Group, w: number, d: number, h: number): void {
+  g.add(part(w, h * 0.8, d, "light-wood", 0, (h * 0.8) / 2, 0, "#d9b45b"));
+  g.add(part(w * 1.04, h * 0.2, d * 1.04, "light-wood", 0, h * 0.9, 0, "#c9a24d"));
+}
+
+function buildTokenDisc(g: Group, w: number, h: number): void {
+  const r = Math.max(0.01, w / 2);
+  g.add(cyl(r, r, h, "light-wood", 0, h / 2, 0, "#e7d7b8"));
 }
 
 function buildByKind(

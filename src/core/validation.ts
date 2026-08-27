@@ -6,10 +6,13 @@
  */
 
 import { assetDef } from "./assets";
+import { BOOTH_OVERLAP_EXEMPT, boothCatalogEntry } from "./boothCatalog";
+import { isBoothProject } from "./boothFlow";
 import {
   DEFAULT_VALIDATION_SETTINGS,
   type ObjectKind,
   type Project,
+  type SceneObject,
   type ValidationSettings,
 } from "./model";
 import { groupFootprint, groupMembers } from "./arrays";
@@ -48,6 +51,7 @@ interface PObj extends Rect {
   id: string; // object id, or owning group id for members
   kind: ObjectKind;
   parentId?: string;
+  assetId?: string;
 }
 
 const FURNITURE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["table", "chair", "regTable"]);
@@ -60,7 +64,7 @@ function expand(project: Project): PObj[] {
   const list: PObj[] = [];
   for (const o of project.objects) {
     if (o.hidden) continue;
-    list.push({ id: o.id, kind: o.kind, cx: o.x, cz: o.z, w: o.width, d: o.depth, rot: o.rotationDeg, parentId: o.parentId });
+    list.push({ id: o.id, kind: o.kind, cx: o.x, cz: o.z, w: o.width, d: o.depth, rot: o.rotationDeg, parentId: o.parentId, assetId: o.assetId });
   }
   for (const g of project.groups) {
     if (g.hidden) continue;
@@ -96,19 +100,37 @@ export function validateProject(project: Project, settings?: ValidationSettings)
   for (const o of objs) hash.insert(o);
   const pairs = hash.candidatePairs();
 
-  // Bounds. Wall-mounted kinds (door/switch/screen) sit centered on the wall
-  // line by design, so half their thin depth legitimately overhangs the room
-  // rectangle — for those only the center must be on a wall of the venue.
-  for (const o of objs) {
-    if (WALL_KINDS.has(o.kind)) {
-      if (!insideAny(o.cx, o.cz, project)) {
+  // Outdoor booth rules run first so their (error-level) overlap findings can
+  // suppress the generic (warning-level) furniture-overlap report on the same
+  // pair — one problem should produce one line, not two.
+  const booth = isBoothProject(project);
+  const boothOverlapPairs = new Set<string>();
+  if (booth) {
+    for (const raw of boothValidationIssues(project, cfg, boothOverlapPairs)) {
+      push(raw.severity, raw.code, raw.shortTitle, raw.message, raw.targetId, raw.focus, raw.suggestedAction);
+    }
+  }
+
+  // Bounds. Wall-mounted assets sit centered on the wall line by design, so
+  // half their thin depth legitimately overhangs the room rectangle — for
+  // those only the center must be on a wall of the venue.
+  //
+  // Skipped entirely on an outdoor booth: a pitch has no walls, and the
+  // neighbouring stall and the edge-of-pitch signage are deliberately outside
+  // the 攤位範圍 rectangle. The booth rules below cover what actually matters
+  // there (blocked entrance, occupied path, overlaps, aisle width).
+  if (!booth) {
+    for (const o of objs) {
+      if (WALL_KINDS.has(o.kind)) {
+        if (!insideAny(o.cx, o.cz, project)) {
+          push("error", "bounds", "超出場地", `${assetDef(o.kind).displayName}超出場地邊界`, o.id, { x: o.cx, z: o.cz }, "移回教室或走廊範圍內");
+        }
+        continue;
+      }
+      const corners = rectCorners(o.cx, o.cz, o.w, o.d, o.rot);
+      if (corners.some((c) => !insideAny(c.x, c.z, project))) {
         push("error", "bounds", "超出場地", `${assetDef(o.kind).displayName}超出場地邊界`, o.id, { x: o.cx, z: o.cz }, "移回教室或走廊範圍內");
       }
-      continue;
-    }
-    const corners = rectCorners(o.cx, o.cz, o.w, o.d, o.rot);
-    if (corners.some((c) => !insideAny(c.x, c.z, project))) {
-      push("error", "bounds", "超出場地", `${assetDef(o.kind).displayName}超出場地邊界`, o.id, { x: o.cx, z: o.cz }, "移回教室或走廊範圍內");
     }
   }
 
@@ -120,6 +142,13 @@ export function validateProject(project: Project, settings?: ValidationSettings)
     const b = hash.getItem(ib) as PObj;
     if (a.id === b.id) continue; // members of same group cannot overlap
     if (a.parentId === b.id || b.parentId === a.id) continue;
+    // A tent roof, a hung banner and a floor mat are *meant* to have other
+    // things inside their footprint. Two of the SAME asset overlapping is
+    // still a mistake, so mat-on-mat keeps reporting.
+    const exempt = a.assetId !== b.assetId
+      && (BOOTH_OVERLAP_EXEMPT.has(a.assetId ?? "") || BOOTH_OVERLAP_EXEMPT.has(b.assetId ?? ""));
+    if (exempt) continue;
+    if (boothOverlapPairs.has([a.id, b.id].sort().join("|"))) continue;
     const bothMat = a.kind === "mat" && b.kind === "mat";
     const bothFurn = (FURNITURE.has(a.kind)) && (FURNITURE.has(b.kind));
     if (!bothMat && !bothFurn) continue;
@@ -167,9 +196,11 @@ export function validateProject(project: Project, settings?: ValidationSettings)
     }
   }
 
-  // Wall assets off the wall.
+  // Wall assets off the wall. Only for assets actually placed on a wall: an
+  // outdoor banner is a `screen` hanging off a tent, and telling the user it
+  // is "not against the wall" on a pitch that has no walls is nonsense.
   for (const o of project.objects) {
-    if (!WALL_KINDS.has(o.kind) || o.hidden) continue;
+    if (!WALL_KINDS.has(o.kind) || o.hidden || o.surface !== "wall") continue;
     const snap = nearestWallSnap(o.x, o.z, [project.classroom, project.corridor], o.width);
     if (!snap || snap.distance > WALL_TOLERANCE) {
       push("warning", "wall-off", "未貼牆", `${assetDef(o.kind).displayName}沒有貼在牆面上`, o.id, { x: o.x, z: o.z }, "拖到牆邊自動吸附");
@@ -284,6 +315,131 @@ export function validateProject(project: Project, settings?: ValidationSettings)
 
   const order: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
   return issues.sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
+// --- outdoor booth rules ---------------------------------------------------
+
+type RawIssue = Omit<Issue, "id">;
+
+/** Overlap under this (meters) on either axis is a graze, not a collision. */
+const BOOTH_OVERLAP_TOLERANCE = 0.04;
+/** Anything less than this touching an entrance / path is rounding, not blocking. */
+const BOOTH_TOUCH_TOLERANCE = 0.01;
+
+function boothName(o: SceneObject): string {
+  return boothCatalogEntry(o.assetId ?? "")?.name ?? assetDef(o.kind).displayName;
+}
+
+/** Axis-aligned overlap of two AABBs, per axis. Negative means separated. */
+function aabbOverlap(a: Bounds, b: Bounds): { x: number; z: number } {
+  return {
+    x: Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX),
+    z: Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ),
+  };
+}
+
+function rectBounds(cx: number, cz: number, w: number, d: number): Bounds {
+  return { minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2 };
+}
+
+/**
+ * The four checks a booth plan needs, per BOOTH_SIMULATION_SPEC.md §5:
+ * things standing in each other, things standing in the entrance or exit,
+ * things standing on the paved path, and a too-narrow gap between the table
+ * and the display board.
+ *
+ * `overlapPairs` collects "a|b" keys so the caller can suppress the generic
+ * furniture-overlap warning for the same pair.
+ */
+export function boothValidationIssues(
+  project: Project,
+  cfg: ValidationSettings,
+  overlapPairs: Set<string> = new Set(),
+): RawIssue[] {
+  const out: RawIssue[] = [];
+  // Ground-standing booth kit only: tabletop props, the tent roof, the hung
+  // banner and floor mats are all things other objects legitimately share
+  // space with.
+  const solid = project.objects.filter(
+    (o) => !o.hidden && o.surface === "floor" && !BOOTH_OVERLAP_EXEMPT.has(o.assetId ?? ""),
+  );
+  const bounds = new Map<string, Bounds>(
+    solid.map((o) => [o.id, footprintBounds({ cx: o.x, cz: o.z, w: o.width, d: o.depth, rot: o.rotationDeg })]),
+  );
+
+  for (let i = 0; i < solid.length; i++) {
+    for (let j = i + 1; j < solid.length; j++) {
+      const a = solid[i], b = solid[j];
+      if (a.parentId === b.id || b.parentId === a.id) continue;
+      const ov = aabbOverlap(bounds.get(a.id)!, bounds.get(b.id)!);
+      if (ov.x <= BOOTH_OVERLAP_TOLERANCE || ov.z <= BOOTH_OVERLAP_TOLERANCE) continue;
+      overlapPairs.add([a.id, b.id].sort().join("|"));
+      out.push({
+        severity: "error",
+        code: "booth-overlap",
+        shortTitle: "物件重疊",
+        message: `${boothName(a)}與${boothName(b)}重疊約 ${(ov.x * 100).toFixed(0)}×${(ov.z * 100).toFixed(0)} cm`,
+        targetId: a.id,
+        focus: { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 },
+        suggestedAction: "拉開兩件物品",
+      });
+    }
+  }
+
+  for (const z of project.zones) {
+    if (z.hidden || (z.boothRole !== "entry" && z.boothRole !== "exit")) continue;
+    const zb = rectBounds(z.x, z.z, z.width, z.depth);
+    for (const o of solid) {
+      const ov = aabbOverlap(bounds.get(o.id)!, zb);
+      if (ov.x <= BOOTH_TOUCH_TOLERANCE || ov.z <= BOOTH_TOUCH_TOLERANCE) continue;
+      out.push({
+        severity: "error",
+        code: z.boothRole === "entry" ? "booth-entry-blocked" : "booth-exit-blocked",
+        shortTitle: `擋住${z.name}`,
+        message: `${boothName(o)}壓在${z.name}上，請移開`,
+        targetId: o.id,
+        focus: { x: o.x, z: o.z },
+        suggestedAction: `讓出${z.name}的整塊範圍`,
+      });
+    }
+  }
+
+  const c = project.corridor;
+  const corridorBounds = { minX: c.x, maxX: c.x + c.length, minZ: c.z, maxZ: c.z + c.width };
+  for (const o of solid) {
+    const ov = aabbOverlap(bounds.get(o.id)!, corridorBounds);
+    if (ov.x <= BOOTH_TOUCH_TOLERANCE || ov.z <= BOOTH_TOUCH_TOLERANCE) continue;
+    out.push({
+      severity: "warning",
+      code: "booth-object-in-corridor",
+      shortTitle: "物件在走道上",
+      message: `${boothName(o)}位於${c.name}內，可能阻擋主要人流`,
+      targetId: o.id,
+      focus: { x: o.x, z: o.z },
+      suggestedAction: "移回攤位範圍內",
+    });
+  }
+
+  const table = project.objects.find((o) => o.assetId === "custom:booth-table" && !o.hidden);
+  const board = project.objects.find((o) => o.assetId === "custom:display-board" && !o.hidden);
+  if (table && board) {
+    const tb = bounds.get(table.id) ?? footprintBounds({ cx: table.x, cz: table.z, w: table.width, d: table.depth, rot: table.rotationDeg });
+    const bb = bounds.get(board.id) ?? footprintBounds({ cx: board.x, cz: board.z, w: board.width, d: board.depth, rot: board.rotationDeg });
+    const gap = Math.max(tb.minX, bb.minX) - Math.min(tb.maxX, bb.maxX);
+    if (gap < cfg.minAisleWidth) {
+      out.push({
+        severity: "warning",
+        code: "booth-aisle-too-narrow",
+        shortTitle: "走道過窄",
+        message: `攤位桌與展示板之間約 ${(Math.max(0, gap) * 100).toFixed(0)} cm，低於 ${(cfg.minAisleWidth * 100).toFixed(0)} cm`,
+        targetId: board.id,
+        focus: { x: (table.x + board.x) / 2, z: (table.z + board.z) / 2 },
+        suggestedAction: "把展示板往外挪，或降低走道門檻",
+      });
+    }
+  }
+
+  return out;
 }
 
 export function issueCounts(issues: Issue[]): { error: number; warning: number; info: number } {
