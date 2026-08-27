@@ -12,7 +12,7 @@ import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
 import { buildCustomAssetFlow } from "./customAssetFlow";
-import { buildVenueCaptureFlow } from "./venueCapture";
+import { buildVenueCaptureFlow, venueCaptureAvailable } from "./venueCapture";
 import { refreshSimPanel } from "./simPanel";
 import { refreshBoothSimPanel } from "./boothSimPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
@@ -734,7 +734,8 @@ export class UI {
       num("原點 Z (m)", t.originZ, 0.05, (v) => this.app.updateTile({ originZ: v })),
       num("旋轉 (°)", t.rotationDeg, 1, (v) => this.app.updateTile({ rotationDeg: v })),
     ]));
-    body.push(buildVenueCaptureFlow(this.app));
+    // Offered only when a real vision provider exists — see ui/venueCapture.ts.
+    if (venueCaptureAvailable()) body.push(buildVenueCaptureFlow(this.app));
     return section("進階設定", body, false);
   }
 
