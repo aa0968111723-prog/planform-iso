@@ -315,7 +315,7 @@ export class App {
       this.syncScene();
       if (!this.dragging) {
         this.notifyUi();
-        if (this.session.workflow === "check") this.scheduleValidation();
+        if (this.showsValidation()) this.scheduleValidation();
       }
     });
     this.bindPointer(canvas);
@@ -417,7 +417,7 @@ export class App {
     if (w !== "site" && this.session.mode === "calibrate") this.cancelCalibration();
     this.session.workflow = w;
     if (w !== "route") { this.session.activeRouteId = null; if (this.session.mode === "route") this.session.mode = "select"; }
-    if (w === "check") this.runValidation();
+    if (w === "check" || w === "export") this.runValidation();
     if (w === "route" && this.session.mode !== "route") this.session.mode = "select";
     // Leaving 模擬 stops the clock rather than letting people keep walking
     // behind a panel nobody is looking at.
@@ -1032,8 +1032,22 @@ export class App {
 
   updateValidationSettings(patch: Partial<ValidationSettings>): void {
     this.store.mutate((p) => Object.assign(p.validationSettings, patch), { history: false });
-    if (this.session.workflow === "check") this.scheduleValidation();
+    if (this.showsValidation()) this.scheduleValidation();
   }
+  /**
+   * Which workflows show the user a validation verdict.
+   *
+   * 檢查 folded into 分享 as the pre-export checklist, but this guard was left
+   * pointing at the folded-away  workflow — which nothing can select
+   * any more. The result was a 分享前先確認 traffic light that was structurally
+   * green: it read a cached issue list that had never been filled, so parking a
+   * table across the door still reported 「目前沒有阻擋分享的問題」 right next
+   * to the button that sends the plan to twenty volunteers.
+   */
+  private showsValidation(): boolean {
+    return this.session.workflow === "check" || this.session.workflow === "export";
+  }
+
   private scheduleValidation(): void {
     if (typeof window === "undefined") { this.runValidation(); return; }
     if (this.validationTimer !== null) window.clearTimeout(this.validationTimer);
