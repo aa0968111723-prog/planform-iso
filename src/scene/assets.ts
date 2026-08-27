@@ -428,11 +428,25 @@ function buildSwitch(g: Group, w: number, d: number, h: number): void {
   g.add(part(w * 0.35, h * 0.45, 0.012, "plastic-gloss", 0, h / 2, d / 2 + 0.002, "#94a3b8"));
 }
 
+/**
+ * One EVA 巧拼 piece, as photographed: a soft 2 cm slab whose top face is
+ * inset, so two pieces laid edge to edge show the shaded groove between them
+ * instead of merging into one painted rectangle.
+ *
+ * The interlocking teeth are NOT modelled per piece. A 30-person field is
+ * around 100 pieces; teeth would multiply the mesh count for detail that is
+ * invisible at the zoom anyone plans at. The groove plus the seam overlay in
+ * SceneManager is what makes the field read as interlocking pieces.
+ */
 function buildMat(g: Group, w: number, d: number, h: number, tint: string): void {
-  const th = Math.max(h, 0.025);
-  g.add(part(w, th, d, "mat-soft", 0, th / 2, 0, tint));
-  g.add(part(w * 0.94, 0.006, d * 0.94, "fabric", 0, th + 0.002, 0, tint, 25));
-  g.add(part(w, 0.008, d, "rubber", 0, 0.004, 0, "#4b5563"));
+  const th = Math.max(h, 0.02);
+  // Body: full footprint, so the field stays continuous with no gaps of floor.
+  g.add(part(w, th * 0.72, d, "mat-soft", 0, (th * 0.72) / 2, 0, tint, -14));
+  // Top face, inset by ~8 mm a side: the inset edge IS the seam.
+  const inset = Math.min(0.008, w * 0.02);
+  g.add(part(w - inset * 2, th * 0.34, d - inset * 2, "mat-soft", 0, th * 0.72, 0, tint));
+  // Thin dark underside keeps the slab from floating on a pale floor.
+  g.add(part(w, 0.006, d, "rubber", 0, 0.003, 0, "#3f4a52"));
 }
 
 function buildSignage(g: Group, w: number, d: number, h: number, detail: boolean): void {

@@ -5,6 +5,7 @@
 
 import type { AssetCatalogEntry, SemanticAssetType, ServiceRole } from "../core/catalog";
 import type { ObjectKind, SceneObject } from "../core/model";
+import { MAT_COLORS } from "./theme";
 
 export type PlanSymbolKind =
   | "door"
@@ -68,7 +69,7 @@ export function planSymbolForKind(kind: ObjectKind, serviceRole?: ServiceRole): 
       icon: serviceRole === "payment" ? "收費" : undefined,
     },
     chair: { kind: "chair", fill: "#b8c0cc", showFacing: true },
-    mat: { kind: "mat", fill: "#4fb89a", showFacing: false },
+    mat: { kind: "mat", fill: MAT_COLORS.base, showFacing: false },
     computer: { kind: "computer", fill: "#94a3b8", showFacing: true },
     regTable: { kind: "checkin-desk", label: "報到", fill: "#a8b3a0", showFacing: true, icon: "報到" },
   };

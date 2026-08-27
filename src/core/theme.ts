@@ -18,6 +18,35 @@ export type ThemeName = "light" | "dark";
 
 export const DEFAULT_THEME: ThemeName = "light";
 
+/**
+ * The club's 巧拼, measured — not chosen.
+ *
+ * Sampled from six of the club's own event photographs
+ * (`LINE_ALBUM_20251016_260530_{1,10,20,30,57,80}.jpg`, ~90 000 mat pixels):
+ * median `#29bcaa`, seam/shadow `#179483`, highlight `#52cbba`.
+ * See docs/field-research/REFERENCE_MAPPING.md row M-01.
+ *
+ * Honest limit: this is the colour of the mats *as photographed under E310's
+ * fluorescent lighting*, not a colorimeter reading of the material. It is a
+ * far better basis than taste, and it is what the plan should print.
+ *
+ * ONE constant on purpose. The scene said `#4fb89a` while the exported 場刊圖
+ * said `#3f8f71`, so the plan you edited and the plan you sent to LINE were
+ * different colours — exactly what this module's header promises never happens.
+ */
+export const MAT_COLORS = {
+  /** Field colour. */
+  base: "#29bcaa",
+  /** Seam between two interlocking pieces, and the shaded side of a piece. */
+  seam: "#179483",
+  /** A piece catching the light. */
+  light: "#52cbba",
+  /** A piece in shade — the low end of the piece-to-piece variation. */
+  dark: "#1d9e8e",
+  /** Outline weight for the exported plan. */
+  outline: "#12776a",
+} as const;
+
 export const THEME_STORAGE_KEY = "planform.theme";
 
 export interface ScenePalette {

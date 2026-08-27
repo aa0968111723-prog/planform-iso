@@ -11,6 +11,7 @@ import { BUILTIN_CATALOG } from "../src/core/catalog";
 import { BUILTIN_VENUE_PRESETS, venuePresetById } from "../src/core/venues";
 import { planSymbolForKind } from "../src/core/planSymbol";
 import { MATERIAL_PRESETS } from "../src/scene/materials";
+import { MAT_COLORS } from "../src/core/theme";
 import { buildE310GoldenProject } from "../src/core/quickStart";
 import { inventoryLines } from "../src/export/constructionPlan";
 
@@ -42,6 +43,41 @@ describe("M-01 巧拼 are green, as in the club's event photos", () => {
 
   it("the plan symbol used in the exported 場刊圖 matches too", () => {
     expect(isGreenish(planSymbolForKind("mat").fill)).toBe(true);
+  });
+
+  /**
+   * The colour is measured, and every surface must use the SAME measurement.
+   *
+   * Before this, the 3D scene painted the mats `#4fb89a` while the exported
+   * 場刊圖 painted them `#3f8f71` — so the plan you edited and the plan you
+   * sent to LINE were literally different colours, which is the one thing
+   * src/core/theme.ts promises never happens.
+   */
+  it("scene, catalog and plan symbol all use the one measured colour", () => {
+    expect(MAT_COLORS.base).toBe("#29bcaa");
+    expect(entry("builtin:mat").color).toBe(MAT_COLORS.base);
+    expect(MATERIAL_PRESETS["mat-soft"].baseColor).toBe(MAT_COLORS.base);
+    expect(planSymbolForKind("mat").fill).toBe(MAT_COLORS.base);
+  });
+
+  it("the measured colour really is the teal in the photos, not sage green", () => {
+    // Median of ~90 000 mat pixels across six of the club's own event photos
+    // (REFERENCE_MAPPING M-01). Guards against a later 'tidy up' nudging the
+    // hue back toward the generic green it used to be.
+    const rgb = (hex: string) => {
+      const n = parseInt(hex.replace("#", ""), 16);
+      return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    };
+    const [r, g, b] = rgb(MAT_COLORS.base);
+    // Teal: blue is much closer to green than red is — that is what separates
+    // the photographed mats from the old sage `#3f8f71` / `#65ae91` guesses.
+    expect(g - b).toBeLessThan(40);
+    expect(g - r).toBeGreaterThan(100);
+    // Seam is a shaded version of the same hue, never a black grid line.
+    const [sr, sg, sb] = rgb(MAT_COLORS.seam);
+    expect(sg).toBeLessThan(g);
+    expect(sg - sb).toBeLessThan(40);
+    expect(sg - sr).toBeGreaterThan(100);
   });
 });
 

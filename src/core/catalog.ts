@@ -7,6 +7,7 @@
  */
 
 import type { ObjectKind, Surface } from "./model";
+import { MAT_COLORS } from "./theme";
 
 export type AssetSourceType =
   | "builtin-procedural"
@@ -244,7 +245,7 @@ export const BUILTIN_CATALOG: AssetCatalogEntry[] = [
     // (docs/e310/E310_GOLDEN_SCENARIO.md §1.6, REFERENCE_MAPPING M-01).
     // 🧩 rather than 🟩 so it does not collide with the stage platform icon.
     icon: "🧩",
-    color: "#4fb89a",
+    color: MAT_COLORS.base,
     tags: ["floor", "mat"],
     presets: [
       preset("m60180", 0.6, 1.8, 0.04),

@@ -37,7 +37,7 @@ import { doorSweep } from "../core/placement";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
 import { SimCrowd } from "./crowd";
-import { DEFAULT_THEME, EXPORT_PALETTE, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
+import { DEFAULT_THEME, EXPORT_PALETTE, MAT_COLORS, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
@@ -709,13 +709,22 @@ export class SceneManager {
         const geom = buildMergedGeometry(g.sourceKind, { width: g.itemWidth, depth: g.itemDepth, height: g.itemHeight });
         const material = assetInstanceMaterial(g.sourceKind).clone();
         if (isFieldMatGroup(g)) {
-          // Opaque teal EVA with slight piece-to-piece variation reads as the
+          // Opaque EVA with slight piece-to-piece variation reads as the
           // photographed continuous puzzle-mat field, not a transparent zone.
+          //
+          // The emissive term is CALIBRATED, not guessed: with the measured
+          // instance colours and this scene's lighting, `MAT_COLORS.base` at
+          // 0.65 renders `#2fae9f`, the closest match to the photographed
+          // `#29bcaa` out of the intensities tried (0.16 → `#00342b`,
+          // 0.35 → `#008173`, 0.5 → `#099b8c`, 0.65 → `#2fae9f`, 0.8 → `#47bcad`).
+          // It is deliberately below the old 0.92, which washed out the diffuse
+          // term entirely and flattened the field into a paint patch — hiding
+          // the thickness and seams the plan is supposed to show.
           material.color.set("#ffffff");
           material.roughness = 0.96;
           material.vertexColors = true;
-          material.emissive.set("#2d8064");
-          material.emissiveIntensity = 0.92;
+          material.emissive.set(MAT_COLORS.base);
+          material.emissiveIntensity = 0.65;
         }
         const mesh = new InstancedMesh(geom, material, Math.max(members.length, 1));
         mesh.count = members.length;
@@ -726,7 +735,11 @@ export class SceneManager {
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
           if (isFieldMatGroup(g)) {
-            mesh.setColorAt(i, new Color(i % 3 === 0 ? "#65ae91" : i % 3 === 1 ? "#70b99b" : "#5fa589"));
+            // Piece-to-piece variation, measured range (dark .. base .. light).
+            // Cycled on row+col rather than a flat index so the variation does
+            // not read as stripes down one axis, the way `i % 3` did.
+            const v = (members[i].row + members[i].col * 2) % 3;
+            mesh.setColorAt(i, new Color(v === 0 ? MAT_COLORS.base : v === 1 ? MAT_COLORS.light : MAT_COLORS.dark));
           }
         }
         mesh.instanceMatrix.needsUpdate = true;
@@ -772,7 +785,11 @@ export class SceneManager {
     }
     const geo = new BufferGeometry();
     geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
-    overlay.add(new LineSegments(geo, new LineBasicMaterial({ color: 0x174f40, transparent: true, opacity: 0.72 })));
+    // The seam between two interlocking pieces, in the colour the photographs
+    // show it — a shaded joint, not a drawn black grid.
+    overlay.add(new LineSegments(geo, new LineBasicMaterial({
+      color: new Color(MAT_COLORS.seam), transparent: true, opacity: 0.62,
+    })));
 
     const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
     const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;

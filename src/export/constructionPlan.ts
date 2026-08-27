@@ -13,6 +13,7 @@ import { calibrationComplete, venueNeedsCalibration, type Project, type SceneObj
 import { groupFootprint, groupMembers, memberLabel } from "../core/arrays";
 
 import { doorSweep, facingVec, rectCorners } from "../core/placement";
+import { MAT_COLORS } from "../core/theme";
 
 const NEUTRAL_STROKE = "#334155";
 const TEXT = "#0f172a";
@@ -713,16 +714,16 @@ function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][numb
   const minZ = Math.min(...points.map((p) => p.z));
   const maxZ = Math.max(...points.map((p) => p.z));
   const x = t.X(minX), y = t.Y(minZ), w = (maxX - minX) * t.s, h = (maxZ - minZ) * t.s;
-  const color = "#3f8f71";
+  const color = MAT_COLORS.base;
   ctx.fillStyle = hexA(color, seatMap ? 0.72 : 0.88);
-  ctx.strokeStyle = "#205c49";
+  ctx.strokeStyle = MAT_COLORS.outline;
   ctx.lineWidth = 3.5;
   ctx.fillRect(x, y, w, h);
   ctx.strokeRect(x, y, w, h);
 
   // Draw every 60 cm EVA seam and a small joint mark. The overall field stays
   // visually continuous while still reading as interlocking pieces.
-  ctx.strokeStyle = "rgba(18, 78, 61, .58)";
+  ctx.strokeStyle = hexA(MAT_COLORS.seam, 0.62);
   ctx.lineWidth = 1.5;
   for (const member of members) {
     const corners = rectCorners(member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg);
