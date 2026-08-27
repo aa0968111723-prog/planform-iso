@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createDefaultProject, uid, type SceneObject } from "../src/core/model";
 import { applyVenuePreset, boothVenuePreset, createProjectFromVenuePreset, venuePresetById } from "../src/core/venues";
 import { validateProject } from "../src/core/validation";
-import { planHasContent } from "../src/state/projectSession";
+import { planHasContent } from "../src/core/model";
 import { isBoothProject } from "../src/core/boothFlow";
 
 function installLocalStorage(): void {

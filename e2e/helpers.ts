@@ -9,24 +9,79 @@ export interface WorkspaceProbe {
   coverage: number;
 }
 
-/** Load the app with the first-run overlay already dismissed, in the editor. */
+/** Storage keys owned by the multi-project library. */
+export const PROJECT_KEYS = {
+  index: "planform-iso:projects:index",
+  bodyPrefix: "planform-iso:projects:",
+  active: "planform-iso:active-project",
+  migrated: "planform-iso:projects:migrated",
+} as const;
+
+/**
+ * Seed one project and mark it active, so the app boots straight into the
+ * editor the way it does for a returning user. Bodies are normalised by
+ * migrateProject on read, so a name is a complete enough seed.
+ *
+ * Playwright serialises the callback, so it must be a plain arrow function with
+ * its data passed as the single argument — a bound function stringifies to
+ * "[native code]" and silently seeds nothing.
+ */
+export async function seedProject(
+  page: Page,
+  seed: { name?: string; id?: string } = {},
+): Promise<void> {
+  await page.addInitScript(({ name, id }) => {
+    const now = Date.now();
+    localStorage.setItem("planform-iso:projects:index", JSON.stringify({
+      version: 1,
+      entries: [{ id, name, createdAt: now, updatedAt: now }],
+    }));
+    localStorage.setItem(`planform-iso:projects:${id}`, JSON.stringify({ name }));
+    localStorage.setItem("planform-iso:active-project", id);
+    localStorage.setItem("planform-iso:projects:migrated", "1");
+    localStorage.removeItem("planform-iso:autosave");
+  }, { name: seed.name ?? "E2E 專案", id: seed.id ?? "prj_e2e_seed" });
+}
+
+/** Load the app in the editor, on a seeded project. */
 export async function openWorkspace(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    // A clean library every time, then straight into the editor: these tests
-    // are about the workspace, and 我的專案 is now the default first screen.
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith("planform-iso:") && key !== "planform-iso:venues") {
-        localStorage.removeItem(key);
-      }
-    }
-    localStorage.setItem("planform-iso:quickstart", "1");
-    localStorage.setItem("planform-iso:boot", "editor");
-  });
+  await seedProject(page);
   await page.goto("/");
   await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
   await page.waitForFunction(() => !!document.getElementById("app")?.dataset.wsMode);
+  // Project Home is a full-screen overlay — if the seed did not take, every
+  // later click would time out on it instead of saying why.
+  await page.waitForSelector(".projhome", { state: "hidden" });
   await page.waitForTimeout(200);
   await settle(page);
+}
+
+/**
+ * Load the app with an empty project library, landing on 我的專案.
+ * The new-project wizard opens itself on a first run — dismiss it unless the
+ * test wants it.
+ */
+export async function openProjectHome(page: Page, opts: { keepWizard?: boolean } = {}): Promise<void> {
+  await page.addInitScript(() => {
+    // Only wipe on the FIRST load. addInitScript runs on every navigation, so
+    // an unguarded clear() would also wipe on reload — and then "everything
+    // survives a reload" would be testing the wipe, not the product.
+    if (!sessionStorage.getItem("e2e-home-cleared")) {
+      sessionStorage.setItem("e2e-home-cleared", "1");
+      localStorage.clear();
+      localStorage.setItem("planform-iso:projects:migrated", "1");
+    }
+  });
+  await page.goto("/");
+  await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
+  await page.waitForSelector(".projhome", { state: "visible" });
+  if (!opts.keepWizard) {
+    const wizard = page.locator(".quickstart");
+    if (await wizard.count()) {
+      await wizard.getByRole("button", { name: "取消" }).first().click();
+      await wizard.waitFor({ state: "detached" });
+    }
+  }
 }
 
 /** Wait until no sheet is mid-transition, so measurements are stable. */
@@ -36,15 +91,20 @@ export async function settle(page: Page): Promise<void> {
       const n = document.querySelector(sel);
       return n ? Math.round(n.getBoundingClientRect().top) : 0;
     }).join(","));
+  // Stability, not equality with a single sample. The previous version read an
+  // "expected" position once, 350ms in, and then waited for the panels to come
+  // back to it. Taken while a sheet was still animating, that value was a
+  // position the panel passed through and never returned to, so the poll ran
+  // out the clock — a failure with nothing to do with the test that hit it.
+  let previous = await read();
   await expect
-    .poll(read, { timeout: 5000, intervals: [100, 100, 100, 150, 200] })
-    .toBe(await page.evaluate(async () => {
-      await new Promise((r) => setTimeout(r, 350));
-      return [".left", ".right", ".partnersheet"].map((sel) => {
-        const n = document.querySelector(sel);
-        return n ? Math.round(n.getBoundingClientRect().top) : 0;
-      }).join(",");
-    }));
+    .poll(async () => {
+      const current = await read();
+      const unchanged = current === previous;
+      previous = current;
+      return unchanged;
+    }, { timeout: 5000, intervals: [100, 100, 100, 150, 200] })
+    .toBe(true);
 }
 
 export async function probe(page: Page): Promise<WorkspaceProbe> {

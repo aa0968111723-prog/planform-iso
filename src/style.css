@@ -298,10 +298,7 @@ html, body {
   appearance: none; cursor: pointer; text-align: left;
   display: flex; align-items: center; gap: 8px;
   padding: 9px; border-radius: 10px;
-  /* var(--surface-2), not a hard-coded slate: the literal below was a
-     leftover from when dark was the default and renders as a dark
-     translucent tile on the light theme every card-heavy screen uses. */
-  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); background: rgba(30, 41, 59, 0.6); color: var(--text);
   transition: background 0.15s, border-color 0.15s, transform 0.05s;
 }
 .card:hover { background: var(--surface-hover); border-color: var(--accent); }
@@ -350,8 +347,11 @@ html, body {
 
 /* --- toast / undo snackbar --------------------------------------------- */
 .toast {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  top: calc(var(--ws-header-h) + 10px); z-index: 40;
+  /* Above Project Home (70) and the wizard (80): confirmations like
+     「已複製成…」 are fired from those screens, and at z-index 40 they were
+     painted underneath the very surface that triggered them. */
+  position: fixed; left: 50%; transform: translateX(-50%);
+  top: calc(var(--ws-header-h) + 10px); z-index: 90;
   display: flex; gap: 10px; align-items: center;
   padding: 8px 14px; font-size: 13px;
   background: var(--panel-solid); color: var(--text);
@@ -697,7 +697,9 @@ html, body {
 
 /* --- quick start -------------------------------------------------------- */
 .quickstart {
-  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  /* Above Project Home (z-index 70): the new-project wizard opens on top of
+     我的專案, and at z-index 50 the Home overlay swallowed every click on it. */
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
   background: var(--scrim-strong); backdrop-filter: blur(3px); padding: 16px;
 }
 .quickstart__card {
@@ -725,21 +727,6 @@ html, body {
 .section:has(.sim-panel-host) .sim-panel-host { order: -1; }
 .sim-transport { margin: 6px 0; }
 .sim-panel .readout { margin-top: 6px; }
-
-/* Booth 模擬: label left, number right, so a glance finds the number. */
-.readout__row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
-/* Opacity, not a colour: the readout paints its own panel in each theme, and a
-   fixed dim colour disappeared into it. */
-.readout__label { opacity: 0.75; }
-.readout__value { font-weight: 700; font-variant-numeric: tabular-nums; }
-.booth-panel .list__row { flex-wrap: nowrap; gap: 8px; align-items: flex-end; }
-.booth-panel .list__row .field { flex: 0 0 auto; width: 76px; }
-.booth-panel .list__row .field__input { width: 100%; }
-.booth-panel .list__grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 480px) {
-  .booth-panel .list__row { flex-wrap: wrap; }
-  .booth-panel .list__grow { flex-basis: 100%; }
-}
 .sim-result { position: sticky; top: 0; z-index: 2; background: var(--panel-solid); }
 .chip--accent { border-color: var(--accent); color: var(--accent-text); }
 
@@ -921,167 +908,101 @@ html, body {
 }
 .comparerow--same { border-color: var(--border); }
 
-/* --- 我的專案 (Project Home) --------------------------------------------- */
-/*
- * Like Partner Mode above, a different application surface rather than a skin:
- * the editor chrome is removed outright, so the card grid is never sharing a
- * screen with an inspector, a bottom nav or a half-open sheet.
+/* --- Project Home（我的專案） -------------------------------------------
  *
- * The canvas is display:none and not merely covered: SceneManager runs a
- * permanent animation loop and App binds pointer handlers straight to the
- * canvas, so an overlay alone would leave both live behind the cards.
- * Hiding it is safe for mode detection — WorkspaceViewport falls back to
- * window.innerWidth/innerHeight when the canvas rect is zero, so data-ws-mode
- * still resolves and the columns below still pick the right count.
+ * The first level of the app. Cards only — a 場務組 volunteer opens this on a
+ * phone the evening of an event, so one column is the base case and wider
+ * screens simply fit more cards, never a sidebar or a table.
  */
-.projecthome { display: none; }
-#app[data-screen="home"] .topbar,
-#app[data-screen="home"] .left,
-#app[data-screen="home"] .right,
-#app[data-screen="home"] .bottomnav,
-#app[data-screen="home"] .ctxbar,
-#app[data-screen="home"] .placebar-wrap,
-#app[data-screen="home"] .measurebar,
-/* The host, not just `.agent-sheet`: `quickAgentSheet` MOVES the 預覽就緒 bar
-   out of the sheet and into the host, so it is a sibling and a rule naming
-   only `.agent-sheet` never reaches it. */
-#app[data-screen="home"] .agent-sheet-host,
-#app[data-screen="home"] .agent-sheet,
-#app[data-screen="home"] .calibration-banner { display: none !important; }
-/* Keep WebGL actively rendering behind the opaque Project Home surface.
-   Chromium/SwiftShader may discard even a visibility:hidden context, so only
-   hit-testing is disabled here; the home layer at z-index 35 hides the pixels. */
-#app[data-screen="home"] #scene { pointer-events: none; }
+.projhome {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  padding: max(16px, env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+}
+.projhome__inner { max-width: 1100px; margin: 0 auto; }
+.projhome__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 16px;
+}
+.projhome__title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: .01em; }
+.projhome__new { margin-left: auto; min-height: var(--tap); }
+.projhome__count { margin: 0 0 10px; }
 
-/*
- * z-index 35: above the topbar (25), the rails (18), the compact sheet (26)
- * and the partner strips (30/32); BELOW the toast (40) so the 復原 chip after
- * a delete is visible and tappable, below the wizard (50) so ＋建立新專案
- * opens on top, and below the menu sheet (60) so a card's ⋯ does too.
- */
-#app[data-screen="home"] .projecthome {
-  display: block;
-  position: absolute; inset: 0; z-index: 35;
-  background: #f3f7f5; overflow-y: auto; overflow-x: hidden;
-  padding: 0;
-}
-/* --ws-header-h collapses to 0 with the topbar hidden, so the toast would
-   otherwise sit flush against the top edge. */
-#app[data-screen="home"] .toast { top: calc(16px + env(safe-area-inset-top)); }
+.projhome__grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+#app[data-ws-mode="tablet"] .projhome__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#app[data-ws-mode="desktop"] .projhome__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
-.projecthome__wash {
-  position: fixed; inset: 0 0 auto; height: min(480px, 60vh); pointer-events: none;
-  background:
-    radial-gradient(circle at 78% 10%, rgba(20, 184, 166, .18), transparent 34%),
-    radial-gradient(circle at 18% 28%, rgba(250, 204, 21, .09), transparent 28%),
-    linear-gradient(180deg, #e7f3ef 0%, rgba(243,247,245,0) 100%);
+.projcard {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  grid-template-areas: "thumb open" "actions actions";
+  gap: 10px 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-solid);
+  box-shadow: 0 1px 3px var(--shadow);
 }
-.projecthome__shell {
-  position: relative; width: min(1180px, 100%); margin: 0 auto;
-  padding: calc(22px + env(safe-area-inset-top)) 24px calc(48px + env(safe-area-inset-bottom));
+.projcard--broken { border-color: #f59e0b; }
+.projcard__thumb {
+  grid-area: thumb;
+  width: 56px; height: 56px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--surface-1);
 }
-.projecthome__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.projecthome__brand { display: flex; align-items: center; gap: 9px; color: #123c36; font-size: 16px; font-weight: 800; letter-spacing: -.01em; }
-.projecthome__mark {
-  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px;
-  background: #0f766e; color: #fff; box-shadow: 0 8px 20px rgba(15,118,110,.2);
+.projcard__thumb--empty {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: var(--text-dim);
 }
-.projecthome__release { color: #52716c; font-size: 12px; font-weight: 700; }
-.projecthome__hero {
-  display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(320px, .92fr);
-  align-items: center; gap: 48px; min-height: 320px; padding: 46px 0 34px;
+.projcard__open {
+  grid-area: open;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+  padding: 4px 0;
+  text-align: left;
+  background: none; border: 0; color: inherit;
+  font: inherit; cursor: pointer;
 }
-.projecthome__hero-copy { max-width: 640px; }
-.projecthome__eyebrow { color: #0f766e; font-size: 12px; font-weight: 850; letter-spacing: .14em; }
-.projecthome__title {
-  max-width: 620px; margin: 10px 0 14px; color: #102e2a;
-  font-size: clamp(32px, 4.2vw, 56px); line-height: 1.08; font-weight: 820; letter-spacing: -.045em;
+.projcard__name {
+  font-size: 16px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.projecthome__lead { max-width: 580px; margin: 0 0 24px; color: #526b67; font-size: 16px; line-height: 1.75; }
-.projecthome__new { min-height: 48px; padding: 0 20px; border-radius: 12px; background: #0f766e; border-color: #0f766e; font-weight: 750; box-shadow: 0 10px 24px rgba(15,118,110,.2); }
-.projecthome__new:hover { background: #115e59; border-color: #115e59; }
-.projecthome__scene {
-  position: relative; min-height: 230px; transform: rotateX(58deg) rotateZ(-34deg);
-  border: 2px solid rgba(71,85,105,.32); border-radius: 8px;
-  background:
-    linear-gradient(rgba(100,116,139,.1) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(100,116,139,.1) 1px, transparent 1px), #f8fafc;
-  background-size: 22px 22px; box-shadow: 32px 36px 45px rgba(38,69,61,.18);
+.projcard__sub, .projcard__time { font-size: 13px; color: var(--text-dim); }
+.projcard--broken .projcard__sub { color: var(--warn-text); font-weight: 600; }
+.projcard__actions {
+  grid-area: actions;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
 }
-.projecthome__scene-stage { position: absolute; left: 8%; top: 8%; width: 72%; height: 18%; border-radius: 3px; background: #315b45; box-shadow: 0 8px 0 #233d32; }
-.projecthome__scene-mats {
-  position: absolute; left: 16%; top: 36%; width: 60%; height: 48%; border-radius: 3px;
-  background:
-    linear-gradient(rgba(6,78,59,.26) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(6,78,59,.26) 1px, transparent 1px), #3f9a79;
-  background-size: 20% 25%; box-shadow: 0 6px 0 #2f735b;
-}
-.projecthome__scene-corridor { position: absolute; right: -1%; top: 0; width: 18%; height: 100%; background: #d9a7a8; border-left: 4px solid #f8fafc; opacity: .82; }
-.projecthome__scene-route { position: absolute; right: 16%; bottom: 12%; width: 36%; height: 4px; border-radius: 99px; background: #f59e0b; transform: rotate(-28deg); }
-.projecthome__summary { display: flex; flex-wrap: wrap; gap: 10px 22px; padding: 14px 0 26px; color: #60736f; font-size: 13px; border-bottom: 1px solid rgba(15,118,110,.14); }
-.projecthome__summary span { display: inline-flex; align-items: baseline; gap: 4px; }
-.projecthome__summary strong { color: #163f39; font-size: 18px; }
-.projecthome__sectionhead { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 30px 0 16px; }
-.projecthome__sectionhead h2 { margin: 0 0 4px; color: #173b35; font-size: 21px; letter-spacing: -.02em; }
-.projecthome__sectionhead p, .projecthome__empty { margin: 0; color: #6a7e79; }
-.projecthome__empty { padding: 28px; border: 1px dashed rgba(15,118,110,.3); border-radius: 16px; text-align: center; background: rgba(255,255,255,.55); }
+.projcard__actions .chip { min-height: 36px; }
 
-/* No @media queries: columns come off the measured-canvas attribute, the same
-   channel every other responsive rule in this file uses. */
-.projecthome__grid { display: grid; gap: 16px; }
-#app[data-ws-mode="phone"] .projecthome__grid { grid-template-columns: 1fr; }
-#app[data-ws-mode="tablet"] .projecthome__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-#app[data-ws-mode="desktop"] .projecthome__grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%;
+.projhome__undo {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-1);
+  font-size: 14px;
 }
-.projectcard {
-  position: relative; min-height: 236px; padding: 0; overflow: hidden;
-  border: 1px solid rgba(51,65,85,.12); border-radius: 17px; background: rgba(255,255,255,.92);
-  box-shadow: 0 10px 30px rgba(46,74,66,.08); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
-}
-.projectcard:hover { transform: translateY(-2px); border-color: rgba(15,118,110,.25); box-shadow: 0 16px 38px rgba(46,74,66,.13); }
-.projectcard .card__title { display: block; margin: 4px 0 5px; color: #183a35; font-size: 16px; font-weight: 760; }
-.projectcard__body { display: flex; min-height: 236px; flex-direction: column; }
-.projectcard__preview { position: relative; display: block; height: 142px; overflow: hidden; background: linear-gradient(150deg, #eef6f3, #e8efed); }
-.projectcard__preview-room {
-  position: absolute; left: 15%; top: 9%; width: 70%; height: 78%; transform: rotateX(58deg) rotateZ(-32deg);
-  border: 2px solid rgba(71,85,105,.28); background: #f8fafc; box-shadow: 15px 18px 20px rgba(43,68,62,.13);
-}
-.projectcard__preview-field {
-  position: absolute; left: 32%; top: 42%; width: 35%; height: 40%; transform: rotateX(58deg) rotateZ(-32deg);
-  background: repeating-linear-gradient(90deg, transparent 0 17%, rgba(6,78,59,.25) 17% 19%), repeating-linear-gradient(0deg, #4aa17f 0 22%, #347c64 22% 24%);
-  box-shadow: 0 5px 0 #2f6f59;
-}
-.projectcard__preview-stage { position: absolute; left: 31%; top: 28%; width: 34%; height: 9%; transform: rotate(-32deg); border-radius: 2px; background: #315b45; }
-.projectcard__content { display: block; padding: 15px 18px 17px; }
-.projectcard__kicker { display: block; color: #0f766e; font-size: 10px; font-weight: 850; letter-spacing: .1em; }
-/* `all: unset` clears the focus ring, and inset:0 covers ⋯'s hit area
-   entirely — hence the explicit ring and the stacking order below. */
-.projectcard__open { all: unset; position: absolute; inset: 0; cursor: pointer; }
-.projectcard__open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.projectcard__open[disabled] { cursor: default; }
-.projectcard__more {
-  position: absolute; right: 8px; top: 8px; z-index: 1;
-  min-width: var(--tap); min-height: var(--tap);
-  background: rgba(255,255,255,.9); box-shadow: 0 4px 12px rgba(15,23,42,.1);
-}
-.projectcard--broken { border-color: var(--danger); }
+.projhome__undo .chip { margin-left: auto; }
 
-#app[data-ws-mode="phone"] .projecthome__shell { padding-left: 16px; padding-right: 16px; }
-#app[data-ws-mode="phone"] .projecthome__hero { grid-template-columns: 1fr; gap: 20px; min-height: auto; padding: 38px 0 24px; }
-#app[data-ws-mode="phone"] .projecthome__title { font-size: 36px; }
-#app[data-ws-mode="phone"] .projecthome__scene { min-height: 160px; margin: 0 12px 14px; }
-#app[data-ws-mode="phone"] .projecthome__summary { padding-top: 4px; }
-#app[data-ws-mode="tablet"] .projecthome__hero { gap: 28px; grid-template-columns: 1.1fr .9fr; }
+.projhome__empty { text-align: center; padding: 32px 12px 16px; }
+.projhome__empty-icon { font-size: 44px; }
+.projhome__empty-title { margin: 10px 0 4px; font-size: 17px; font-weight: 700; }
+.projhome__empty .btn { margin-top: 14px; }
 
-/* Compact-header elasticity. `.topbar--compact .chip` is flex:0 0 auto, so a
-   chip in slot 1 would leave NOTHING in the row shrinkable and the header
-   would overflow at 360/390/412/600. The glyph never shrinks; the project
-   name absorbs the ellipsis. */
-.topbar__home { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.topbar--compact .topbar__home { flex: 0 1 auto; overflow: hidden; }
-.topbar__home-glyph { flex: 0 0 auto; }
-.topbar__home-name {
-  flex: 0 1 auto; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
+/* Wizard step counter, so 3 steps never feel open-ended on a phone. */
+.quickstart__step { font-size: 12px; color: var(--text-dim); letter-spacing: .04em; }
+.quickstart__name { font-size: 17px; min-height: var(--tap); }
+
+/* The way back to 我的專案 is a real control on every size, not a menu item. */
+.topbar__home { flex: 0 0 auto; font-weight: 700; }

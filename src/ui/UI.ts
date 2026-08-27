@@ -1,6 +1,6 @@
 import { App, type Workflow } from "../app/App";
 import { metersToCm, type SnapMode } from "../core/units";
-import { calibrationComplete, calibrationPendingLabels, venueNeedsCalibration, type MeasurementType, type RouteType, type ViewName } from "../core/model";
+import { calibrationComplete, calibrationPendingLabels, planHasContent, venueNeedsCalibration, type MeasurementType, type RouteType, type ViewName } from "../core/model";
 import { calibrationCompare } from "../core/measure";
 import { ROUTE_PRESETS } from "../core/routes";
 import type { LayoutCandidate } from "../core/smartLayout";
@@ -18,13 +18,12 @@ import { refreshBoothSimPanel } from "./boothSimPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
-import { quickStartSeen, showQuickStart } from "./quickStart";
-import { buildProjectHome, type ProjectHomeHandle } from "./projectHome";
+import { showNewProjectWizard } from "./quickStart";
+import { buildProjectHome, type ProjectHomeHandles } from "./projectHome";
+import { ProjectRepository } from "../state/projectRepository";
 import { BUILD_INFO } from "../buildInfo";
 import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
-import type { Screen, ToastUndo } from "../state/projectSession";
-import { readLegacyCorruptBackup } from "../state/projectStorage";
-import { migrateProject } from "../core/migrate";
+import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
 
@@ -85,6 +84,7 @@ export class UI {
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false };
   private agentSheet: QuickAgentSheetHandles;
   private menu: MenuSheetHandles = buildMenuSheet();
+  private home: ProjectHomeHandles;
   private smartBox = el("div", { class: "list" });
   private simPanelRoot = el("div", { class: "sim-panel-host" });
   private boothPanelRoot = el("div", { class: "sim-panel-host" });
@@ -95,8 +95,6 @@ export class UI {
   private sheetHistoryPushed = false;
   private viewport: WorkspaceViewport;
   private mode: WorkspaceMode = "desktop";
-  private projectHome: ProjectHomeHandle;
-  private screen: Screen = "editor";
   private builtHeaderMode: WorkspaceMode | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
@@ -113,15 +111,9 @@ export class UI {
       onExit: () => this.app.exitPartnerMode(),
       onLayoutChange: () => this.viewport.schedule(),
     });
-    this.projectHome = buildProjectHome({
-      session: app.projects,
-      menu: this.menu,
-      onNewProject: () => this.openQuickStart(),
-      onToast: (msg, undo) => this.showToast(msg, undo),
-    });
     root.append(
       this.topbar, this.calibrationBanner, this.left, this.right, this.nav, this.placebar, this.measurebar,
-      this.box, this.toast, this.ctxbar, this.projectHome.root, this.menu.root,
+      this.box, this.toast, this.ctxbar, this.menu.root,
       this.partner.top, this.partner.dock, this.partner.sheet,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
@@ -167,12 +159,20 @@ export class UI {
       // Everything that frames the world uses the measured visible rect, so the
       // camera never assumes the whole window is canvas.
       this.app.scene.setViewportRects(state.canvas, state.safeRect, state.focusRect);
-      // A project opened from 我的專案 was adopted while the canvas and every
-      // rail were still display:none, so its framing used the wrong insets.
-      // This is the first moment real rects exist; re-frame exactly once.
-      if (this.screen === "editor" && this.app.consumePendingFrame()) this.app.recenterView();
       this.onModeMaybeChanged();
     });
+
+    this.home = buildProjectHome({
+      onOpen: (id) => this.openProject(id),
+      onNew: () => this.openNewProjectWizard(),
+      onDeleted: (id) => {
+        // Deleting the plan that is still open in the editor must not leave the
+        // Store writing to a dead key — that would resurrect it on next save.
+        if (this.app.currentProjectId === id) this.app.detachProject();
+      },
+      onToast: (msg) => this.showToast(msg),
+    });
+    root.append(this.home.root);
 
     this.syncNav();
     this.placebar.append(buildPlacementToolbar(app));
@@ -180,14 +180,14 @@ export class UI {
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
     this.app.store.onLayoutError = (action) =>
-      this.showToast(action === "save" ? "儲存這版場佈失敗，請先匯出 JSON" : "刪除這版場佈失敗，原檔案仍保留");
+      this.showToast(action === "save" ? "儲存平面圖失敗，請先匯出 JSON" : "刪除平面圖失敗，原檔案仍保留");
     this.app.onImprove = () => this.agentSheet.runPreset("幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門");
     this.app.onChange(() => this.update());
     this.bindKeys();
     this.bindSheetGestures();
     this.applySheetState();
     this.update();
-    this.buildQuickStart();
+    this.bootRoute();
   }
 
   /** Measured workspace state — used by browser smoke tests and diagnostics. */
@@ -213,66 +213,108 @@ export class UI {
     return this.mode !== "desktop";
   }
 
-  private buildQuickStart(): void {
-    if (quickStartSeen()) return;
-    this.openQuickStart();
+  /**
+   * Where the app lands on load. An active project resumes straight into the
+   * editor — a 場務組 volunteer who refreshes mid-setup in E310 wants their
+   * plan back, not a list. With nothing open (first run, or they left from
+   * Project Home) 我的專案 is the landing screen.
+   */
+  private bootRoute(): void {
+    if (this.app.currentProjectId) {
+      this.enterEditor();
+      return;
+    }
+    this.goHome();
+    // A brand new install has nothing to list — go straight to creating one.
+    if (ProjectRepository.count() === 0) this.openNewProjectWizard();
   }
 
-  /** Open the Quick Start wizard (first run, or 更多 → 快速開始). */
-  openQuickStart(): void {
+  // --- project routing ----------------------------------------------------
+
+  /**
+   * Show 我的專案. Pending edits are flushed first so the card the user is
+   * about to look at already shows the work they just did.
+   */
+  goHome(): void {
+    // Close the editor chrome FIRST, then flush. Doing it the other way round
+    // let the teardown (sheet close -> update -> view mutation) schedule an
+    // autosave that landed after the flush, so the last write to storage was
+    // not the one we thought we had committed.
+    this.menu.close();
+    this.setSheet("none");
+    // An AI preview belongs to the project it was drafted from. Left open, its
+    // 預覽就緒 bar (position: fixed, outside .agent-sheet) survives the trip
+    // through 我的專案 and reappears over the NEXT project's editor — where 套用
+    // commits this project's draft into that one, name and all. Closing rolls
+    // the draft back while the project it came from is still the bound one.
+    this.agentSheet.close();
+    this.root.setAttribute("data-route", "home");
+    this.app.leaveProject();
+    this.home.show();
+  }
+
+  private enterEditor(): void {
+    // 更多 → ＋ 新建專案 binds a different project without passing through
+    // goHome(), so the same preview-crosses-projects leak has a second door.
+    // Rolling back here is safe: rollback only drops the draft, it never
+    // writes to whichever project is now bound.
+    this.agentSheet.close();
+    this.home.hide();
+    this.root.setAttribute("data-route", "editor");
+    this.buildTopbar();
+    this.update();
+    this.viewport.schedule();
+  }
+
+  isHomeVisible(): boolean {
+    return this.home.isVisible();
+  }
+
+  private openProject(id: string): void {
+    if (!this.app.openProjectById(id)) {
+      this.showToast("這份專案需要復原，先下載原始資料再試", false);
+      this.home.refresh();
+      return;
+    }
+    this.enterEditor();
+    this.showToast(`已開啟「${this.app.store.getState().name}」`);
+  }
+
+  /** The new-project wizard. Creating never replaces the open project. */
+  openNewProjectWizard(): void {
     if (this.root.querySelector(".quickstart")) return;
-    const overlay = showQuickStart(this.app, this.app.projects, () => {
-      this.viewport.schedule();
-      this.update();
+    const wasHome = this.home.isVisible();
+    const overlay = showNewProjectWizard({
+      onCreate: (result) => {
+        try {
+          this.app.createProject({
+            name: result.name,
+            project: result.project,
+            venuePresetId: result.venue.id,
+            venueName: result.venue.name,
+            participants: result.participants,
+          });
+        } catch {
+          this.showToast("儲存空間已滿，請先刪掉一些專案或匯出備份", false);
+          this.home.show();
+          return;
+        }
+        this.enterEditor();
+      },
+      onCancel: () => {
+        // Back where they came from: Project Home on a fresh start, the editor
+        // if they opened the wizard from 更多.
+        if (wasHome || !this.app.currentProjectId) this.goHome();
+        else this.update();
+      },
     });
     this.root.append(overlay);
   }
 
-  /**
-   * Switch application surface.
-   *
-   * Home deliberately leaves the project hydrated with its persistence
-   * installed, so 「繼續編輯」 is instant — which is exactly why `bindKeys`
-   * has to refuse to act while this is `"home"`.
-   */
-  setScreen(screen: Screen): void {
-    // Always, in both directions: an AI preview belongs to the project it was
-    // generated from. Its 套用 bar is `position: fixed` at the highest z-index
-    // in the app and is a SIBLING of `.agent-sheet`, so it outlives any screen
-    // change on its own — and committing it after a switch would overwrite a
-    // different project's zones, objects, routes and name wholesale.
-    this.agentSheet.close();
-
-    this.screen = screen;
-    this.root.dataset.screen = screen;
-    if (screen === "home") {
-      if (this.app.session.partner) this.app.exitPartnerMode();
-      this.setSheet("none");
-      this.menu.close();
-      this.projectHome.update();
-    }
-    // Measure NOW, not on the next frame: the canvas has just flipped between
-    // display:none and visible, and `App.adoptProject` has already asked for a
-    // frame that must land against the rects of the screen we are entering,
-    // not the one we are leaving.
-    this.viewport.measure();
-    this.update();
-  }
-
-  refreshProjectHome(): void {
-    this.projectHome.update();
-  }
-
-  showToast(msg: string, undo: boolean | ToastUndo = false): void {
+  private showToast(msg: string, undo = false): void {
     this.toast.innerHTML = "";
     this.toast.append(el("span", { text: msg }));
-    if (undo === true) this.toast.append(button("復原", () => this.app.undo(), "chip chip--sm"));
-    else if (undo && typeof undo === "object") {
-      this.toast.append(button(undo.label, () => {
-        this.toast.style.display = "none";
-        undo.onSelect();
-      }, "chip chip--sm"));
-    }
+    if (undo) this.toast.append(button("復原", () => this.app.undo(), "chip chip--sm"));
     this.toast.style.display = "flex";
     if (this.toastTimer !== null) window.clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => { this.toast.style.display = "none"; }, 4000);
@@ -294,7 +336,8 @@ export class UI {
    * Workflows live in the bottom nav; everything else lives behind More.
    */
   private buildCompactTopbar(): void {
-    const title = this.buildHomeChip("chip chip--sm topbar__home");
+    const title = el("div", { class: "topbar__title topbar__title--compact" });
+    const home = this.homeButton("←");
     const history = el("div", { class: "group" }, [
       button("↶", () => this.app.undo(), "chip chip--sm"),
       button("↷", () => this.app.redo(), "chip chip--sm"),
@@ -303,7 +346,7 @@ export class UI {
     const ai = button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent");
     const more = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     more.setAttribute("aria-label", "更多設定");
-    this.topbar.append(title, this.statusBadge, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
+    this.topbar.append(home, title, this.statusBadge, el("div", { class: "topbar__spacer" }), history, viewBtn, ai, more);
   }
 
   private buildDesktopTopbar(): void {
@@ -329,26 +372,19 @@ export class UI {
     const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
-      this.buildHomeChip("chip topbar__home"),
+      this.homeButton("← 我的專案"),
+      el("div", { class: "topbar__title", text: "平面場 ISO" }),
       history, flows, views, more, el("div", { class: "topbar__spacer" }), team, moreBtn,
     );
     this.topbar.append(this.statusBadge);
   }
 
-  /**
-   * The way back to 我的專案, in the slot the project name used to occupy.
-   *
-   * 🗂 and not ←: a back arrow next to a label reads as "back to that label",
-   * and this goes to the library, not to the project it names.
-   */
-  private buildHomeChip(cls: string): HTMLButtonElement {
-    const home = button("", () => this.app.projects.goHome(), cls);
-    home.append(
-      el("span", { class: "topbar__home-glyph", text: "🗂" }),
-      el("span", { class: "topbar__home-name" }),
-    );
-    home.setAttribute("aria-label", "回到我的專案");
-    return home;
+  /** Always-visible way back to 我的專案, on every screen size. */
+  private homeButton(label: string): HTMLButtonElement {
+    const b = button(label, () => this.goHome(), "chip chip--sm topbar__home");
+    b.setAttribute("aria-label", "回到我的專案");
+    b.title = "我的專案";
+    return b;
   }
 
   private openViewMenu(): void {
@@ -396,11 +432,15 @@ export class UI {
         ],
       },
       {
-        title: "活動",
+        title: "專案",
         items: [
-          { label: "🗂 我的專案", sub: "切換活動、複製或刪除舊的場佈", onSelect: () => this.app.projects.goHome() },
-          { label: "🚀 快速開始", sub: "選場地、勾需求、自動排場佈", onSelect: () => this.openQuickStart() },
-          { label: "重新命名活動", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
+          { label: "← 我的專案", sub: "回到專案列表（會先存檔）", onSelect: () => this.goHome() },
+          {
+            label: "＋ 新建專案",
+            sub: "另外開一份，不會蓋掉現在這個",
+            onSelect: () => this.openNewProjectWizard(),
+          },
+          { label: "重新命名這個專案", sub: this.app.store.getState().name, onSelect: () => this.promptRename() },
         ],
       },
       {
@@ -411,12 +451,12 @@ export class UI {
             sub: `${BUILD_INFO.commit}${BUILD_INFO.builtAt ? ` · ${BUILD_INFO.builtAt.slice(0, 16).replace("T", " ")}` : ""}`,
             onSelect: () => true,
           },
-          ...(readLegacyCorruptBackup()
+          ...(Store.corruptBackup()
             ? [{
                 label: "下載損壞前的備份",
-                sub: "舊版存檔中無法讀取的資料",
+                sub: "上次無法讀取的專案原始資料",
                 onSelect: () => {
-                  const raw = readLegacyCorruptBackup();
+                  const raw = Store.corruptBackup();
                   if (raw) {
                     const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
                     downloadPng(url, "planform-備份.json");
@@ -941,30 +981,21 @@ export class UI {
     const importInput = el("input", { type: "file", accept: "application/json", style: "display:none" }) as HTMLInputElement;
     importInput.addEventListener("change", async () => {
       const f = importInput.files?.[0]; if (!f) return;
-      // Importing no longer replaces anything, so the old confirm is gone. It
-      // does have to reject junk BEFORE creating a project, or a bad file
-      // becomes a permanent broken card in 我的專案.
-      try {
-        const parsed = await importProjectJson(f) as unknown;
-        const shape = parsed as { version?: unknown; zones?: unknown; objects?: unknown };
-        if (!parsed || typeof parsed !== "object" || typeof shape.version !== "number" ||
-            (!Array.isArray(shape.zones) && !Array.isArray(shape.objects))) {
-          this.showToast("匯入失敗：檔案格式不正確");
-        } else {
-          const meta = this.app.projects.createProject({ project: migrateProject(parsed), open: true });
-          this.showToast(`已匯入「${meta.name}」`);
-        }
-      } catch {
-        this.showToast("匯入失敗：檔案格式不正確");
+      const current = this.app.store.getState();
+      const hasContent = planHasContent(current);
+      if (hasContent && !window.confirm("載入 JSON 會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) {
+        importInput.value = "";
+        return;
       }
+      try { this.app.store.loadProject(await importProjectJson(f) as never); this.showToast("已匯入專案"); } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
     });
-    const layoutName = el("input", { type: "text", placeholder: "這版場佈的名字", class: "field__input" }) as HTMLInputElement;
+    const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" }) as HTMLInputElement;
     const layoutList = el("select", { class: "field__input" }) as HTMLSelectElement;
     const refreshList = () => {
-      const names = this.app.projects.listLayouts(); const cur = layoutList.value;
+      const names = this.app.store.listLayouts(); const cur = layoutList.value;
       layoutList.innerHTML = "";
-      layoutList.append(el("option", { value: "", text: names.length ? "選擇存過的場佈…" : "還沒存過其他排法" }));
+      layoutList.append(el("option", { value: "", text: names.length ? "選擇平面圖…" : "尚無已存平面圖" }));
       for (const n of names) layoutList.append(el("option", { value: n, text: n }));
       if (names.includes(cur)) layoutList.value = cur;
     };
@@ -1064,26 +1095,24 @@ export class UI {
       el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
       textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
-      el("div", { class: "subhead", text: "這份專案存過的場佈" }),
-      el("p", { class: "hint", text: "同一個活動的不同排法；換活動請回「我的專案」開新的。" }),
+      el("div", { class: "subhead", text: "這個專案的版本（方案 A／方案 B／最後版）" }),
       el("div", { class: "row" }, [layoutName, button("儲存", () => {
-        const saved = this.app.projects.saveLayout(layoutName.value.trim() || state().name);
-        if (saved) { refreshList(); this.showToast("已儲存這版場佈"); }
+        const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
+        if (saved) { refreshList(); this.showToast("已儲存平面圖"); }
       })]),
       el("div", { class: "row" }, [layoutList,
         button("載入", () => {
           if (!layoutList.value) return;
-          if (!window.confirm("載入其他排法會取代畫面上目前的排法（目前這版會先自動存起來）。要繼續嗎？")) return;
-          if (this.app.projects.applyLayout(layoutList.value)) {
-            refreshList();
-            this.showToast("已載入");
-          }
+          const current = this.app.store.getState();
+          const hasContent = planHasContent(current);
+          if (hasContent && !window.confirm("載入平面圖會取代目前專案；載入前已保留一個復原步驟。要繼續嗎？")) return;
+          if (this.app.store.loadNamedLayout(layoutList.value)) this.showToast("已載入平面圖");
         }, "btn btn--ghost"),
         button("刪除", () => {
           const name = layoutList.value;
           if (!name) return;
-          if (!window.confirm(`確定刪除場佈「${name}」？此動作無法復原。`)) return;
-          if (this.app.projects.deleteLayout(name)) {
+          if (!window.confirm(`確定刪除平面圖「${name}」？此動作無法復原。`)) return;
+          if (this.app.store.deleteNamedLayout(name)) {
             refreshList();
             this.showToast(`已刪除「${name}」`);
           }
@@ -1123,10 +1152,7 @@ export class UI {
       ? "有問題待處理"
       : counts.warning ? "有提醒" : uncalibrated ? "尺寸待校正" : "檢查通過";
     const pendingCalibration = uncalibrated;
-    // Belt and braces with the CSS hide list: this banner is position:fixed at
-    // z 55 and would otherwise float over the card grid.
-    this.calibrationBanner.style.display =
-      pendingCalibration && this.screen === "editor" ? "flex" : "none";
+    this.calibrationBanner.style.display = pendingCalibration ? "flex" : "none";
     if (pendingCalibration) {
       const labels = calibrationPendingLabels(s);
       const span = this.calibrationBanner.querySelector("span")!;
@@ -1141,12 +1167,12 @@ export class UI {
       }
     }
 
-    // The header's first slot names the open project and is the way back to
-    // 我的專案. The index's copy of the name wins while it is fresher than the
-    // Store (a rename of another project writes the index first).
-    const homeName = this.topbar.querySelector(".topbar__home-name");
-    if (homeName) homeName.textContent = this.app.projects.activeMeta?.name || s.name || "我的專案";
-    if (!this.compact) {
+    if (this.compact) {
+      const title = this.topbar.querySelector(".topbar__title--compact");
+      if (title) title.textContent = s.name || "平面場 ISO";
+    } else {
+      const desktopTitle = this.topbar.querySelector(".topbar__title");
+      if (desktopTitle) desktopTitle.textContent = s.name || "平面場 ISO";
       setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
       setPressed(this.topbar, "flows", (b) => primaryWorkflows(this.app)[b]?.id === sess.workflow);
       setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
@@ -1316,12 +1342,6 @@ export class UI {
     window.addEventListener("keydown", (e) => {
       const tgt = e.target as HTMLElement;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "SELECT" || tgt.tagName === "TEXTAREA")) return;
-      // Home keeps the project hydrated and its autosave live, so Delete / d /
-      // arrows here would mutate the open plan while the user is looking at a
-      // card grid — and `loadProject` clears the undo stack on the next switch,
-      // so it would be unrecoverable. The wizard half fixes the same
-      // pre-existing hole in the non-modal Quick Start overlay.
-      if (this.screen === "home" || this.root.querySelector(".quickstart")) return;
       // Partner Mode is read-only: only Escape (close a sheet, then leave).
       if (this.app.session.partner) {
         if (e.key !== "Escape") return;

@@ -96,9 +96,9 @@ import {
   type VenueCaptureSession,
 } from "../assets/venueCapture";
 import { Store } from "../state/store";
-import type { ProjectSession } from "../state/projectSession";
 import { SceneManager, type GhostState } from "../scene/SceneManager";
 import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
+import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
 import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
@@ -222,8 +222,6 @@ const TOUCH_GHOST_OFFSET_PX = 46;
 
 export class App {
   readonly store: Store;
-  /** The project library. Owns which project is open; see state/projectSession. */
-  readonly projects: ProjectSession;
   readonly scene: SceneManager;
   readonly session: Session = {
     selection: new Set(),
@@ -306,9 +304,8 @@ export class App {
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
 
-  constructor(canvas: HTMLCanvasElement, store: Store, projects: ProjectSession) {
+  constructor(canvas: HTMLCanvasElement, store: Store) {
     this.store = store;
-    this.projects = projects;
     this.scene = new SceneManager(canvas);
     // Light by default; a stored preference wins. Applied before the first
     // paint so the canvas and the panels never disagree for a frame.
@@ -628,38 +625,102 @@ export class App {
     return ok;
   }
 
+  // --- multi-project session ---------------------------------------------
+
+  /** The library project currently open in the editor, if any. */
+  get currentProjectId(): string | null {
+    return this.store.getProjectId();
+  }
+
+  currentProjectMeta(): ProjectMeta | null {
+    const id = this.currentProjectId;
+    return id ? ProjectRepository.getMeta(id) : null;
+  }
+
   /**
-   * Take on a project that has just been loaded into the Store.
-   *
-   * Split in two halves because boot adopts BEFORE `new UI` exists. The frame
-   * half depends on `scene.setViewportRects(...)`, which only ever runs from
-   * inside `UI`'s viewport subscription — recentering before that frames
-   * against unmeasured defaults, with nothing to correct it afterwards.
+   * Open a project from the library. Returns false when its body is missing or
+   * unreadable, so the caller can keep the user on Project Home with an
+   * explanation instead of dropping them into a blank editor.
    */
-  adoptProject(project: Project, opts: { frame: boolean; toast?: string }): void {
-    // --- state half: always ------------------------------------------------
-    // Everything here is derived from the OLD project and would otherwise
-    // survive the switch: a selection of ids that no longer exist, a
-    // half-placed object, a simulation of somebody else's floor plan.
-    this.session.selection = new Set();
-    this.cancelPlacement();
-    if (this.session.measure) this.stopMeasure();
-    if (this.session.calibrate) this.cancelCalibration();
-    this.session.agentPreview = null;
-    this.session.simResult = null;
-    this.session.simPositions = [];
-    this.session.simMode = "off";
-    this.session.simCompare = null;
-    this.session.matCandidates = [];
-    this.session.issues = [];
-    this.session.focusRouteId = null;
-    // A booth playback belongs to the plan it was started on.
+  openProjectById(id: string): boolean {
+    const opened = ProjectRepository.openProject(id);
+    if (!opened.ok) return false;
+    this.store.openBoundProject(id, opened.project);
+    ProjectRepository.setActiveProjectId(id);
+    this.adoptProjectSettings(this.store.getState());
+    return true;
+  }
+
+  /**
+   * Create a new project from the wizard and open it. This adds to the
+   * library — it never replaces the project that was open before.
+   */
+  createProject(input: {
+    name: string;
+    project: Project;
+    venuePresetId?: string;
+    venueName?: string;
+    participants?: number;
+  }): ProjectMeta {
+    const meta = ProjectRepository.createProject(input);
+    // Read the stored body back rather than opening the caller's object: the
+    // repository normalises it (notably stamping the project name over the
+    // template's own). Opening the un-normalised original left the editor
+    // showing 「E310 演講活動（範例）」 while storage held the name the user
+    // typed — and the next autosave wrote the template name back over it.
+    const opened = ProjectRepository.openProject(meta.id);
+    this.store.openBoundProject(meta.id, opened.ok ? opened.project : input.project);
+    ProjectRepository.setActiveProjectId(meta.id);
+    this.adoptProjectSettings(this.store.getState());
+    this.toast("場佈起點已建立，直接拖曳調整即可");
+    return meta;
+  }
+
+  /**
+   * Let go of the open project without saving it — used when that project has
+   * just been deleted, so autosave cannot write it back into the library.
+   */
+  detachProject(): void {
+    this.stopSimulation();
+    this.store.bindProject(null);
+    ProjectRepository.setActiveProjectId(null);
+  }
+
+  /**
+   * Write pending edits and step out of the project.
+   *
+   * Order matters: flush while still bound so the last edit lands in the right
+   * project, then unbind and clear the active pointer.
+   *
+   * Unbinding is not tidiness. The pagehide handler flushes on every reload and
+   * tab close, and a Store still bound to a project the user had already left
+   * would rewrite that project's stored body from stale memory — which is
+   * exactly how a deliberately corrupted body silently repaired itself.
+   *
+   * Clearing the pointer means someone who walked back to 我的專案 and then
+   * reloaded is still on 我的專案, not dragged into what they just left.
+   */
+  leaveProject(): void {
+    this.stopSimulation();
+    this.store.flushAutosave();
+    this.store.bindProject(null);
+    ProjectRepository.setActiveProjectId(null);
+  }
+
+  /**
+   * Land the user in 場佈 with the session settings the plan implies: head
+   * count, arrival window and staffing come from the plan's own scenario so the
+   * mat arranger, the simulation and the AI all read one number.
+   */
+  private adoptProjectSettings(project: Project): void {
+    // A booth rehearsal belongs to the plan it was started on. Carrying the
+    // agents, the queue counts or the statistics into the next project would
+    // show somebody else's crowd standing in this room.
     this.stopBoothLoopOnly();
     this.boothSim = null;
     this.session.booth = { playing: false, speed: this.session.booth.speed, stats: null, compare: null };
     this.session.simQueues = {};
     this.session.bottlenecks = [];
-    if (this.session.workflow === "sim" && !isBoothProject(project)) this.session.workflow = "layout";
 
     const scenario = project.activeScenarioId
       ? project.scenarios.find((s) => s.id === project.activeScenarioId)
@@ -683,48 +744,17 @@ export class App {
       // number the event was created with.
       this.session.participants = scenario.participantCount;
     }
-    this.scene.setView(project.view);
-
-    // --- frame half: interactive opens only --------------------------------
-    if (!opts.frame) {
-      // Boot restores exactly what the previous session left, including its
-      // workflow step. Forcing 場佈 here would change first-launch behaviour
-      // for every existing user.
-      this.notifyUi();
-      return;
-    }
     this.setWorkflow("layout");
-    // Two flat purple slabs in a shallow isometric view read as nothing on a
-    // phone — compact devices open the plan top-down. A booth is the exception:
-    // its subject is a 2.5 m tent, and from directly above that is a white
+    // Two flat slabs in a shallow isometric view read as nothing on a phone —
+    // compact devices open the plan top-down. A booth is the exception: its
+    // subject is a 2.5 m tent, and from directly above that is a white
     // rectangle, so it keeps the 立體 view its template asked for.
     if (typeof window !== "undefined"
       && window.matchMedia?.("(max-width: 600px)").matches
       && !isBoothProject(project)) {
       this.setView("top");
     }
-    // Best effort now (correct when the editor is already on screen), and
-    // again after the next measurement (correct when it is not).
-    this.framePending = true;
     this.recenterView();
-    if (opts.toast) this.toast(opts.toast);
-    this.notifyUi();
-  }
-
-  private framePending = false;
-
-  /**
-   * Whether the plan still needs framing against real viewport rects.
-   *
-   * Opening a project from 我的專案 adopts it while `#scene` and every rail are
-   * `display:none`, so `recenterView()` picks its zoom from the Home layout —
-   * the plan lands over-zoomed with an edge under the docked rail. `UI` calls
-   * this once per measurement and re-frames when it returns true.
-   */
-  consumePendingFrame(): boolean {
-    if (!this.framePending) return false;
-    this.framePending = false;
-    return true;
   }
 
   // --- array groups ------------------------------------------------------

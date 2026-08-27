@@ -467,6 +467,84 @@ export function createDefaultProject(): Project {
   };
 }
 
+/**
+ * Is there work in this plan that replacing it would throw away?
+ *
+ * Semantic comparison against a pristine `createDefaultProject()`, covering
+ * every user-editable field — not just the arrays. Somebody who spent ten
+ * minutes walking the room, calibrating the tile grid against a real floor
+ * tile, writing what the activity is, or importing a custom asset has done
+ * real work, and has not yet placed a single object.
+ *
+ * This started as an objects/zones/groups/routes test, grew 尺寸線 and 情境,
+ * and each time the missing field was found the same way — somebody lost work.
+ * So it is now written the other way round: everything counts unless it is
+ * still exactly what a brand-new project ships with.
+ *
+ * `id` and the camera `view` are deliberately ignored: ambient, not work.
+ */
+export function planHasContent(project: Project): boolean {
+  const pristine = createDefaultProject();
+
+  if (project.objects.length > 0) return true;
+  if (project.zones.length > 0) return true;
+  if (project.groups.length > 0) return true;
+  if (project.routes.length > 0) return true;
+  if (project.measurements.length > 0) return true;
+  if ((project.scenarios?.length ?? 0) > 0) return true;
+  if ((project.catalogExtras?.length ?? 0) > 0) return true;
+
+  if ((project.description ?? "").trim() !== "") return true;
+  if (project.venuePresetId) return true;
+  if (project.eventDate) return true;
+  if (project.activeScenarioId) return true;
+
+  // Any name other than the blank default is a deliberate user decision.
+  const name = (project.name ?? "").trim();
+  if (name && name !== pristine.name) return true;
+
+  if (!areaConfigEqual(project.classroom, pristine.classroom)) return true;
+  if (!areaConfigEqual(project.corridor, pristine.corridor)) return true;
+  if (!tileConfigEqual(project.tile, pristine.tile)) return true;
+  if (!calibrationEqual(project.calibration, pristine.calibration)) return true;
+  if (!layersEqual(project.layers, pristine.layers)) return true;
+  if (!validationEqual(project.validationSettings, pristine.validationSettings)) return true;
+
+  return false;
+}
+
+function areaConfigEqual(a: AreaConfig, b: AreaConfig): boolean {
+  return a.id === b.id && a.name === b.name && a.length === b.length
+    && a.width === b.width && a.x === b.x && a.z === b.z;
+}
+
+function tileConfigEqual(a: TileConfig, b: TileConfig): boolean {
+  return a.width === b.width && a.depth === b.depth
+    && a.originX === b.originX && a.originZ === b.originZ
+    && a.rotationDeg === b.rotationDeg && a.visible === b.visible;
+}
+
+function calibrationEqual(a: Calibration, b: Calibration): boolean {
+  return a.referenceLength === b.referenceLength
+    && (a.note ?? "") === (b.note ?? "")
+    && !!a.confirmed?.tile === !!b.confirmed?.tile
+    && !!a.confirmed?.door === !!b.confirmed?.door
+    && !!a.confirmed?.room === !!b.confirmed?.room;
+}
+
+function layersEqual(a: LayerVisibility, b: LayerVisibility): boolean {
+  return a.areas === b.areas && a.zones === b.zones && a.objects === b.objects
+    && a.tiles === b.tiles && a.routes === b.routes;
+}
+
+function validationEqual(a: ValidationSettings, b: ValidationSettings): boolean {
+  return a.minAisleWidth === b.minAisleWidth
+    && a.doorFrontClearance === b.doorFrontClearance
+    && a.matWallClearance === b.matWallClearance
+    && a.checkScreenView === b.checkScreenView
+    && a.checkZoneRouteIntrusion === b.checkZoneRouteIntrusion;
+}
+
 export function venueNeedsCalibration(project: Project): boolean {
   return project.venuePresetId === "venue:tku-e310";
 }

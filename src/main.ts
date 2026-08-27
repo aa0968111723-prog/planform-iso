@@ -2,9 +2,8 @@ import "./style.css";
 import { App } from "./app/App";
 import { UI } from "./ui/UI";
 import { Store } from "./state/store";
+import { ProjectRepository } from "./state/projectRepository";
 import { createDefaultProject } from "./core/model";
-import { NULL_PERSISTENCE, ProjectRepository } from "./state/projectRepository";
-import { ProjectSession } from "./state/projectSession";
 import { exportProjectJson } from "./export/exporters";
 
 const canvas = document.getElementById("scene");
@@ -13,39 +12,27 @@ if (!(canvas instanceof HTMLCanvasElement) || !root) {
   throw new Error("app root not found");
 }
 
-// Boot order is load-bearing. The Store starts on the no-op sink so nothing
-// can write over the retained pre-library autosave before the migration has
-// read it; `bootstrap()` then runs the migration, picks the first screen and
-// hydrates the Store — all before `new UI`, because UI reads the open project
-// while it builds. `onProjectOpened` is wired first so the boot hydrate is
-// adopted like any other.
-const store = new Store(createDefaultProject());
-store.setPersistence(NULL_PERSISTENCE);
-const repo = new ProjectRepository();
-const projects = new ProjectSession(store, repo);
-const app = new App(canvas, store, projects);
+// One-time import of the pre-multi-project world: the old single autosave
+// becomes a real project so nobody opens the app to an empty list. The legacy
+// keys are read, never deleted.
+const migrated = ProjectRepository.migrateLegacyIfNeeded();
 
-projects.onProjectOpened = (project, ctx) => app.adoptProject(project, { frame: ctx.interactive });
-const boot = projects.bootstrap();
+// Resume the project that was open, if it still opens. A body that has gone
+// corrupt must land the user on Project Home with an explanation rather than
+// on a white screen.
+const activeId = ProjectRepository.getActiveProjectId();
+const opened = activeId ? ProjectRepository.openProject(activeId) : null;
+const store = new Store(opened?.ok ? opened.project : createDefaultProject());
+if (opened?.ok && activeId) store.bindProject(activeId);
+else ProjectRepository.setActiveProjectId(null);
 
+const app = new App(canvas, store);
 const ui = new UI(app, root);
-projects.onScreenChange = (screen) => ui.setScreen(screen);
-projects.onLibraryChange = () => ui.refreshProjectHome();
-projects.onToast = (msg, undo) => ui.showToast(msg, undo);
-ui.setScreen(boot.screen);
 
-// Index and variant failures are reported here, never through the Store's
-// autosave latch: that latch answers one question only — can I persist the
-// project that is open? — and the 自動儲存失敗 banner below claims exactly that.
-repo.onError = (op) => {
-  app.notifyToast?.(
-    op === "index" ? "專案清單儲存失敗，可能是儲存空間已滿" : "這版場佈儲存失敗，原本的排法仍保留",
-    false,
-  );
-};
-
-if (boot.recovered) {
-  app.notifyToast?.("有專案讀不出來，原始資料已保留在「我的專案」裡", false);
+if (opened && !opened.ok) {
+  app.notifyToast?.("上次開著的專案讀不出來，已回到「我的專案」", false);
+} else if (migrated) {
+  app.notifyToast?.(`舊的場佈已存成專案「${migrated.name}」`, false);
 }
 let autosaveBanner: HTMLElement | null = null;
 store.onStorageError = () => {
@@ -68,16 +55,9 @@ store.onStorageRecovered = () => {
 
 // Flush the debounced autosave when the tab is backgrounded or closed so the
 // last edit before leaving is never lost.
-// Cross-tab: another tab may have created, renamed or deleted a project.
-// `listProjects()` reads the index from disk on every call, so re-rendering is
-// the entire fix.
-window.addEventListener("storage", (e) => {
-  if (e.key?.startsWith("planform-iso:")) ui.refreshProjectHome();
-});
-
-window.addEventListener("pagehide", () => projects.flush());
+window.addEventListener("pagehide", () => store.flushAutosave());
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") projects.flush();
+  if (document.visibilityState === "hidden") store.flushAutosave();
 });
 
 // Browser-test handle: always on in dev (dev builds never ship, and the
@@ -91,8 +71,6 @@ if (e2eEnabled) {
     app,
     ui,
     store,
-    projects,
-    repo,
     workspace: () => ui.workspace,
     catalog: () => app.getCatalog(),
     agent: app.quickAgent,
@@ -130,7 +108,7 @@ function showUpdateBanner(onUpdate: () => void): void {
   btn.textContent = "立即更新";
   btn.className = "chip chip--accent";
   btn.addEventListener("click", () => {
-    projects.flush();
+    store.flushAutosave();
     onUpdate();
   });
   const later = document.createElement("button");

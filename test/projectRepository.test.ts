@@ -1,393 +1,475 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { ProjectRepository } from "../src/state/projectRepository";
-import {
-  PROJECT_INDEX_BACKUP_KEY,
-  PROJECT_INDEX_KEY,
-  projectBackupKey,
-  projectBodyKey,
-  projectLayoutsBackupKey,
-  projectLayoutsKey,
-  type ProjectMeta,
-} from "../src/state/projectStorage";
-import { createDefaultProject, type Project, type Zone } from "../src/core/model";
-
 /**
- * The same four-method stub `storeRecovery.test.ts` installs: no `length`, no
- * `key()`. That is deliberate — every enumeration in the repository has to be
- * gated behind `canEnumerate`, and this stub is what proves it.
+ * The multi-project library. The assertions that matter most are the ones the
+ * brief called out by name: creating a project must never replace another one,
+ * and each project's autosave must be physically isolated from the others.
  */
-function installLocalStorage(): Map<string, string> {
-  const store = new Map<string, string>();
-  (globalThis as { localStorage?: unknown }).localStorage = {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-    clear: () => store.clear(),
-  };
-  return store;
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  LEGACY_AUTOSAVE_KEY,
+  LEGACY_LAYOUTS_KEY,
+  PROJECT_STORAGE_KEYS,
+  ProjectRepository,
+} from "../src/state/projectRepository";
+import { createDefaultProject, uid, type Project } from "../src/core/model";
+import { buildE310GoldenProject } from "../src/core/quickStart";
+import { venuePresetById } from "../src/core/venues";
+
+/** A localStorage good enough to exercise quota failures and key scans. */
+class MemoryStorage implements Storage {
+  private map = new Map<string, string>();
+  /** When set, any setItem whose key matches throws like a full disk. */
+  failOn: RegExp | null = null;
+
+  get length(): number {
+    return this.map.size;
+  }
+  clear(): void {
+    this.map.clear();
+  }
+  getItem(key: string): string | null {
+    return this.map.has(key) ? this.map.get(key)! : null;
+  }
+  key(index: number): string | null {
+    return [...this.map.keys()][index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.map.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    if (this.failOn?.test(key)) throw new DOMException("quota", "QuotaExceededError");
+    this.map.set(key, value);
+  }
 }
 
-function zone(name: string): Zone {
-  return {
-    id: `zone_${name}`,
-    type: "group",
-    name,
-    x: 0,
-    z: 0,
-    width: 2,
-    depth: 2,
-    color: "#38bdf8",
-    locked: false,
-    hidden: false,
-    icon: "◻",
-    capacity: null,
-  };
-}
+let store: MemoryStorage;
 
-function planWith(name: string, zones: Zone[] = []): Project {
+function plan(name: string, objectCount = 0): Project {
   const p = createDefaultProject();
   p.name = name;
-  p.zones = zones;
+  for (let i = 0; i < objectCount; i++) {
+    p.objects.push({
+      id: uid("obj"),
+      kind: "table",
+      assetId: "builtin:table",
+      x: i,
+      z: 0,
+      rotationDeg: 0,
+      width: 1.2,
+      depth: 0.6,
+      height: 0.74,
+      locked: false,
+      surface: "floor",
+      elevation: 0,
+    } as Project["objects"][number]);
+  }
   return p;
 }
 
-describe("ProjectRepository", () => {
-  let backing: Map<string, string>;
-  let repo: ProjectRepository;
+beforeEach(() => {
+  store = new MemoryStorage();
+  vi.stubGlobal("localStorage", store);
+});
 
-  beforeEach(() => {
-    backing = installLocalStorage();
-    repo = new ProjectRepository();
+describe("creating projects", () => {
+  it("starts with an empty library", () => {
+    expect(ProjectRepository.listProjects()).toEqual([]);
+    expect(ProjectRepository.count()).toBe(0);
   });
 
-  it("兩份專案各自一支 key，互不覆蓋", () => {
-    const a = repo.createProject({ project: planWith("A 活動", [zone("報到區")]) });
-    const b = repo.createProject({ project: planWith("B 活動") });
-
+  it("gives every project a stable id that is not its name", () => {
+    const a = ProjectRepository.createProject({ name: "9/24 社課", project: plan("9/24 社課") });
+    const b = ProjectRepository.createProject({ name: "9/24 社課", project: plan("9/24 社課") });
     expect(a.id).not.toBe(b.id);
-
-    const rawA = backing.get(projectBodyKey(a.id))!;
-    const rawB = backing.get(projectBodyKey(b.id))!;
-    expect(rawA).toContain("報到區");
-    expect(rawB).not.toContain("報到區");
-
-    const index = JSON.parse(backing.get(PROJECT_INDEX_KEY)!) as ProjectMeta[];
-    expect(index).toHaveLength(2);
-    expect(repo.listProjects()[0].id).toBe(b.id);
-    expect(repo.listProjects().map((m) => m.name).sort()).toEqual(["A 活動", "B 活動"]);
+    expect(a.id).toMatch(/^prj_/);
+    // Two projects may legitimately share a name; both must survive.
+    expect(ProjectRepository.count()).toBe(2);
   });
 
-  it("body 的 id 一定等於它所在的 key", () => {
-    const foreign = planWith("外來檔案");
-    foreign.id = "proj_from_another_device";
-    const meta = repo.createProject({ project: foreign });
-    const load = repo.openProject(meta.id);
-    expect(load.ok).toBe(true);
-    if (load.ok) expect(load.project.id).toBe(meta.id);
+  it("NEVER replaces an existing project — the whole point of the feature", () => {
+    const a = ProjectRepository.createProject({ name: "期初茶會", project: plan("期初茶會", 3) });
+    const b = ProjectRepository.createProject({ name: "E310 社課", project: plan("E310 社課", 7) });
+    const c = ProjectRepository.createProject({ name: "生命靈數演講", project: plan("生命靈數演講", 1) });
+
+    expect(ProjectRepository.count()).toBe(3);
+    const openedA = ProjectRepository.openProject(a.id);
+    const openedB = ProjectRepository.openProject(b.id);
+    const openedC = ProjectRepository.openProject(c.id);
+    expect(openedA.ok && openedA.project.objects).toHaveLength(3);
+    expect(openedB.ok && openedB.project.objects).toHaveLength(7);
+    expect(openedC.ok && openedC.project.objects).toHaveLength(1);
   });
 
-  it("一份壞掉的專案不會影響其他專案", () => {
-    const a = repo.createProject({ project: planWith("壞掉的") });
-    const b = repo.createProject({ project: planWith("好的", [zone("舞台")]) });
-
-    backing.set(projectBodyKey(a.id), "{broken json!!");
-
-    expect(repo.listProjects()).toHaveLength(2);
-
-    const good = repo.openProject(b.id);
-    expect(good.ok).toBe(true);
-    if (good.ok) expect(good.project.zones).toHaveLength(1);
-
-    const bad = repo.openProject(a.id);
-    expect(bad.ok).toBe(false);
-    if (!bad.ok) expect(bad.reason).toBe("corrupt");
-
-    expect(repo.getMeta(a.id)?.broken).toBe(true);
-    expect(repo.corruptBody(a.id)).toBe("{broken json!!");
-    expect(backing.has(projectBodyKey(a.id))).toBe(false);
-    expect(backing.get(projectBackupKey(a.id))).toBe("{broken json!!");
+  it("records the metadata the project cards need", () => {
+    const e310 = venuePresetById("venue:tku-e310")!;
+    const meta = ProjectRepository.createProject({
+      name: "E310 60 人演講",
+      project: buildE310GoldenProject(e310),
+      venuePresetId: e310.id,
+      venueName: e310.name,
+      eventDate: "2026-09-24",
+    });
+    expect(meta.venuePresetId).toBe("venue:tku-e310");
+    expect(meta.venueName).toContain("E310");
+    expect(meta.eventDate).toBe("2026-09-24");
+    // Head count is derived from the scenario, not asked for twice.
+    expect(meta.participants).toBe(60);
+    expect(meta.createdAt).toBeGreaterThan(0);
   });
 
-  it("第二次開啟壞掉的專案不會覆蓋既有備份", () => {
-    const a = repo.createProject({ project: planWith("壞掉的") });
-    backing.set(projectBodyKey(a.id), "{first corruption");
-    repo.openProject(a.id);
-    expect(backing.get(projectBackupKey(a.id))).toBe("{first corruption");
+  it("lists most-recently-updated first", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A") }, 1000);
+    const b = ProjectRepository.createProject({ name: "B", project: plan("B") }, 2000);
+    expect(ProjectRepository.listProjects().map((p) => p.id)).toEqual([b.id, a.id]);
+    ProjectRepository.saveProject(a.id, plan("A"), 3000);
+    expect(ProjectRepository.listProjects().map((p) => p.id)).toEqual([a.id, b.id]);
+  });
+});
 
-    backing.set(projectBodyKey(a.id), "{second corruption");
-    repo.openProject(a.id);
-    expect(backing.get(projectBackupKey(a.id))).toBe("{first corruption");
-    repo.openProject(a.id);
-    expect(backing.get(projectBackupKey(a.id))).toBe("{first corruption");
+describe("save isolation", () => {
+  it("saving one project physically cannot touch another", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A", 2) });
+    const b = ProjectRepository.createProject({ name: "B", project: plan("B", 5) });
+
+    // Edit A heavily, the way a user would before switching tabs.
+    ProjectRepository.saveProject(a.id, plan("A", 40));
+
+    const openedB = ProjectRepository.openProject(b.id);
+    expect(openedB.ok && openedB.project.objects).toHaveLength(5);
+    const openedA = ProjectRepository.openProject(a.id);
+    expect(openedA.ok && openedA.project.objects).toHaveLength(40);
   });
 
-  it("備份寫入失敗時不會刪掉原始 bytes", () => {
-    const a = repo.createProject({ project: planWith("壞掉的") });
-    backing.set(projectBodyKey(a.id), "{broken json!!");
-
-    (globalThis as { localStorage?: unknown }).localStorage = {
-      getItem: (k: string) => backing.get(k) ?? null,
-      setItem: (k: string, v: string) => {
-        if (k.endsWith(":backup")) throw new Error("QuotaExceededError");
-        backing.set(k, v);
-      },
-      removeItem: (k: string) => void backing.delete(k),
-      clear: () => backing.clear(),
-    };
-
-    const load = repo.openProject(a.id);
-    expect(load.ok).toBe(false);
-    expect(backing.get(projectBodyKey(a.id))).toBe("{broken json!!");
+  it("uses a separate storage key per project body", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A") });
+    const b = ProjectRepository.createProject({ name: "B", project: plan("B") });
+    expect(store.getItem(`${PROJECT_STORAGE_KEYS.bodyPrefix}${a.id}`)).toBeTruthy();
+    expect(store.getItem(`${PROJECT_STORAGE_KEYS.bodyPrefix}${b.id}`)).toBeTruthy();
+    expect(a.id).not.toBe(b.id);
   });
 
-  it("配額滿導致備份寫不進時，corruptBody 仍能退回 primary bytes", () => {
-    const a = repo.createProject({ project: planWith("壞掉的") });
-    const b = repo.createProject({ project: planWith("好的", [zone("舞台")]) });
-    const corrupt = "{broken json for recovery!!";
-    backing.set(projectBodyKey(a.id), corrupt);
+  it("round-trips edits across a simulated reload", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A", 2) });
+    const b = ProjectRepository.createProject({ name: "B", project: plan("B", 5) });
+    ProjectRepository.saveProject(a.id, plan("A", 9));
+    // "Reload": nothing in memory, same storage.
+    const reopenedA = ProjectRepository.openProject(a.id);
+    const reopenedB = ProjectRepository.openProject(b.id);
+    expect(reopenedA.ok && reopenedA.project.objects).toHaveLength(9);
+    expect(reopenedB.ok && reopenedB.project.objects).toHaveLength(5);
+  });
+});
 
-    (globalThis as { localStorage?: unknown }).localStorage = {
-      getItem: (k: string) => backing.get(k) ?? null,
-      setItem: (k: string, v: string) => {
-        if (k.endsWith(":backup")) throw new Error("QuotaExceededError");
-        backing.set(k, v);
-      },
-      removeItem: (k: string) => void backing.delete(k),
-      clear: () => backing.clear(),
-    };
-
-    const load = repo.openProject(a.id);
-    expect(load.ok).toBe(false);
-    if (!load.ok) expect(load.reason).toBe("corrupt");
-
-    expect(backing.get(projectBodyKey(a.id))).toBe(corrupt);
-    expect(backing.has(projectBackupKey(a.id))).toBe(false);
-    expect(repo.corruptBody(a.id)).toBe(corrupt);
-
-    const good = repo.openProject(b.id);
-    expect(good.ok).toBe(true);
-    if (good.ok) expect(good.project.zones).toHaveLength(1);
-    expect(repo.corruptBody(b.id)).toBeNull();
+describe("rename / duplicate / delete", () => {
+  it("renames the card and the body together", () => {
+    const a = ProjectRepository.createProject({ name: "舊名字", project: plan("舊名字") });
+    ProjectRepository.renameProject(a.id, "9/24 禪學社社課");
+    expect(ProjectRepository.getMeta(a.id)!.name).toBe("9/24 禪學社社課");
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok && opened.project.name).toBe("9/24 禪學社社課");
   });
 
-  it("corruptBody 不會把健康的 primary 當成復原資料", () => {
-    const a = repo.createProject({ project: planWith("健康的", [zone("報到區")]) });
-    expect(repo.corruptBody(a.id)).toBeNull();
+  it("refuses a blank rename instead of creating a nameless card", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A") });
+    expect(ProjectRepository.renameProject(a.id, "   ")).toBeNull();
+    expect(ProjectRepository.getMeta(a.id)!.name).toBe("A");
   });
 
-  it("壞掉的 index 會被隔離，不會靜靜清空整個列表", () => {
-    repo.createProject({ project: planWith("A") });
-    backing.set(PROJECT_INDEX_KEY, "[not json");
-
-    expect(() => repo.listProjects()).not.toThrow();
-    expect(repo.listProjects()).toEqual([]);
-    expect(backing.get(PROJECT_INDEX_BACKUP_KEY)).toBe("[not json");
-    expect(repo.corruptIndex()).toBe("[not json");
-  });
-
-  it("index 自我修復只會新增，不會刪掉沒有 body 的條目", () => {
-    const a = repo.createProject({ project: planWith("A") });
-    const b = repo.createProject({ project: planWith("B") });
-    const c: ProjectMeta = { id: "proj_c", name: "C", createdAt: 1, updatedAt: 1, broken: true };
-    backing.set(projectBackupKey(c.id), "{broken}");
-    const index = JSON.parse(backing.get(PROJECT_INDEX_KEY)!) as ProjectMeta[];
-    backing.set(PROJECT_INDEX_KEY, JSON.stringify([...index, c]));
-
-    const listed = repo.listProjects();
-    expect(listed).toHaveLength(3);
-    expect(listed.map((m) => m.id).sort()).toEqual([a.id, b.id, c.id].sort());
-    expect(repo.getMeta(c.id)?.broken).toBe(true);
-  });
-
-  it("一份壞掉的排法不會清空整個專案的排法", () => {
-    const a = repo.createProject({ project: planWith("A", [zone("報到區")]) });
-    repo.writeLayout(a.id, "A版", planWith("A", [zone("報到區")]));
-    repo.writeLayout(a.id, "B版", planWith("A", [zone("舞台")]));
-
-    backing.set(projectLayoutsKey(a.id), "{broken layouts");
-    repo.deleteLayout(a.id, "A版");
-
-    expect(backing.get(projectLayoutsBackupKey(a.id))).toBe("{broken layouts");
-    expect(repo.corruptLayouts(a.id)).toBe("{broken layouts");
-    expect(backing.get(projectLayoutsKey(a.id))).toBeUndefined();
-  });
-
-  it("載入排法版本後，body 的 id 仍等於目前專案的 id", () => {
-    const a = repo.createProject({ project: planWith("原名", [zone("報到區")]) });
-    repo.writeLayout(a.id, "A版", planWith("存檔時的名字", [zone("報到區")]));
-    repo.renameProject(a.id, "改過的名字");
-
-    const loaded = repo.readLayout(a.id, "A版")!;
-    expect(loaded.id).toBe(a.id);
-    expect(loaded.name).toBe("改過的名字");
-    expect(loaded.zones).toHaveLength(1);
-
-    const stored = JSON.parse(backing.get(projectLayoutsKey(a.id))!) as Record<
-      string,
-      { body: Record<string, unknown> }
-    >;
-    expect(Object.keys(stored["A版"].body)).not.toContain("id");
-    expect(Object.keys(stored["A版"].body)).not.toContain("name");
-  });
-
-  it("複製會整份帶走，並產生新的 id", () => {
-    const source = planWith("原專案", [zone("報到區")]);
-    source.objects = [];
-    source.routes = [];
-    source.groups = [];
-    source.scenarios = [
-      {
-        id: "sc_1",
-        name: "情境",
-        participantCount: 120,
-        arrivalWindowSeconds: 600,
-        arrivalProfile: "uniform",
-        profiles: [],
-        stations: [],
-        seed: 1,
-        settings: { speedMetersPerSecond: 1 },
-      },
-    ];
-    source.activeScenarioId = "sc_1";
-    const a = repo.createProject({ project: source });
-    repo.writeLayout(a.id, "A版", source);
-
-    const copy = repo.duplicateProject(a.id)!;
+  it("duplicates the whole plan into an independent project", () => {
+    const a = ProjectRepository.createProject({
+      name: "8/25 社課",
+      project: plan("8/25 社課", 12),
+      venuePresetId: "venue:tku-e310",
+    });
+    const copy = ProjectRepository.duplicateProject(a.id, "9/1 社課")!;
     expect(copy.id).not.toBe(a.id);
-    expect(copy.name).toBe("原專案 副本");
-    expect(copy.participants).toBe(120);
+    expect(copy.name).toBe("9/1 社課");
+    expect(copy.venuePresetId).toBe("venue:tku-e310");
 
-    const loaded = repo.openProject(copy.id);
-    expect(loaded.ok).toBe(true);
-    if (loaded.ok) {
-      expect(loaded.project.id).toBe(copy.id);
-      expect(loaded.project.zones).toHaveLength(1);
-      expect(loaded.project.scenarios).toHaveLength(1);
-    }
-    expect(repo.listLayouts(copy.id)).toEqual(["A版"]);
-
-    const edited = repo.openProject(copy.id);
-    if (edited.ok) {
-      edited.project.zones.push(zone("新的區域"));
-      repo.saveProject(copy.id, edited.project);
-    }
-    const originalAfter = repo.openProject(a.id);
-    expect(originalAfter.ok).toBe(true);
-    if (originalAfter.ok) expect(originalAfter.project.zones).toHaveLength(1);
+    // Editing the copy must not disturb the original.
+    ProjectRepository.saveProject(copy.id, plan("9/1 社課", 1));
+    const original = ProjectRepository.openProject(a.id);
+    expect(original.ok && original.project.objects).toHaveLength(12);
   });
 
-  it("刪除會保留 tombstone，還原是 byte-identical", () => {
-    const a = repo.createProject({ project: planWith("A", [zone("報到區")]) });
-    repo.writeLayout(a.id, "A版", planWith("A", [zone("報到區")]));
-    const body = backing.get(projectBodyKey(a.id))!;
-    const layouts = backing.get(projectLayoutsKey(a.id))!;
-
-    const tomb = repo.deleteProject(a.id)!;
-    expect(tomb.body).toBe(body);
-    expect(tomb.layouts).toBe(layouts);
-    expect(backing.has(projectBodyKey(a.id))).toBe(false);
-    expect(repo.listProjects()).toHaveLength(0);
-
-    expect(repo.restoreProject(tomb)).toBe(true);
-    expect(backing.get(projectBodyKey(a.id))).toBe(body);
-    expect(backing.get(projectLayoutsKey(a.id))).toBe(layouts);
-    expect(repo.listProjects().map((m) => m.id)).toEqual([a.id]);
+  it("defaults the copy's name rather than silently colliding", () => {
+    const a = ProjectRepository.createProject({ name: "社課", project: plan("社課") });
+    expect(ProjectRepository.duplicateProject(a.id)!.name).toBe("社課 複本");
   });
 
-  it("刪除壞掉的專案時，隔離的 bytes 也會被保留與還原", () => {
-    const a = repo.createProject({ project: planWith("壞掉的") });
-    backing.set(projectBodyKey(a.id), "{broken json!!");
-    repo.openProject(a.id);
+  it("deletes and can undo the delete", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A", 4) });
+    ProjectRepository.createProject({ name: "B", project: plan("B") });
+    const snapshot = ProjectRepository.deleteProject(a.id)!;
+    expect(ProjectRepository.count()).toBe(1);
+    expect(ProjectRepository.openProject(a.id).ok).toBe(false);
 
-    const tomb = repo.deleteProject(a.id)!;
-    expect(tomb.body).toBeNull();
-    expect(tomb.backup).toBe("{broken json!!");
-    expect(backing.has(projectBackupKey(a.id))).toBe(false);
-
-    expect(repo.restoreProject(tomb)).toBe(true);
-    expect(backing.get(projectBackupKey(a.id))).toBe("{broken json!!");
-    expect(repo.getMeta(a.id)?.broken).toBe(true);
+    expect(ProjectRepository.restoreProject(snapshot)).toBe(true);
+    expect(ProjectRepository.count()).toBe(2);
+    const restored = ProjectRepository.openProject(a.id);
+    expect(restored.ok && restored.project.objects).toHaveLength(4);
   });
 
-  it("另一個分頁新增的專案不會被本頁的 flushIndex 蓋掉", () => {
-    const a = repo.createProject({ project: planWith("A") });
-    const b = repo.createProject({ project: planWith("B") });
+  it("clears the active pointer when the open project is deleted", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A") });
+    ProjectRepository.setActiveProjectId(a.id);
+    ProjectRepository.deleteProject(a.id);
+    // Otherwise the app boots pointing at nothing and shows a white screen.
+    expect(ProjectRepository.getActiveProjectId()).toBeNull();
+  });
+});
 
-    const onDisk = JSON.parse(backing.get(PROJECT_INDEX_KEY)!) as ProjectMeta[];
-    const c: ProjectMeta = { id: "proj_other_tab", name: "另一個分頁", createdAt: 5, updatedAt: 5 };
-    backing.set(PROJECT_INDEX_KEY, JSON.stringify([...onDisk, c]));
-    backing.set(projectBodyKey(c.id), JSON.stringify({ ...planWith("另一個分頁"), id: c.id }));
-
-    const load = repo.openProject(a.id);
-    if (load.ok) {
-      load.project.name = "A 改過";
-      repo.saveProject(a.id, load.project);
-    }
-    repo.flushIndex();
-
-    const merged = JSON.parse(backing.get(PROJECT_INDEX_KEY)!) as ProjectMeta[];
-    expect(merged.map((m) => m.id).sort()).toEqual([a.id, b.id, c.id].sort());
-    expect(merged.find((m) => m.id === a.id)?.name).toBe("A 改過");
+describe("active project pointer", () => {
+  it("round-trips", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A") });
+    ProjectRepository.setActiveProjectId(a.id);
+    expect(ProjectRepository.getActiveProjectId()).toBe(a.id);
   });
 
-  it("index 寫入失敗時不會留下截斷的 index，也會在下次 flush 重試", () => {
-    const a = repo.createProject({ project: planWith("A") });
-    const before = backing.get(PROJECT_INDEX_KEY)!;
+  it("ignores a pointer at a project that no longer exists", () => {
+    ProjectRepository.setActiveProjectId("prj_ghost");
+    expect(ProjectRepository.getActiveProjectId()).toBeNull();
+  });
+});
 
-    let failing = true;
-    const errors: Array<"index" | "layout"> = [];
-    repo.onError = (op) => errors.push(op);
-    (globalThis as { localStorage?: unknown }).localStorage = {
-      getItem: (k: string) => backing.get(k) ?? null,
-      setItem: (k: string, v: string) => {
-        if (failing && k === PROJECT_INDEX_KEY) throw new Error("QuotaExceededError");
-        backing.set(k, v);
+describe("legacy migration", () => {
+  it("turns the old single autosave into a real project, keeping its name", () => {
+    store.setItem(LEGACY_AUTOSAVE_KEY, JSON.stringify(plan("E310 社課 9/24", 6)));
+    const meta = ProjectRepository.migrateLegacyIfNeeded()!;
+    expect(meta.name).toBe("E310 社課 9/24");
+    const opened = ProjectRepository.openProject(meta.id);
+    expect(opened.ok && opened.project.objects).toHaveLength(6);
+  });
+
+  it("names an untitled legacy plan 我的舊場佈", () => {
+    store.setItem(LEGACY_AUTOSAVE_KEY, JSON.stringify(createDefaultProject()));
+    expect(ProjectRepository.migrateLegacyIfNeeded()!.name).toBe("我的舊場佈");
+  });
+
+  it("never deletes the legacy keys — the old data stays on disk", () => {
+    const legacy = JSON.stringify(plan("舊的", 2));
+    store.setItem(LEGACY_AUTOSAVE_KEY, legacy);
+    store.setItem(LEGACY_LAYOUTS_KEY, JSON.stringify({ "方案 A": plan("方案 A") }));
+    ProjectRepository.migrateLegacyIfNeeded();
+    expect(store.getItem(LEGACY_AUTOSAVE_KEY)).toBe(legacy);
+    expect(store.getItem(LEGACY_LAYOUTS_KEY)).toBeTruthy();
+  });
+
+  it("runs once, not on every boot", () => {
+    store.setItem(LEGACY_AUTOSAVE_KEY, JSON.stringify(plan("舊的")));
+    expect(ProjectRepository.migrateLegacyIfNeeded()).not.toBeNull();
+    expect(ProjectRepository.migrateLegacyIfNeeded()).toBeNull();
+    expect(ProjectRepository.count()).toBe(1);
+  });
+
+  it("does not import on top of an existing library", () => {
+    ProjectRepository.createProject({ name: "已經有的", project: plan("已經有的") });
+    store.setItem(LEGACY_AUTOSAVE_KEY, JSON.stringify(plan("舊的")));
+    expect(ProjectRepository.migrateLegacyIfNeeded()).toBeNull();
+    expect(ProjectRepository.count()).toBe(1);
+  });
+
+  it("leaves a corrupt legacy blob alone instead of importing garbage", () => {
+    store.setItem(LEGACY_AUTOSAVE_KEY, "{ this is not json");
+    expect(ProjectRepository.migrateLegacyIfNeeded()).toBeNull();
+    expect(ProjectRepository.count()).toBe(0);
+    expect(store.getItem(LEGACY_AUTOSAVE_KEY)).toBe("{ this is not json");
+  });
+
+  it("retries later if storage was full during migration", () => {
+    store.setItem(LEGACY_AUTOSAVE_KEY, JSON.stringify(plan("舊的")));
+    store.failOn = /projects:prj_/;
+    expect(() => ProjectRepository.migrateLegacyIfNeeded()).not.toThrow();
+    expect(ProjectRepository.hasMigrated()).toBe(false);
+    store.failOn = null;
+    expect(ProjectRepository.migrateLegacyIfNeeded()).not.toBeNull();
+  });
+});
+
+describe("corrupt recovery", () => {
+  it("one broken project does not take the library down", () => {
+    const good = ProjectRepository.createProject({ name: "好的", project: plan("好的", 3) });
+    const bad = ProjectRepository.createProject({ name: "壞掉的", project: plan("壞掉的") });
+    store.setItem(`${PROJECT_STORAGE_KEYS.bodyPrefix}${bad.id}`, "<<not json>>");
+
+    // Project Home still lists both.
+    expect(ProjectRepository.listProjects()).toHaveLength(2);
+    // The good one still opens.
+    expect(ProjectRepository.openProject(good.id).ok).toBe(true);
+    // The bad one reports itself instead of throwing.
+    const opened = ProjectRepository.openProject(bad.id);
+    expect(opened.ok).toBe(false);
+    expect(!opened.ok && opened.reason).toBe("corrupt");
+    expect(!opened.ok && opened.meta?.name).toBe("壞掉的");
+  });
+
+  it("keeps the unreadable bytes so the data can still be rescued", () => {
+    const bad = ProjectRepository.createProject({ name: "壞掉的", project: plan("壞掉的") });
+    store.setItem(`${PROJECT_STORAGE_KEYS.bodyPrefix}${bad.id}`, "<<not json>>");
+    ProjectRepository.openProject(bad.id);
+    expect(ProjectRepository.corruptBody(bad.id)).toBe("<<not json>>");
+  });
+
+  it("rebuilds the library from bodies when the index itself is corrupt", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A") });
+    ProjectRepository.createProject({ name: "B", project: plan("B") });
+    store.setItem(PROJECT_STORAGE_KEYS.index, "<<not json>>");
+    const recovered = ProjectRepository.listProjects();
+    expect(recovered).toHaveLength(2);
+    expect(recovered.map((p) => p.name).sort()).toEqual(["A", "B"]);
+    expect(ProjectRepository.openProject(a.id).ok).toBe(true);
+  });
+
+  it("drops an unusable index row without hiding the rest", () => {
+    ProjectRepository.createProject({ name: "A", project: plan("A") });
+    const index = JSON.parse(store.getItem(PROJECT_STORAGE_KEYS.index)!);
+    index.entries.push({ nonsense: true });
+    store.setItem(PROJECT_STORAGE_KEYS.index, JSON.stringify(index));
+    expect(ProjectRepository.listProjects()).toHaveLength(1);
+  });
+
+  it("reports a missing body rather than throwing", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A") });
+    store.removeItem(`${PROJECT_STORAGE_KEYS.bodyPrefix}${a.id}`);
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok).toBe(false);
+    expect(!opened.ok && opened.reason).toBe("missing");
+  });
+});
+
+describe("storage unavailable", () => {
+  it("degrades to an empty library instead of crashing the app", () => {
+    vi.stubGlobal("localStorage", {
+      get length() {
+        throw new Error("blocked");
       },
-      removeItem: (k: string) => void backing.delete(k),
-      clear: () => backing.clear(),
-    };
-
-    repo.renameProject(a.id, "改過的名字");
-    expect(errors).toContain("index");
-    expect(backing.get(PROJECT_INDEX_KEY)).toBe(before);
-
-    failing = false;
-    repo.flushIndex();
-    const after = JSON.parse(backing.get(PROJECT_INDEX_KEY)!) as ProjectMeta[];
-    expect(after.find((m) => m.id === a.id)?.name).toBe("改過的名字");
+      getItem() {
+        throw new Error("blocked");
+      },
+      setItem() {
+        throw new Error("blocked");
+      },
+      removeItem() {
+        throw new Error("blocked");
+      },
+      key() {
+        throw new Error("blocked");
+      },
+      clear() {
+        throw new Error("blocked");
+      },
+    });
+    expect(ProjectRepository.listProjects()).toEqual([]);
+    expect(ProjectRepository.getActiveProjectId()).toBeNull();
+    expect(() => ProjectRepository.setActiveProjectId("x")).not.toThrow();
+    expect(ProjectRepository.migrateLegacyIfNeeded()).toBeNull();
   });
 
-  it("重新命名以 body 為準，index 只是鏡子", () => {
-    const a = repo.createProject({ project: planWith("原名") });
-    expect(repo.renameProject(a.id, "新名字")).toBe(true);
-
-    const load = repo.openProject(a.id);
-    expect(load.ok).toBe(true);
-    if (load.ok) expect(load.project.name).toBe("新名字");
-    expect(repo.getMeta(a.id)?.name).toBe("新名字");
-
-    backing.set(projectBodyKey(a.id), "{broken");
-    expect(repo.renameProject(a.id, "再改一次")).toBe(false);
-    expect(repo.getMeta(a.id)?.name).toBe("新名字");
+  it("surfaces a full disk on create rather than making an empty card", () => {
+    store.failOn = /projects:prj_/;
+    expect(() => ProjectRepository.createProject({ name: "A", project: plan("A") })).toThrow();
+    expect(ProjectRepository.count()).toBe(0);
   });
 
-  it("不存在的專案回報 missing，而不是 corrupt", () => {
-    const load = repo.openProject("proj_never_existed");
-    expect(load.ok).toBe(false);
-    if (!load.ok) {
-      expect(load.reason).toBe("missing");
-      expect(load.meta).toBeNull();
+  it("reports a failed save instead of pretending it worked", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: plan("A", 1) });
+    store.failOn = new RegExp(`projects:${a.id}$`);
+    expect(ProjectRepository.saveProject(a.id, plan("A", 99))).toBe(false);
+    // The last good body is still there.
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok && opened.project.objects).toHaveLength(1);
+  });
+});
+
+describe("real club sizes fit in localStorage", () => {
+  it("a season of E310 projects stays well under the budget", () => {
+    const e310 = venuePresetById("venue:tku-e310")!;
+    for (let week = 0; week < 20; week++) {
+      ProjectRepository.createProject({
+        name: `E310 社課 第 ${week + 1} 週`,
+        project: buildE310GoldenProject(e310),
+        venuePresetId: e310.id,
+      });
     }
+    let bytes = 0;
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i)!;
+      bytes += key.length + (store.getItem(key)?.length ?? 0);
+    }
+    expect(ProjectRepository.count()).toBe(20);
+    // 20 full golden scenarios — comfortably inside a 5 MB origin quota.
+    expect(bytes).toBeLessThan(1_000_000);
+  });
+});
+
+describe("card metadata stays true to the plan", () => {
+  it("drops the stale venue name when the plan changes venue", () => {
+    const a = ProjectRepository.createProject({
+      name: "A",
+      project: plan("A"),
+      venuePresetId: "venue:tku-e310",
+      venueName: "E310＋走廊（待現場校正）",
+    });
+    expect(ProjectRepository.getMeta(a.id)!.venueName).toContain("E310");
+
+    const moved = plan("A");
+    moved.venuePresetId = "venue:blank";
+    ProjectRepository.saveProject(a.id, moved);
+
+    const meta = ProjectRepository.getMeta(a.id)!;
+    expect(meta.venuePresetId).toBe("venue:blank");
+    // Otherwise the card would still read "E310" for a plan that is not in E310.
+    expect(meta.venueName).toBeUndefined();
   });
 
-  it("blocked storage 下每個讀取都回傳空值而不是丟例外", () => {
-    (globalThis as { localStorage?: unknown }).localStorage = undefined;
-    const blocked = new ProjectRepository();
-    expect(blocked.listProjects()).toEqual([]);
-    expect(blocked.hasProjects()).toBe(false);
-    expect(blocked.getActiveProjectId()).toBeNull();
-    expect(blocked.openProject("proj_x").ok).toBe(false);
-    expect(() => blocked.setActiveProjectId("proj_x")).not.toThrow();
-    expect(() => blocked.createProject()).toThrow();
+  it("keeps the head count in step with the plan's scenario", () => {
+    const e310 = venuePresetById("venue:tku-e310")!;
+    const a = ProjectRepository.createProject({ name: "A", project: buildE310GoldenProject(e310) });
+    expect(ProjectRepository.getMeta(a.id)!.participants).toBe(60);
+
+    const smaller = buildE310GoldenProject(e310);
+    smaller.scenarios[0].participantCount = 25;
+    ProjectRepository.saveProject(a.id, smaller);
+    expect(ProjectRepository.getMeta(a.id)!.participants).toBe(25);
+  });
+
+  it("gives distinct ids even when two are created in the same millisecond", () => {
+    const ids = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      ids.add(ProjectRepository.createProject({ name: `P${i}`, project: plan(`P${i}`) }, 1234).id);
+    }
+    expect(ids.size).toBe(200);
+  });
+});
+
+describe("the stored body is the source of truth for the name", () => {
+  it("stamps the project name over a template's own name", () => {
+    // Regression: buildE310GoldenProject names itself 「E310 演講活動（範例）」.
+    // The wizard's name must win, and — critically — the body that gets STORED
+    // must already carry it, or the editor opens under the template name and
+    // the next autosave writes that name back over the user's.
+    const e310 = venuePresetById("venue:tku-e310")!;
+    const template = buildE310GoldenProject(e310);
+    expect(template.name).toBe("E310 演講活動（範例）");
+
+    const meta = ProjectRepository.createProject({
+      name: "9/24 禪學社社課",
+      project: template,
+      venuePresetId: e310.id,
+    });
+    expect(meta.name).toBe("9/24 禪學社社課");
+    const opened = ProjectRepository.openProject(meta.id);
+    expect(opened.ok && opened.project.name).toBe("9/24 禪學社社課");
+  });
+
+  it("does not mutate the caller's object", () => {
+    const source = plan("原本的名字");
+    ProjectRepository.createProject({ name: "新名字", project: source });
+    expect(source.name).toBe("原本的名字");
+  });
+
+  it("falls back to the plan's own name when none is given", () => {
+    const meta = ProjectRepository.createProject({ name: "", project: plan("計畫自己的名字") });
+    expect(meta.name).toBe("計畫自己的名字");
   });
 });

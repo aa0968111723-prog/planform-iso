@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../src/state/store";
-import { ProjectRepository } from "../src/state/projectRepository";
-import { projectBodyKey, readLegacyCorruptBackup } from "../src/state/projectStorage";
 import { createDefaultProject } from "../src/core/model";
+import { ProjectRepository } from "../src/state/projectRepository";
 
 function installLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -21,10 +20,29 @@ describe("autosave recovery", () => {
     backing = installLocalStorage();
   });
 
-  it("舊版存檔的損壞備份仍然拿得到（更多 → 下載損壞前的備份）", () => {
-    expect(readLegacyCorruptBackup()).toBeNull();
-    backing.set("planform-iso:autosave-backup", "{broken json!!");
-    expect(readLegacyCorruptBackup()).toBe("{broken json!!");
+  it("loads a healthy autosave without flagging recovery", () => {
+    const p = createDefaultProject();
+    p.name = "健康專案";
+    backing.set("planform-iso:autosave", JSON.stringify(p));
+    const { project, recovered } = Store.loadAutosaveWithRecovery();
+    expect(recovered).toBe(false);
+    expect(project?.name).toBe("健康專案");
+  });
+
+  it("corrupt autosave → backup kept, recovery flagged, no throw", () => {
+    backing.set("planform-iso:autosave", "{broken json!!");
+    const { project, recovered } = Store.loadAutosaveWithRecovery();
+    expect(project).toBeNull();
+    expect(recovered).toBe(true);
+    expect(Store.corruptBackup()).toBe("{broken json!!");
+    // The broken blob no longer shadows the next healthy autosave.
+    expect(backing.get("planform-iso:autosave")).toBeUndefined();
+  });
+
+  it("empty storage is a normal first run, not a recovery", () => {
+    const { project, recovered } = Store.loadAutosaveWithRecovery();
+    expect(project).toBeNull();
+    expect(recovered).toBe(false);
   });
 
   it("flushAutosave writes immediately", () => {
@@ -87,59 +105,112 @@ describe("autosave recovery", () => {
     store.saveAutosave();
     expect(recovered).toBe(1);
   });
+});
 
-  it("setPersistence 後，autosave 寫到專案 key，舊的 autosave key 不再被寫", () => {
-    const repo = new ProjectRepository();
-    const meta = repo.createProject({ name: "A 活動" });
+describe("per-project autosave isolation", () => {
+  beforeEach(() => {
+    installLocalStorage();
+    ProjectRepository._resetForTests();
+  });
+
+  it("edits land in the bound project, not the global autosave key", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
     const store = new Store(createDefaultProject());
-    store.setPersistence(repo.persistenceFor(meta.id));
-
-    store.mutate((p) => (p.name = "改過的名字"), { history: false });
+    store.bindProject(a.id);
+    store.mutate((p) => (p.name = "只屬於 A"), { history: false });
     store.flushAutosave();
 
-    expect(backing.get(projectBodyKey(meta.id))).toContain("改過的名字");
-    expect(backing.has("planform-iso:autosave")).toBe(false);
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok && opened.project.name).toBe("只屬於 A");
+    // The legacy single-project key must not be written any more.
+    expect(localStorage.getItem("planform-iso:autosave")).toBeNull();
   });
 
-  it("setPersistence 後儲存場佈不會改掉專案名稱；legacy 模式仍會", () => {
-    const repo = new ProjectRepository();
-    const meta = repo.createProject({ name: "A 活動" });
+  it("editing A then switching to B leaves A intact — the P0 the brief named", () => {
+    const a = ProjectRepository.createProject({ name: "E310 30 人社課", project: createDefaultProject() });
+    const b = ProjectRepository.createProject({ name: "E310 60 人演講", project: createDefaultProject() });
     const store = new Store(createDefaultProject());
-    store.setPersistence(repo.persistenceFor(meta.id));
-    store.mutate((p) => (p.name = "A 活動"), { history: false });
 
-    expect(store.saveNamedLayout("晚宴版")).toBe(true);
-    expect(store.getState().name).toBe("A 活動");
-    expect(store.listLayouts()).toEqual(["晚宴版"]);
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "A 的地墊改過了"), { history: false });
 
-    // The legacy branch keeps its old behaviour, and is still exercised, so it
-    // cannot rot behind the branch production actually takes.
-    const legacy = new Store(createDefaultProject());
-    expect(legacy.saveNamedLayout("晚宴版")).toBe(true);
-    expect(legacy.getState().name).toBe("晚宴版");
+    // Switch to B and edit it.
+    const openedB = ProjectRepository.openProject(b.id);
+    expect(openedB.ok).toBe(true);
+    if (openedB.ok) store.openBoundProject(b.id, openedB.project);
+    store.mutate((p) => (p.description = "B 的報到改過了"), { history: false });
+    store.flushAutosave();
+
+    // Back to A: it must be exactly as it was left.
+    const backToA = ProjectRepository.openProject(a.id);
+    expect(backToA.ok && backToA.project.description).toBe("A 的地墊改過了");
+    const stillB = ProjectRepository.openProject(b.id);
+    expect(stillB.ok && stillB.project.description).toBe("B 的報到改過了");
   });
 
-  it("配額爆掉只回報一次，且 index 失敗不會謊稱已恢復", () => {
+  it("switching projects clears undo history rather than letting A undo into B", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const b = ProjectRepository.createProject({ name: "B", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.name = "A 改過"));
+    expect(store.canUndo()).toBe(true);
+
+    const openedB = ProjectRepository.openProject(b.id);
+    if (openedB.ok) store.openBoundProject(b.id, openedB.project);
+    expect(store.canUndo()).toBe(false);
+    expect(store.getProjectId()).toBe(b.id);
+  });
+
+  it("a full disk while bound still reports through onStorageError", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
     let errors = 0;
-    let recovered = 0;
-    const store = new Store(createDefaultProject());
-    // A sink whose body write always fails. The index write beside it may well
-    // succeed — it must never be allowed to clear the banner.
-    store.setPersistence({
-      saveProject: () => {
-        throw new Error("QuotaExceededError");
-      },
-      listLayouts: () => [],
-      readLayout: () => null,
-      writeLayout: () => undefined,
-      deleteLayout: () => undefined,
-    });
-    store.onStorageError = () => errors++;
-    store.onStorageRecovered = () => recovered++;
-
-    store.saveAutosave();
-    store.saveAutosave();
+    store.onStorageError = () => void errors++;
+    const real = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (k: string, v: string) => {
+      if (k.includes("projects:prj_")) throw new Error("QuotaExceededError");
+      real(k, v);
+    };
+    store.mutate((p) => (p.name = "寫不進去"), { history: false });
+    store.flushAutosave();
     expect(errors).toBe(1);
-    expect(recovered).toBe(0);
+  });
+});
+
+describe("leaving a project stops it being written to", () => {
+  beforeEach(() => {
+    installLocalStorage();
+    ProjectRepository._resetForTests();
+  });
+
+  it("unbinding means a later flush cannot rewrite the project you left", () => {
+    const a = ProjectRepository.createProject({ name: "離開的專案", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "編輯過"), { history: false });
+    store.flushAutosave();
+
+    // Leave: flush, then unbind (what App.leaveProject does).
+    store.flushAutosave();
+    store.bindProject(null);
+
+    // Something external changes the stored body — a corrupt blob, or another
+    // tab. The pagehide flush must NOT put the stale in-memory copy back.
+    localStorage.setItem(`planform-iso:projects:${a.id}`, "<<not json>>");
+    store.flushAutosave();
+    expect(localStorage.getItem(`planform-iso:projects:${a.id}`)).toBe("<<not json>>");
+  });
+
+  it("the last edit before leaving is still committed", () => {
+    const a = ProjectRepository.createProject({ name: "A", project: createDefaultProject() });
+    const store = new Store(createDefaultProject());
+    store.bindProject(a.id);
+    store.mutate((p) => (p.description = "離開前最後一筆"), { history: false });
+    // No explicit flush: bindProject(null) must flush the pending write itself.
+    store.bindProject(null);
+    const opened = ProjectRepository.openProject(a.id);
+    expect(opened.ok && opened.project.description).toBe("離開前最後一筆");
   });
 });
