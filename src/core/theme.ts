@@ -49,6 +49,16 @@ export const MAT_COLORS = {
 
 export const THEME_STORAGE_KEY = "planform.theme";
 
+/**
+ * The pill `TextLabel` paints behind every sprite label (see scene/label.ts).
+ *
+ * Exported so contrast can be asserted against the thing the text actually
+ * sits on. Reading it as floor text is how the E310 room and corridor names
+ * ended up at 1.04:1 — a dark slate chosen for a light floor, painted on a
+ * dark pill.
+ */
+export const LABEL_PILL_RGBA = { r: 15, g: 23, b: 42, a: 0.72 } as const;
+
 export interface ScenePalette {
   /** Canvas clear colour. */
   background: number;

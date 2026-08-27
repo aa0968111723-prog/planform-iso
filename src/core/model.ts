@@ -545,22 +545,46 @@ function validationEqual(a: ValidationSettings, b: ValidationSettings): boolean 
     && a.checkZoneRouteIntrusion === b.checkZoneRouteIntrusion;
 }
 
+/**
+ * Does this plan's geometry still need measuring on site?
+ *
+ * This used to be `venuePresetId === "venue:tku-e310"` — one hard-coded id.
+ * Every other template therefore exported with no 尺寸待現場校正 footer and
+ * reported 「檢查通過」, including the outdoor booth, whose every dimension is
+ * an estimate read off a photograph. A plan that says 檢查通過 over invented
+ * measurements is the exact thing REFERENCE_MAPPING forbids.
+ *
+ * So it is data now: a template that ships estimates says so by putting a note
+ * on `calibration`, and that note is what raises the flag. The E310 id stays as
+ * well, because projects saved before templates carried notes have none.
+ */
 export function venueNeedsCalibration(project: Project): boolean {
-  return project.venuePresetId === "venue:tku-e310";
+  if (project.venuePresetId === "venue:tku-e310") return true;
+  return (project.calibration.note ?? "").trim() !== "";
+}
+
+/**
+ * Which on-site confirmations this venue can actually offer.
+ *
+ * A door is only a calibration reference if the venue has one. An outdoor
+ * booth has no door, so demanding a door measurement would leave it
+ * permanently 待校正 with no way to finish — which trains people to ignore
+ * the warning, and then it stops working for E310 too.
+ */
+function calibrationChecks(project: Project): ("tile" | "door" | "room")[] {
+  const hasDoor = project.objects.some((o) => o.kind === "door" && !o.hidden);
+  return hasDoor ? ["tile", "door", "room"] : ["tile", "room"];
 }
 
 export function calibrationComplete(project: Project): boolean {
   if (!venueNeedsCalibration(project)) return true;
   const c = project.calibration.confirmed;
-  return c.tile === true && c.door === true && c.room === true;
+  return calibrationChecks(project).every((k) => c[k] === true);
 }
 
 export function calibrationPendingLabels(project: Project): string[] {
   if (!venueNeedsCalibration(project)) return [];
   const c = project.calibration.confirmed;
-  return [
-    c.tile ? null : "地磚",
-    c.door ? null : "門寬",
-    c.room ? null : "已知距離",
-  ].filter((x): x is string => x !== null);
+  const label = { tile: "地磚", door: "門寬", room: "已知距離" } as const;
+  return calibrationChecks(project).filter((k) => !c[k]).map((k) => label[k]);
 }

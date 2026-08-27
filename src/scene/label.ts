@@ -4,6 +4,7 @@ import {
   Sprite,
   SpriteMaterial,
 } from "three";
+import { LABEL_PILL_RGBA } from "../core/theme";
 
 /**
  * A billboarded text label rendered from a 2D canvas. Kept small and cached
@@ -49,7 +50,8 @@ export class TextLabel {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.fillStyle = "rgba(15,23,42,0.72)";
+    // One source for the pill colour, so contrast can be tested against it.
+    ctx.fillStyle = `rgba(${LABEL_PILL_RGBA.r},${LABEL_PILL_RGBA.g},${LABEL_PILL_RGBA.b},${LABEL_PILL_RGBA.a})`;
     roundRect(ctx, 2, 2, this.canvas.width - 4, this.canvas.height - 4, this.canvas.height / 5);
     ctx.fill();
     ctx.font = `700 ${this.fontSize}px system-ui, 'Noto Sans TC', sans-serif`;

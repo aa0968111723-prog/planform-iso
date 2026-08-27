@@ -509,7 +509,13 @@ export class SceneManager {
       areaGroup.add(floor);
       areaGroup.add(outdoor ? this.buildAreaOutline(area) : this.buildAreaWalls(area));
       const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
-      label.set(area.name, e310 && this.theme === "light" ? "#43534f" : (area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor));
+      // Always the pale palette colour. TextLabel paints its own dark pill
+      // behind the text (label.ts: rgba(15,23,42,.72)), so the label's contrast
+      // is against the PILL, never against the floor. An E310-only override to
+      // a dark slate `#43534f` was reading it as floor text and landed at
+      // 1.04:1 — the room and corridor names were invisible on the venue the
+      // release uses as its visual baseline.
+      label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
       label.sprite.scale.set(1.55, 0.36, 1);
       label.sprite.position.set(area.x + 1.25, 0.14, area.z + 0.55);
       areaGroup.add(label.sprite);
