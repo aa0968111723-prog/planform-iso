@@ -29,11 +29,11 @@ test("✦ AI 幫我 says it is offline rules, not a cloud model", async ({ page 
 test("掃描場地 and 模擬 say what they actually do", async ({ page }) => {
   await openWorkspace(page);
 
-  await page.locator('.navbtn[data-nav="site"]').click();
-  const advanced = page.locator("summary", { hasText: "進階設定" });
-  await advanced.click();
+  // Desktop has no bottom nav — workflows live in the topbar chips.
+  await page.locator(".topbar .group--flows").getByRole("button", { name: "場地" }).click();
+  await page.locator(".left > .section", { hasText: "進階設定" }).locator(".section__title").first().click();
   await expect(page.locator(".venue-capture")).toContainText("示範偵測（假資料）");
 
-  await page.locator('.navbtn[data-nav="route"]').click();
-  await expect(page.locator(".sim-panel")).toContainText("沒有 A–E 報到流程精靈");
+  await page.locator(".topbar .group--flows").getByRole("button", { name: "動線" }).click();
+  await expect(page.locator(".sim-panel-host")).toContainText("沒有 A–E 報到流程精靈");
 });
