@@ -712,19 +712,23 @@ export class SceneManager {
           // Opaque EVA with slight piece-to-piece variation reads as the
           // photographed continuous puzzle-mat field, not a transparent zone.
           //
-          // The emissive term is CALIBRATED, not guessed: with the measured
-          // instance colours and this scene's lighting, `MAT_COLORS.base` at
-          // 0.65 renders `#2fae9f`, the closest match to the photographed
-          // `#29bcaa` out of the intensities tried (0.16 → `#00342b`,
-          // 0.35 → `#008173`, 0.5 → `#099b8c`, 0.65 → `#2fae9f`, 0.8 → `#47bcad`).
-          // It is deliberately below the old 0.92, which washed out the diffuse
-          // term entirely and flattened the field into a paint patch — hiding
-          // the thickness and seams the plan is supposed to show.
+          // `vertexColors` must stay OFF. `setColorAt` writes `instanceColor`,
+          // which three.js applies on its own; turning on `vertexColors` also
+          // switches on USE_COLOR, and with no `color` attribute on the merged
+          // geometry the albedo multiplies by (0,0,0) — the field renders
+          // BLACK and only an emissive term can be seen at all. Measured:
+          // vertexColors on + no emissive → `#516672` (the floor showing
+          // through dead mats); vertexColors off + no emissive → `#27aa94`,
+          // the photographed teal, straight out of real lighting.
+          //
+          // That is why the emissive is now a whisper instead of 0.65: the
+          // diffuse term is doing the work again, so thickness, seams and the
+          // shaded side of each piece are visible instead of washed flat.
           material.color.set("#ffffff");
           material.roughness = 0.96;
-          material.vertexColors = true;
+          material.vertexColors = false;
           material.emissive.set(MAT_COLORS.base);
-          material.emissiveIntensity = 0.65;
+          material.emissiveIntensity = 0.12;
         }
         const mesh = new InstancedMesh(geom, material, Math.max(members.length, 1));
         mesh.count = members.length;
