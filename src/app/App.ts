@@ -38,6 +38,14 @@ import {
 } from "../core/interactionCompile";
 import { INTERACTION_PRESETS, interactionPreset } from "../core/interactionPresets";
 import {
+  applyTemplate,
+  deleteTemplate,
+  listTemplates,
+  loadTemplate,
+  saveTemplate,
+  type TemplateMeta,
+} from "../state/templateLibrary";
+import {
   catalogFromProject,
   createDefaultScenario,
   resolveScenarioBindings,
@@ -1630,6 +1638,51 @@ export class App {
     this.session.simCompare = null;
     this.notifyUi();
     return result;
+  }
+
+  // --- my own templates -----------------------------------------------------
+
+  myFlowTemplates(): TemplateMeta[] {
+    return listTemplates();
+  }
+
+  saveFlowTemplate(name: string): boolean {
+    const template = this.state.interaction;
+    if (!template) return false;
+    const meta = saveTemplate(template, name);
+    this.toast(`已存成範本「${meta.name}」`, true);
+    this.notifyUi();
+    return true;
+  }
+
+  deleteFlowTemplate(id: string): void {
+    deleteTemplate(id);
+    this.notifyUi();
+  }
+
+  /**
+   * Apply a saved template to THIS plan.
+   *
+   * Stations come back by name onto the plan's own positions; anything this
+   * plan has no station for lands in the middle of the room and is named in a
+   * toast, because a station quietly parked at the origin would put every
+   * walking distance in the run somewhere the room is not.
+   */
+  applyMyFlowTemplate(id: string): boolean {
+    const saved = loadTemplate(id);
+    if (!saved) {
+      this.toast("這個範本讀不出來，可能已經損毀");
+      return false;
+    }
+    const centre = this.centerOfClassroom();
+    const existing = this.state.interaction?.stations ?? [];
+    const { template, unplaced } = applyTemplate(saved, { stations: existing, centre });
+    this.store.mutate((p) => { p.interaction = template; });
+    this.resetFlowRun();
+    this.toast(unplaced.length
+      ? `已套用「${template.name}」，${unplaced.join("、")} 放在場地中央，請拖到正確位置`
+      : `已套用「${template.name}」`, true);
+    return true;
   }
 
   /** ▶ 演練一次 — the numbers first; the walk-through is the separate ▶ 播放走位. */

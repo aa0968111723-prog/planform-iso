@@ -69,6 +69,7 @@ function structureSignature(app: App): string {
         stations: t.stations.map((st) => [st.id, st.name, st.staffRoleId ?? "", st.selfService ?? false, st.parallelServers, st.queueCapacity]),
         staff: t.staff.map((r) => [r.id, r.name, r.count]),
         audience: t.audience,
+        mine: app.myFlowTemplates().map((m) => [m.id, m.name, m.stepCount]),
       }
       : null,
     quick: t ? null : s.simQuick,
@@ -528,13 +529,34 @@ function resultBlocks(app: App): HTMLElement[] {
 }
 
 function presetSection(app: App, t: InteractionTemplate): HTMLElement {
+  const mine = app.myFlowTemplates();
+  let saveName = t.name;
   const body: HTMLElement[] = [
+    el("div", { class: "row wrap" }, [
+      textField("存成我的範本", saveName, (v) => { saveName = v; }),
+      button("儲存", () => app.saveFlowTemplate(saveName), "btn btn--ghost"),
+    ]),
+    ...(mine.length
+      ? [
+        el("div", { class: "subhead", text: "我的範本" }),
+        ...mine.map((m) => el("div", { class: "list__row" }, [
+          el("span", { class: "list__grow", text: `${m.name}（${m.stepCount} 步）` }),
+          button("套用", () => {
+            if (t.steps.length > 1 && !confirm(`套用「${m.name}」會蓋掉現在的 ${t.steps.length} 個步驟，確定嗎？`)) return;
+            app.applyMyFlowTemplate(m.id);
+          }, "chip chip--sm"),
+          button("刪除", () => app.deleteFlowTemplate(m.id), "chip chip--sm"),
+        ])),
+        el("p", { class: "hint", text: "範本只記住流程與站點名字，不記座標——換一個場地套用時，會用同名的站點位置。" }),
+      ]
+      : []),
+    el("div", { class: "subhead", text: "起手範本" }),
     el("div", { class: "row wrap" }, app.flowPresets().map((p) =>
       button(p.name, () => {
         if (t.steps.length > 1 && !confirm(`套用「${p.name}」會蓋掉現在的 ${t.steps.length} 個步驟，確定嗎？`)) return;
         app.applyFlowPreset(p.id);
       }, "chip chip--sm"))),
-    el("p", { class: "hint", text: "套用範本會換掉整份流程；現在這份如果還要用，先匯出專案。" }),
+    el("p", { class: "hint", text: "套用範本會換掉整份流程；現在這份如果還要用，先存成我的範本。" }),
   ];
   if (app.activeScenario()) {
     body.push(button("回到快速設定", () => app.discardFlow(), "chip chip--sm"));

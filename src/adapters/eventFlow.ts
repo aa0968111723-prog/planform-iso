@@ -10,11 +10,12 @@ import {
   buildCheckinPaymentVariants,
   compareScenarioVariants,
   runDiscreteEvent,
+  runInteraction,
   runScenarioMedian,
   type ScenarioVariantCompareResult,
   type SimulationResult,
 } from "../core/eventFlow";
-import { createDefaultScenario, resolveScenarioBindings } from "../core/migrate";
+import { createDefaultScenario, resolveScenarioBindings, resolveTemplateBindings } from "../core/migrate";
 import type {
   EventScenario,
   Project,
@@ -135,6 +136,10 @@ export const eventFlowAdapter = {
   },
 
   simulateScenario(project: Project, participants: number): SimulationSummary {
+    // A plan with its own step list is simulated as that step list. Asking the
+    // agent about a booth and getting an answer about an invented check-in
+    // desk is the kind of confident wrong answer that costs trust.
+    if (project.interaction) return this.simulateInteraction(project);
     const scn = resolveScenarioBindings(project, ensureScenario(project, participants));
     if (!scn.stations.length) {
       return routeWalkSummary(project, participants);
@@ -154,6 +159,31 @@ export const eventFlowAdapter = {
       message: result.summaryLines.join(" "),
       result,
       scenarioId: scn.id,
+    };
+  },
+
+  /** The plan's own interaction flow, run and summarised the same way. */
+  simulateInteraction(project: Project): SimulationSummary {
+    const template = project.interaction;
+    if (!template) {
+      return { available: false, reason: "no-interaction", message: "這份計畫沒有互動流程。" };
+    }
+    const bound = resolveTemplateBindings(project, template);
+    const result = runInteraction(bound, { sampleDt: 5 });
+    const bottlenecks = result.stations
+      .filter((s) => s.maxQueue >= 3)
+      .map((s) => {
+        const st = bound.stations.find((x) => x.id === s.stationId);
+        return { x: st?.x ?? 0, z: st?.z ?? 0, count: s.maxQueue, name: s.name };
+      });
+    return {
+      available: true,
+      participants: result.participantCount,
+      bottleneckCount: bottlenecks.length,
+      bottlenecks,
+      message: result.summaryLines.join(" "),
+      result,
+      scenarioId: bound.id,
     };
   },
 

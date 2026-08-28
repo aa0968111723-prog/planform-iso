@@ -1039,6 +1039,9 @@ export class UI {
         planChoice("地墊 / 座位圖", "mats", "地墊座位圖"),
         planChoice("工作分區圖", "zones", "工作分區圖"),
         planChoice("物資清單圖", "inventory", "物資清單", { orientation: "portrait" }),
+        ...(this.app.hasFlow()
+          ? [planChoice("互動流程圖", "flow", "互動流程", { orientation: "portrait" })]
+          : []),
         planChoice("夥伴觀看圖", "partner", "夥伴觀看圖", { simplify: true, dims: false }),
       ]),
       el("div", { class: "subhead", text: "各組任務圖（只顯示該組需要的）" }),

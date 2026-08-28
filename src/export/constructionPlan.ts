@@ -10,6 +10,7 @@ import { assetDef } from "../core/assets";
 import { catalogFromProject } from "../core/migrate";
 import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
 import { calibrationComplete, venueNeedsCalibration, type Project, type SceneObject } from "../core/model";
+import { audienceJoiners, stationForStep, normalizeTemplate } from "../core/interactionCompile";
 import { groupFootprint, groupMembers, memberLabel } from "../core/arrays";
 
 import { doorSweep, facingVec, rectCorners } from "../core/placement";
@@ -27,7 +28,7 @@ function font(spec: string): string {
   return `${adjusted} system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
 }
 
-export type PlanPreset = "full" | "mats" | "route" | "zones" | "staff" | "partner" | "inventory";
+export type PlanPreset = "full" | "mats" | "route" | "zones" | "staff" | "partner" | "inventory" | "flow";
 export type PageSize = "a4" | "a3" | "phone";
 export type PageOrientation = "landscape" | "portrait";
 
@@ -101,6 +102,7 @@ const PRESET_TITLE: Record<PlanPreset, string> = {
   staff: "工作人員配置圖",
   partner: "夥伴觀看圖",
   inventory: "物資清單",
+  flow: "互動流程",
 };
 
 interface Xform { X: (wx: number) => number; Y: (wz: number) => number; s: number }
@@ -195,6 +197,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const opt = { ...DEFAULT_OPTIONS, ...options };
   activePageSize = opt.page;
   if (opt.preset === "inventory") return renderInventorySheet(project, opt);
+  if (opt.preset === "flow") return renderFlowSheet(project, opt);
   project = applyRoleFilter(project, opt.roleFilter, opt.simplify);
   const bounds = contentBounds(project);
   const minX = bounds.minX;
@@ -330,6 +333,154 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
 }
 
 /** 物資清單圖 — the item list is the page, with a small locator plan. */
+/** One printed line of the 互動流程 sheet. */
+export interface FlowSheetLine {
+  kind: "head" | "step" | "detail" | "option" | "note";
+  text: string;
+}
+
+/**
+ * The interaction flow, as words on paper.
+ *
+ * Printed, not drawn. A volunteer standing at the table needs to read what to
+ * say and what to hand over; a box-and-arrow diagram of the same thing is
+ * slower to read and impossible to check against.
+ *
+ * What is deliberately NOT here: step ids, `next` targets, option weights,
+ * station ids, seeds. Those are how the SIMULATION walks the flow. Nobody
+ * running the booth needs them, and printing them would turn a briefing sheet
+ * into a data dump. The one place a jump appears is where the flow genuinely
+ * branches out of order, and then it is named, not numbered.
+ */
+export function flowSheetLines(project: Project): FlowSheetLine[] {
+  const template = project.interaction;
+  if (!template) return [];
+  const n = normalizeTemplate(template);
+  const lines: FlowSheetLine[] = [];
+
+  const funnel = audienceJoiners(template.audience);
+  const minutes = Math.round(template.audience.windowSeconds / 60);
+  lines.push({
+    kind: "head",
+    text: template.audience.stopRate < 1
+      ? `${minutes} 分鐘內經過 ${funnel.passed} 人，預計 ${funnel.joined} 人會參加`
+      : `${funnel.joined} 人，${minutes} 分鐘內到齊`,
+  });
+  if (template.staff.length) {
+    lines.push({
+      kind: "head",
+      text: `人手：${template.staff.map((r) => `${r.name} ${r.count} 人`).join("、")}`,
+    });
+  }
+
+  const supplies = new Set<string>();
+  let inherited: string | null = null;
+  template.steps.forEach((step, i) => {
+    const station = stationForStep(step, inherited, n);
+    inherited = station?.id ?? inherited;
+    const where = station ? `（${station.name}）` : "";
+    const seconds = step.avgSeconds > 0 ? ` · 約 ${Math.round(step.avgSeconds)} 秒` : "";
+    lines.push({ kind: "step", text: `${i + 1}. ${step.name}${where}${seconds}` });
+    if (step.prompt) lines.push({ kind: "detail", text: step.prompt });
+
+    if (step.branch?.kind === "chance") {
+      for (const option of step.branch.options) {
+        if (!option.label.trim()) continue;
+        lines.push({ kind: "option", text: `· ${option.label}${option.prompt ? `：${option.prompt}` : ""}` });
+      }
+    } else if (step.branch?.kind === "match") {
+      for (const rule of step.branch.rules) {
+        lines.push({ kind: "option", text: `· ${rule.label}${rule.prompt ? `：${rule.prompt}` : ""}` });
+      }
+      if (step.branch.otherwise) {
+        lines.push({ kind: "option", text: `· 其他：${step.branch.otherwise.label}` });
+      }
+    }
+
+    for (const item of step.supplies ?? []) supplies.add(item);
+  });
+
+  if (supplies.size) {
+    lines.push({ kind: "head", text: "要帶的東西" });
+    for (const item of supplies) lines.push({ kind: "option", text: `· ${item}` });
+  }
+  if (template.note) lines.push({ kind: "note", text: template.note });
+  return lines;
+}
+
+function renderFlowSheet(project: Project, opt: PlanOptions): string {
+  const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
+  const phone = opt.page === "phone";
+  const scale = Math.max(1, opt.scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(cw * scale);
+  canvas.height = Math.round(ch * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, cw, ch);
+  drawHeader(ctx, project, cw, PRESET_TITLE.flow);
+
+  const lines = flowSheetLines(project);
+  let y = phone ? 132 : 112;
+  const bottom = ch - 56;
+  const columnWidth = phone ? cw - 64 : cw / 2 - 56;
+  let x = 32;
+  let omitted = 0;
+
+  if (!lines.length) {
+    ctx.fillStyle = "#64748b";
+    ctx.font = font("400 16px");
+    ctx.fillText("這份計畫還沒有互動流程 — 到「模擬」分頁排一份。", 32, y);
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (y > bottom) {
+      // One column on a phone, two on paper: move over rather than truncate.
+      if (!phone && x < cw / 2) {
+        x = cw / 2 + 24;
+        y = 112;
+      } else {
+        omitted = lines.length - i;
+        break;
+      }
+    }
+    if (line.kind === "head") {
+      ctx.fillStyle = TEXT;
+      ctx.font = font("700 18px");
+      y += 8;
+    } else if (line.kind === "step") {
+      ctx.fillStyle = TEXT;
+      ctx.font = font("700 16px");
+      y += 6;
+    } else if (line.kind === "option") {
+      ctx.fillStyle = "#334155";
+      ctx.font = font("400 15px");
+    } else if (line.kind === "note") {
+      ctx.fillStyle = "#b45309";
+      ctx.font = font("400 14px");
+      y += 8;
+    } else {
+      ctx.fillStyle = "#475569";
+      ctx.font = font("400 15px");
+    }
+    const indent = line.kind === "option" ? 18 : line.kind === "detail" ? 14 : 0;
+    ctx.fillText(fitText(ctx, line.text, columnWidth - indent), x + indent, y);
+    y += line.kind === "head" ? 30 : 26;
+  }
+
+  if (omitted) {
+    ctx.fillStyle = "#b45309";
+    ctx.font = font("700 15px");
+    ctx.fillText(`還有 ${omitted} 行沒印出來 — 用 A3 或手機版分兩張`, 32, ch - 34);
+  }
+
+  if (phone) drawPhoneFooter(ctx, project, cw, ch, "flow");
+  drawCalibrationFooter(ctx, project, cw, ch);
+  return canvas.toDataURL("image/png");
+}
+
 function renderInventorySheet(project: Project, opt: PlanOptions): string {
   const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
   const phone = opt.page === "phone";

@@ -951,8 +951,8 @@ if (!p.interaction) delete p.interaction;
 | 4. 引擎（`runDiscreteEvent` 變包裝） | ✅ | `7c8b42c`；parity fixture 零改動通過，`test/interactionFlow.test.ts` 13 條 |
 | 5. 遷移與 preset | ✅ | 常數搬家、`templateFromBooth`、`migrateInteraction`、`resolveTemplateBindings`、`interactionPresets.ts`；10 個變異全部被擋下 |
 | 6. 面板（一個取代兩個） | ✅ | `flowPanel.ts`；刪掉 `boothFlow.ts` / `boothSimPanel.ts` / `simPanel.ts`；`boothFlow.test.ts` 的 14 條性質全部改寫進 `interactionFlow.test.ts` |
-| 7. 匯出與模板庫 | ⬜ | |
-| 8. 教室的選擇性升級 | ⬜ | |
+| 7. 匯出與模板庫 | ✅ | 場刊「互動流程」印出來的一頁（`flowSheetLines` 純函式可測）、`state/templateLibrary.ts`；8 個變異全部被擋下 |
+| 8. 教室的選擇性升級 | ✅ | 快速設定底下的唯讀步驟表＋「改成我自己的流程」；轉換後第一次跑逐位相同（測試證明）；`adapters/eventFlow.ts` 對 AI 曝露互動流程 |
 
 ### Step 5 做到一半才發現、計畫裡沒寫的三件事
 
