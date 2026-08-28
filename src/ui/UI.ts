@@ -1004,7 +1004,11 @@ export class UI {
       }
     }
 
-    return section("互動道具", rows, defs.length > 0);
+    // Open even when empty. It used to open only once you ALREADY had a
+    // prop, so on a fresh project the whole feature — including
+    // 「＋ 新增道具」 — was behind a closed summary, hidden exactly when
+    // someone is looking for it.
+    return section("互動道具", rows);
   }
 
   private openPropStudio(edit?: PropDefinition, instanceCount = 0): void {

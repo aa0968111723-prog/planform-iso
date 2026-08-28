@@ -138,6 +138,21 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
     }
   };
 
+  /**
+   * The last row is the end, and says so.
+   *
+   * The wiring contract requires a fragment to be sealed with an explicit
+   * `next: null` — a row that falls through would leak into steps it does not
+   * own. Re-applied whenever the list changes shape.
+   */
+  const sealSteps = (d: PropDefinition) => {
+    const steps = d.interaction?.steps ?? [];
+    steps.forEach((st, i) => {
+      if (i === steps.length - 1) st.next = null;
+      else if (st.next === null) delete st.next;
+    });
+  };
+
   const ensureInteraction = () => {
     if (draft.interaction) return;
     draft.interaction = {
@@ -231,6 +246,10 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
   };
 
   const render = () => {
+    // Every edit rebuilds the whole card, which resets its scroll to the top —
+    // so typing a step name near the bottom threw you back up to 「想做什麼？」
+    // on each keystroke. Keep the reader where they were.
+    const scrollTop = card.scrollTop;
     card.innerHTML = "";
     card.append(el("div", { class: "quickstart__title", text: editing ? `編輯「${draft.name}」` : "新增道具" }));
 
@@ -244,6 +263,18 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
     // --- 類型 (new only): start from a preset ------------------------------
     if (!editing) {
       card.append(el("div", { class: "subhead", text: "想做什麼？" }));
+      // Starting from nothing is the point of the Studio, and it was the one
+      // option with no chip: the presets filled the row and a blind tester,
+      // told not to use the ready-made 抽卡箱, hunted for the nearest preset
+      // instead of just starting. It is still the default draft — now it says so.
+      card.append(el("div", { class: "row wrap" }, [
+        button("⬜ 從空白開始（自己設計）", () => {
+          if (hasTypedContent() && !window.confirm("會清掉你目前打的內容，確定？")) return;
+          draft = { ...blankDraft(), id: draft.id };
+          touch();
+        }, "chip chip--sm chip--primary"),
+        el("span", { class: "hint", text: "或從一個現成的開始改：" }),
+      ]));
       card.append(el("div", { class: "row wrap" }, PROP_PRESETS.map((p) =>
         button(`${p.icon ?? "▦"} ${p.name}`, () => {
           // Tapping a second chip replaces the whole draft. Someone who has
@@ -372,8 +403,58 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
           num("人數", seed.staffRole.count, 1, (v) => { seed.staffRole!.count = Math.max(0, Math.round(v)); touch(); }, 0),
         ]));
       }
+      // --- 這個道具會發生什麼事 (the ordered step list) -------------------
+      interactionRows.push(el("div", { class: "subhead", text: "會發生什麼事" }));
+      interactionRows.push(el("p", { class: "hint", text: "由上往下，一步一步。抽卡、寫字、投進箱子、拍照——想幾步就幾步。" }));
+      const steps = draft.interaction.steps;
+      steps.forEach((st, i) => {
+        const isFace = st.branch?.kind === "chance";
+        interactionRows.push(el("div", { class: "list__row" }, [
+          el("span", { class: "readout__label", text: `${i + 1}.` }),
+          textField("這一步做什麼", st.name, (v) => { st.name = v || st.name; touch(); }),
+          num("大約幾秒", st.avgSeconds, 5, (v) => { st.avgSeconds = Math.max(0, v); touch(); }, 0),
+          textField("說明", st.prompt ?? "", (v) => { st.prompt = v || undefined; touch(); }),
+          ...(isFace ? [el("span", { class: "hint", text: "（這一步會抽到不同結果）" })] : []),
+          ...(i > 0 ? [button("↑", () => {
+            [steps[i - 1], steps[i]] = [steps[i], steps[i - 1]];
+            touch();
+          }, "chip chip--sm")] : []),
+          ...(i < steps.length - 1 ? [button("↓", () => {
+            [steps[i], steps[i + 1]] = [steps[i + 1], steps[i]];
+            touch();
+          }, "chip chip--sm")] : []),
+          ...(steps.length > 1 ? [button("刪", () => {
+            steps.splice(i, 1);
+            // The list is walked in order, so the last row must be the end.
+            sealSteps(draft);
+            touch();
+          }, "chip chip--sm")] : []),
+        ]));
+      });
+      interactionRows.push(el("div", { class: "row wrap" }, [
+        button("＋ 加一步", () => {
+          steps.push({ id: `s${uid("x")}`, name: "下一步", avgSeconds: 15 });
+          sealSteps(draft);
+          touch();
+        }, "btn btn--ghost"),
+        ...(faceStep(draft) ? [] : [button("＋ 加一步「會抽到不同結果」", () => {
+          steps.push({
+            id: `s${uid("x")}`, name: "抽一張", avgSeconds: 15,
+            branch: {
+              kind: "chance", record: "result",
+              options: Array.from({ length: 4 }, (_, i) => ({
+                id: `o${i + 1}`, label: `選項 ${i + 1}`, weight: 1, color: "#38bdf8",
+              })),
+            },
+          });
+          sealSteps(draft);
+          touch();
+        }, "btn btn--ghost")]),
+      ]));
+
       const step = faceStep(draft);
       if (step?.branch?.kind === "chance") {
+        interactionRows.push(el("div", { class: "subhead", text: `「${step.name}」會抽到什麼` }));
         interactionRows.push(el("div", { class: "row wrap" }, [
           el("span", { class: "readout__label", text: "面數：" }),
           ...[2, 4, 6, 8, 10, 12].map((n) => button(String(n), () => { setFaceCount(n); touch(); },
@@ -401,7 +482,11 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
         touch();
       }, "chip chip--sm"));
     }
-    card.append(section("互動", interactionRows, !!draft.interaction));
+    // Open even when the prop has no interaction yet — that is exactly when
+    // 「＋ 加上互動」 needs to be findable. Collapsing it until an
+    // interaction exists is why a blind tester reported 「找不到地方排
+    // 抽卡→寫祝福→投入→離開」: the panel was shut.
+    card.append(section("互動", interactionRows));
 
     // --- actions -----------------------------------------------------------
     const actions: HTMLElement[] = [];
@@ -427,6 +512,7 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
     }, "btn btn--ghost"));
     actions.push(el("div", { class: "quickstart__foot" }, [button("關閉", close, "chip chip--sm")]));
     card.append(...actions);
+    card.scrollTop = scrollTop;
   };
 
   render();
