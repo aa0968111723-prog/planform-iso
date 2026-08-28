@@ -9,10 +9,17 @@ async function openE310(page: Page, participants: number): Promise<void> {
     localStorage.setItem("planform-iso:boot", "editor");
   });
   await page.goto("/");
-  await page.locator(".quickstart__card button", { hasText: "自訂 E310" }).click();
+  // Three steps since the multi-project system landed: name it, pick where,
+  // say how many. This helper still spoke the single-screen wizard's language
+  // and had been failing at its first click ever since.
   const card = page.locator(".quickstart__card");
+  await card.locator(".quickstart__name").fill(`E310 ${participants} 人`);
+  await card.locator("button", { hasText: "下一步：選場地" }).click();
+  // 🎤 is the "pick this venue and keep going" button; the ⚡ one below it
+  // skips straight to the finished 60-person example.
+  await card.locator("button", { hasText: "🎤" }).click();
   await card.locator('input[type="number"]').fill(String(participants));
-  await card.locator("button", { hasText: "建立場佈" }).click();
+  await card.locator("button", { hasText: "建立專案" }).click();
   await settle(page);
 }
 

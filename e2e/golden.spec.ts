@@ -238,7 +238,11 @@ test.describe("Golden Flow 4 — E310 30 人實景場佈", () => {
   test("一鍵實景範例 → 綠色連續巧拼 → 走廊淨空 → 匯出", async ({ page }) => {
     await openFresh(page);
     await nameProject(page, "E310 演講範例專案");
-    await page.locator(".quickstart__card button", { hasText: "E310 演講範例（60 人）" }).click();
+    // 「一鍵實景範例」 is the 實景推薦起點 — the club's own 30-person class, the
+    // one with no payment desk. This line had drifted onto the 60-person
+    // LECTURE example, whose plan legitimately does collect fees, so the
+    // no-payment assertion below could never have passed.
+    await page.locator(".quickstart__card button", { hasText: "建立 30 人實景場佈" }).click();
     await settle(page);
 
     const p = await probeProject(page);
@@ -261,7 +265,8 @@ test.describe("Golden Flow 5 — E310 60 人壓力流程", () => {
 
   test("壓力範例 → 模擬完成", async ({ page }) => {
     await openFresh(page);
-    await page.locator(".quickstart__card button", { hasText: "壓力測試：E310 60 人流程" }).click();
+    await nameProject(page, "E310 壓力測試");
+    await page.locator(".quickstart__card button", { hasText: "直接用 E310 演講範例（60 人）" }).click();
     await settle(page);
     await page.locator(".topbar .chip", { hasText: "動線" }).first().click();
     await settle(page);
