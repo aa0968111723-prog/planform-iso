@@ -9,12 +9,31 @@
 
 import { describe, expect, it } from "vitest";
 import { runInteraction } from "../src/core/eventFlow";
-import { blankTemplate } from "../src/core/interactionCompile";
+import { blankTemplate, templateFromBooth } from "../src/core/interactionCompile";
+import {
+  BOOTH_SIM_PRESETS,
+  createBoothStations,
+  defaultBoothParams,
+} from "../src/core/boothCatalog";
+import { boothVenuePreset, createProjectFromVenuePreset } from "../src/core/venues";
+import { createDefaultProject } from "../src/core/model";
 import type {
+  BoothParams,
   InteractionStation,
   InteractionStep,
   InteractionTemplate,
 } from "../src/core/model";
+
+function installLocalStorage(): void {
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+}
+installLocalStorage();
 
 function station(id: string, over: Partial<InteractionStation> = {}): InteractionStation {
   return {
@@ -327,5 +346,144 @@ describe("零秒的步驟是一個決定，不是一次服務", () => {
     const asked = free.steps!.find((s) => s.stepId === "ask")!;
     expect(asked.entered).toBe(30);
     expect(played.entered).toBeLessThan(30);
+  });
+});
+
+/**
+ * Every property `test/boothFlow.test.ts` used to guard.
+ *
+ * The second engine is gone; these are the same claims, made about the same
+ * booth, through the one engine that is left. They are here rather than in a
+ * booth-shaped file because none of them is about booths: they are about
+ * queues, staffing and giving up.
+ */
+describe("攤位：舊引擎守住的每一條性質", () => {
+  const booth = () => createProjectFromVenuePreset(boothVenuePreset(), "攤位").booth!;
+  const withParams = (over: Partial<BoothParams>) =>
+    templateFromBooth({ ...booth(), params: { ...defaultBoothParams("normal"), ...over } });
+  const peakWith = (over: Partial<BoothParams> = {}) =>
+    templateFromBooth({ ...booth(), params: { ...defaultBoothParams("peak"), ...over } });
+  const run = (t: InteractionTemplate) => runInteraction(t, { sampleDt: 30 });
+
+  it("is reproducible: the same plan gives byte-identical statistics", () => {
+    const t = withParams({});
+    const a = run(t);
+    const b = run(t);
+    expect(JSON.stringify(b)).toEqual(JSON.stringify(a));
+  });
+
+  it("does not mutate the template it was handed", () => {
+    const t = withParams({ visitorCount: 5, arrivalPerMin: 20 });
+    const before = JSON.stringify(t);
+    run(t);
+    expect(JSON.stringify(t)).toEqual(before);
+  });
+
+  it("queues longer at 尖峰 than at 正常", () => {
+    expect(run(peakWith()).maxQueue).toBeGreaterThan(run(withParams({})).maxQueue);
+  });
+
+  it("waits longer when the conversation takes twice as long", () => {
+    const base = run(withParams({}));
+    const slow = run(withParams({ talkSeconds: defaultBoothParams("normal").talkSeconds * 2 }));
+    expect(slow.avgWaitSeconds).toBeGreaterThan(base.avgWaitSeconds);
+  });
+
+  it("loses fewer visitors when the desk goes from 3 to 6 people", () => {
+    const three = run(peakWith({ deskStaff: 3 }));
+    const six = run(peakWith({ deskStaff: 6 }));
+    expect(three.leftEarly).toBeGreaterThan(0);
+    expect(six.leftEarly).toBeLessThan(three.leftEarly);
+  });
+
+  it("loses nobody when 等太久會離開 is switched off", () => {
+    const params = { ...defaultBoothParams("peak"), balk: false };
+    const result = run(templateFromBooth({ ...booth(), params }));
+    expect(result.leftEarly).toBe(0);
+    expect(result.completed).toBe(params.visitorCount);
+  });
+
+  it("loses more visitors as the queue area shrinks", () => {
+    const roomy = run(peakWith({ queueCapacity: 8 }));
+    const tight = run(peakWith({ queueCapacity: 2 }));
+    expect(tight.leftEarly).toBeGreaterThan(roomy.leftEarly);
+  });
+
+  it("takes a disabled station out of the journey and leaves the rest working", () => {
+    const b = booth();
+    const gameId = b.stations.find((st) => st.boothType === "game")!.id;
+    const before = run(templateFromBooth(b));
+    expect(before.stations.find((st) => st.stationId === gameId)!.served).toBeGreaterThan(0);
+
+    b.stations = b.stations.map((st) => (st.id === gameId ? { ...st, enabled: false } : st));
+    const after = run(templateFromBooth(b));
+    expect(after.stations.find((st) => st.stationId === gameId)!.served).toBe(0);
+    for (const st of after.stations) {
+      if (st.stationId === gameId || st.name === "排隊等待") continue;
+      expect(st.served, `${st.name} stopped working`).toBeGreaterThan(0);
+    }
+    expect(after.completed).toBeGreaterThan(0);
+  });
+
+  it("never reports more completions than arrivals, nor a rate outside 0–1", () => {
+    for (const t of [withParams({}), peakWith(), peakWith({ deskStaff: 1 })]) {
+      const r = run(t);
+      expect(r.completed).toBeLessThanOrEqual(r.participantCount);
+      expect(r.participantCount).toBeLessThanOrEqual(t.audience.count);
+      for (const st of r.stations) {
+        expect(st.utilization).toBeGreaterThanOrEqual(0);
+        expect(st.utilization).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("finishes: everybody who arrives eventually leaves, one way or the other", () => {
+    const r = run(peakWith());
+    expect(r.completed + r.leftEarly + r.unfinished).toBe(r.participantCount);
+    const last = r.playback[r.playback.length - 1];
+    expect(last.agents.every((a) => a.state === "done" || a.state === "pending")).toBe(true);
+  });
+
+  it("reports live crowd states the scene can colour", () => {
+    const r = run(withParams({}));
+    const busiest = r.playback.reduce((best, frame) => {
+      const active = frame.agents.filter((a) => a.state !== "pending" && a.state !== "done").length;
+      return active > best.active ? { frame, active } : best;
+    }, { frame: r.playback[0], active: -1 });
+    expect(busiest.active).toBeGreaterThan(0);
+    for (const person of busiest.frame.agents) {
+      expect(["serving", "queued", "traveling", "pending", "done"]).toContain(person.state);
+      expect(Number.isFinite(person.x) && Number.isFinite(person.z)).toBe(true);
+    }
+  });
+
+  it("a plan with no booth data has no booth flow, and an empty flow does not throw", () => {
+    const plain = createDefaultProject();
+    expect(plain.booth).toBeUndefined();
+    expect(plain.interaction).toBeUndefined();
+    const empty = { ...blankTemplate("空"), steps: [], startStepId: "" };
+    expect(() => runInteraction(empty, { sampleDt: 5 })).not.toThrow();
+    const r = runInteraction(empty, { sampleDt: 5 });
+    // Nobody is served, and the readout says WHY rather than showing a
+    // confident zero: the people are still expected, there is nothing to do.
+    expect(r.completed).toBe(0);
+    expect(r.unfinished).toBe(r.participantCount);
+    expect(r.summaryLines.join("")).toContain("沒有站點");
+  });
+
+  it("names a bottleneck only once somebody has actually waited", () => {
+    const lonely = run(withParams({ visitorCount: 1, arrivalPerMin: 0.5 }));
+    expect(lonely.avgWaitSeconds).toBeLessThan(1);
+    expect(lonely.bottleneckStationId).toBeNull();
+    expect(run(peakWith()).bottleneckStationId).not.toBeNull();
+  });
+
+  it("ships the eight default stations with the documented dwell times", () => {
+    const stations = createBoothStations();
+    expect(stations).toHaveLength(8);
+    expect(stations.every((st) => st.type === "custom")).toBe(true);
+    const talk = stations.find((st) => st.boothType === "talk")!;
+    expect(talk.meanServiceSeconds).toBe(BOOTH_SIM_PRESETS.normal.talkSeconds);
+    expect(talk.parallelServers).toBe(BOOTH_SIM_PRESETS.normal.deskStaff);
   });
 });

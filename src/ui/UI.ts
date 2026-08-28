@@ -13,8 +13,7 @@ import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
 import { buildCustomAssetFlow } from "./customAssetFlow";
 import { buildVenueCaptureFlow, venueCaptureAvailable } from "./venueCapture";
-import { refreshSimPanel } from "./simPanel";
-import { refreshBoothSimPanel } from "./boothSimPanel";
+import { refreshFlowPanel } from "./flowPanel";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
@@ -618,7 +617,7 @@ export class UI {
     );
     else if (wf === "route") this.left.append(this.routeSection());
     else if (wf === "sim") {
-      refreshBoothSimPanel(this.boothPanelRoot, this.app);
+      refreshFlowPanel(this.boothPanelRoot, this.app);
       this.left.append(this.boothPanelRoot);
     } else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());
@@ -921,7 +920,7 @@ export class UI {
     const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
       button(`${p.icon} ${p.label.replace("動線", "")}`, () => { this.app.newRoutePreset(p.type as RouteType); if (this.compact) this.setSheet("none"); }, "chip chip--sm")));
 
-    refreshSimPanel(this.simPanelRoot, this.app);
+    refreshFlowPanel(this.simPanelRoot, this.app);
 
     return section("動線", [
       el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。" }),
@@ -1200,7 +1199,7 @@ export class UI {
     this.updateSmartBox();
     // 模擬 is refreshed by rebuildLeft, which knows not to blow away a field
     // the user is typing in — an extra refresh here would eat the caret.
-    if (sess.workflow === "route") refreshSimPanel(this.simPanelRoot, this.app);
+    if (sess.workflow === "route") refreshFlowPanel(this.simPanelRoot, this.app);
 
     // Partner Mode shell (replaces the editor chrome entirely).
     this.updatePartnerMode();

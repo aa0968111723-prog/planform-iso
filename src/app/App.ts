@@ -3,8 +3,6 @@ import {
   ZONE_DEFAULTS,
   type ArrayGroup,
   type ArrivalProfile,
-  type BoothParams,
-  type BoothScenarioId,
   type BoothStation,
   type BoothZoneRole,
   type EventScenario,
@@ -17,21 +15,34 @@ import {
   type SceneObject,
   type ValidationSettings,
   type ViewName,
+  type InteractionAudience,
+  type InteractionStation,
+  type InteractionStep,
+  type InteractionTemplate,
   type Zone,
   type ZoneType,
 } from "../core/model";
 import { assetDef } from "../core/assets";
 import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
-import { BOOTH_ZONE_ROLES } from "../core/boothCatalog";
+import { BOOTH_ZONE_ROLES, isBoothProject } from "../core/boothCatalog";
 import {
-  BoothSim,
-  BOOTH_STEP_SECONDS,
-  defaultBoothParams,
-  isBoothProject,
-  runBoothHeadless,
-  type BoothStats,
-} from "../core/boothFlow";
-import { catalogFromProject, createDefaultScenario, resolveScenarioBindings } from "../core/migrate";
+  addStep,
+  duplicateStep,
+  moveStep,
+  removeStep,
+  renameStep,
+  setOptionCount,
+  setStepStation,
+  templateFromScenario,
+  updateStep,
+} from "../core/interactionCompile";
+import { INTERACTION_PRESETS, interactionPreset } from "../core/interactionPresets";
+import {
+  catalogFromProject,
+  createDefaultScenario,
+  resolveScenarioBindings,
+  resolveTemplateBindings,
+} from "../core/migrate";
 import { applySnap, type SnapMode } from "../core/units";
 import {
   findParentTable,
@@ -85,6 +96,7 @@ import {
   buildCheckinPaymentVariants,
   compareScenarioVariants,
   frameAt,
+  runInteraction,
   runDiscreteEvent,
   runScenarioMedian,
   type PlaybackAgent,
@@ -157,17 +169,6 @@ export interface Session {
     checkinStaff: number;
     paymentStaff: number;
   };
-  /** Outdoor booth playback. Independent of the classroom event-flow state. */
-  booth: BoothSession;
-}
-
-export interface BoothSession {
-  playing: boolean;
-  /** Simulated seconds per wall-clock second. */
-  speed: number;
-  stats: BoothStats | null;
-  /** 正常 vs 尖峰 run on the same layout, or null before 比較 is pressed. */
-  compare: { a: BoothStats; b: BoothStats } | null;
 }
 
 /** Live state of Partner Mode — the visual-first, read-only view of a plan. */
@@ -266,7 +267,6 @@ export class App {
       checkinStaff: 1,
       paymentStaff: 1,
     },
-    booth: { playing: false, speed: 15, stats: null, compare: null },
   };
 
   readonly quickAgent: QuickAgent;
@@ -294,9 +294,12 @@ export class App {
   private pointers = new Map<number, { x: number; y: number; type: string }>();
   private validationTimer: number | null = null;
   private simState: SimState | null = null;
-  private boothSim: BoothSim | null = null;
-  private boothRaf: number | null = null;
-  private boothLast = 0;
+  /**
+   * The template the last run actually used — positions resolved, plan
+   * geometry attached. Playback reads station coordinates from THIS, not from
+   * the project, so a station moved mid-replay does not teleport its queue.
+   */
+  private lastFlow: InteractionTemplate | null = null;
   private simRaf: number | null = null;
   private simLast = 0;
   private lastPanelSync = 0;
@@ -384,15 +387,15 @@ export class App {
       // A booth is 7 m across with eight station badges on it — the flow names
       // on top of that make the plan unreadable exactly when you are watching
       // the crowd. The ribbons and arrows stay; only the names step aside.
-      hideRouteLabels: !!this.boothSim,
+      hideRouteLabels: this.hasFlow() && this.session.simPlaying,
     });
   }
 
-  /** Station badges drawn on the canvas: booth stations when this is a booth. */
+  /** Station badges drawn on the canvas: the flow's own stations when it has one. */
   private overlayStations(): { id: string; name: string; x: number; z: number; queue: number }[] | undefined {
-    const source = this.boothSim
-      ? this.viewState.booth?.stations.filter((s) => s.enabled !== false)
-      : this.activeScenario()?.stations;
+    const source = this.lastFlow?.stations
+      ?? this.viewState.interaction?.stations
+      ?? this.activeScenario()?.stations;
     return source?.map((s) => ({
       id: s.id,
       name: s.name,
@@ -421,7 +424,7 @@ export class App {
     if (w === "route" && this.session.mode !== "route") this.session.mode = "select";
     // Leaving 模擬 stops the clock rather than letting people keep walking
     // behind a panel nobody is looking at.
-    if (w !== "sim" && this.session.booth.playing) this.pauseBoothSim();
+    if (w !== "sim" && this.session.simPlaying) this.pauseSimulation(true);
     this.cancelPlacement();
     this.notifyUi();
   }
@@ -605,9 +608,9 @@ export class App {
     const preset = venuePresetById(id);
     if (!preset) return false;
     this.store.mutate((p) => applyVenuePreset(p, preset, { withFixtures: true }));
-    // A booth template brings its own stations, so any playback of the old
-    // layout is stale the moment it lands.
-    if (this.isBoothPlan()) this.resetBoothSim();
+    // A template brings its own stations, so any playback of the old layout is
+    // stale the moment it lands.
+    this.resetFlowRun();
     this.recenterView();
     this.toast(`已套用「${preset.name}」（可復原）`, true);
     return true;
@@ -713,12 +716,15 @@ export class App {
    * mat arranger, the simulation and the AI all read one number.
    */
   private adoptProjectSettings(project: Project): void {
-    // A booth rehearsal belongs to the plan it was started on. Carrying the
-    // agents, the queue counts or the statistics into the next project would
-    // show somebody else's crowd standing in this room.
-    this.stopBoothLoopOnly();
-    this.boothSim = null;
-    this.session.booth = { playing: false, speed: this.session.booth.speed, stats: null, compare: null };
+    // A rehearsal belongs to the plan it was started on. Carrying the agents,
+    // the queue counts or the statistics into the next project would show
+    // somebody else's crowd standing in this room.
+    this.stopSimLoopOnly();
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simResult = null;
+    this.session.simCompare = null;
+    this.lastFlow = null;
     this.session.simQueues = {};
     this.session.bottlenecks = [];
 
@@ -1466,139 +1472,184 @@ export class App {
     this.render();
   }
 
-  applyBoothScenario(id: BoothScenarioId): void {
-    this.store.mutate((p) => {
-      if (!p.booth) return;
-      p.booth.scenarioId = id;
-      p.booth.params = defaultBoothParams(id);
-    });
-    this.resetBoothSim();
+  // --- interaction flow ----------------------------------------------------
+
+  /** The plan's own step list, or null for a plan that still runs a scenario. */
+  flowTemplate(): InteractionTemplate | null {
+    return this.state.interaction ?? null;
   }
 
-  setBoothParams(patch: Partial<BoothParams>): void {
-    this.store.mutate((p) => {
-      if (p.booth) Object.assign(p.booth.params, patch);
-    }, { history: false });
-    this.resetBoothSim();
+  hasFlow(): boolean {
+    return !!this.state.interaction;
   }
 
-  setBoothStationEnabled(id: string, enabled: boolean): void {
-    this.store.mutate((p) => {
-      const st = p.booth?.stations.find((s) => s.id === id);
-      if (st) st.enabled = enabled;
-    });
-    this.resetBoothSim();
+  /** Presets offered by 套用範本. */
+  flowPresets(): { id: string; name: string; summary: string }[] {
+    return INTERACTION_PRESETS.map(({ id, name, summary }) => ({ id, name, summary }));
   }
 
-  updateBoothStation(id: string, patch: Partial<BoothStation>): void {
-    this.store.mutate((p) => {
-      const st = p.booth?.stations.find((s) => s.id === id);
-      if (st) Object.assign(st, patch);
-    });
-    this.resetBoothSim();
+  /**
+   * Edit the flow.
+   *
+   * Every edit goes through here for one reason: a result computed from the
+   * previous version of the flow must not stay on screen next to the new
+   * version of the settings. That gap — panel says 6 faces, readout is from
+   * when there were 4 — is exactly the "the UI changed but the simulation did
+   * not" failure this whole feature is judged on.
+   */
+  updateFlow(fn: (t: InteractionTemplate) => InteractionTemplate, opts?: { history?: boolean }): void {
+    const current = this.state.interaction;
+    if (!current) return;
+    const next = fn(current);
+    this.store.mutate((p) => { p.interaction = next; }, { history: opts?.history !== false });
+    this.resetFlowRun();
   }
 
-  playBoothSim(): void {
-    if (!this.isBoothPlan()) {
-      this.toast("這個專案沒有攤位資料，請用「戶外攤位」場地模板建立");
-      return;
-    }
-    this.stopBoothLoopOnly();
-    if (!this.boothSim || this.boothSim.done) this.boothSim = new BoothSim(this.state);
-    this.session.booth.playing = true;
-    this.session.simMode = "off";
-    this.focusSimulation();
-    this.boothLast = performance.now();
-    this.applyBoothFrame();
-    this.notifyUi();
-    this.boothLoop();
+  applyFlowPreset(id: string): void {
+    const template = interactionPreset(id);
+    if (!template) return;
+    this.store.mutate((p) => { p.interaction = template; });
+    this.resetFlowRun();
+    this.toast(`已套用「${template.name}」`, true);
   }
 
-  pauseBoothSim(): void {
-    this.stopBoothLoopOnly();
-    this.session.booth.playing = false;
-    this.notifyUi();
+  /**
+   * 改成我自己的流程 — compile the plan's scenario into an editable step list.
+   *
+   * `scenarios` is kept, not deleted: this is reversible, an older build still
+   * opens the file, and the first run after converting produces bit-identical
+   * numbers because it is the same compiler the engine has been using all along.
+   */
+  convertScenarioToFlow(): boolean {
+    const scenario = this.activeScenario();
+    if (!scenario) return false;
+    const template = templateFromScenario(scenario);
+    this.store.mutate((p) => { p.interaction = template; });
+    this.resetFlowRun();
+    this.toast("已改成步驟列表，原本的設定還留著", true);
+    return true;
   }
 
-  resetBoothSim(): void {
-    this.stopBoothLoopOnly();
-    this.session.booth.playing = false;
-    this.boothSim = this.isBoothPlan() ? new BoothSim(this.state) : null;
-    this.session.booth.stats = this.boothSim?.stats() ?? null;
+  /** Back to the quick setup. The step list is dropped, the scenario is intact. */
+  discardFlow(): void {
+    if (!this.state.scenarios.length) return;
+    this.store.mutate((p) => { delete p.interaction; });
+    this.resetFlowRun();
+    this.toast("已回到快速設定", true);
+  }
+
+  // --- step-list editing (thin wrappers over the pure editors) --------------
+
+  addFlowStep(at: number): void { this.updateFlow((t) => addStep(t, at)); }
+  moveFlowStep(id: string, delta: number): void { this.updateFlow((t) => moveStep(t, id, delta)); }
+  duplicateFlowStep(id: string): void { this.updateFlow((t) => duplicateStep(t, id)); }
+  removeFlowStep(id: string): void { this.updateFlow((t) => removeStep(t, id)); }
+  renameFlowStep(id: string, name: string): void { this.updateFlow((t) => renameStep(t, id, name)); }
+  setFlowStepStation(id: string, stationId: string | undefined): void {
+    this.updateFlow((t) => setStepStation(t, id, stationId));
+  }
+  updateFlowStep(id: string, patch: Partial<InteractionStep>): void {
+    this.updateFlow((t) => updateStep(t, id, patch));
+  }
+  setFlowOptionCount(id: string, count: number): void {
+    this.updateFlow((t) => setOptionCount(t, id, count));
+  }
+
+  updateFlowStation(id: string, patch: Partial<InteractionStation>): void {
+    this.updateFlow((t) => ({
+      ...t,
+      stations: t.stations.map((st) => (st.id === id ? { ...st, ...patch } : st)),
+    }));
+  }
+
+  updateFlowAudience(patch: Partial<InteractionAudience>): void {
+    this.updateFlow((t) => ({ ...t, audience: { ...t.audience, ...patch } }), { history: false });
+  }
+
+  setFlowStaffCount(roleId: string, count: number): void {
+    this.updateFlow((t) => ({
+      ...t,
+      staff: t.staff.map((r) => (r.id === roleId ? { ...r, count: Math.max(0, Math.round(count)) } : r)),
+    }), { history: false });
+  }
+
+  addFlowRole(name: string): void {
+    this.updateFlow((t) => ({
+      ...t,
+      staff: [...t.staff, { id: uid("role"), name: name || `角色 ${t.staff.length + 1}`, count: 1 }],
+    }));
+  }
+
+  removeFlowRole(roleId: string): void {
+    this.updateFlow((t) => ({
+      ...t,
+      staff: t.staff.filter((r) => r.id !== roleId),
+      // A station pointing at a role that no longer exists would open zero
+      // servers and stall silently, so the claim goes with the role.
+      stations: t.stations.map((st) => (st.staffRoleId === roleId ? { ...st, staffRoleId: undefined } : st)),
+    }));
+  }
+
+  /** Which role staffs a station. Passing the role it already has clears it. */
+  setStationRole(stationId: string, roleId: string | undefined): void {
+    this.updateFlow((t) => ({
+      ...t,
+      stations: t.stations.map((st) => (st.id === stationId ? { ...st, staffRoleId: roleId } : st)),
+    }));
+  }
+
+  // --- running it -----------------------------------------------------------
+
+  /** Drop a stale result so the readout never describes a flow that changed. */
+  private resetFlowRun(): void {
+    this.stopSimLoopOnly();
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simResult = null;
+    this.session.simCompare = null;
     this.session.simPositions = [];
     this.session.simQueues = {};
     this.session.bottlenecks = [];
+    this.session.simTime = 0;
+    this.lastFlow = null;
     this.render();
   }
 
-  setBoothSpeed(speed: number): void {
-    this.session.booth.speed = Math.max(1, Math.min(120, speed));
+  runFlowSimulation(): SimulationResult | null {
+    const template = this.state.interaction;
+    if (!template) return null;
+    const bound = resolveTemplateBindings(this.state, template);
+    // One sample every 600th of the run, between 1 s and 30 s: a two-hour booth
+    // produces about the same number of playback frames as a 15-minute check-in
+    // instead of 7 200 of them.
+    const horizon = Math.max(60, template.audience.windowSeconds);
+    const sampleDt = Math.min(30, Math.max(1, Math.round(horizon / 600)));
+    const result = runInteraction(bound, { sampleDt });
+    this.lastFlow = bound;
+    this.session.simResult = result;
+    this.session.simCompare = null;
     this.notifyUi();
+    return result;
   }
 
-  /** Run 正常 and 尖峰 headless on the current layout and keep both readouts. */
-  compareBoothScenarios(): { a: BoothStats; b: BoothStats } | null {
-    if (!this.isBoothPlan()) return null;
-    const compare = {
-      a: runBoothHeadless(this.state, defaultBoothParams("normal")),
-      b: runBoothHeadless(this.state, defaultBoothParams("peak")),
-    };
-    this.session.booth.compare = compare;
+  /** ▶ 演練一次 — the numbers first; the walk-through is the separate ▶ 播放走位. */
+  startFlowPlayback(): void {
+    const result = this.runFlowSimulation();
+    if (!result) return;
+    this.stopSimLoopOnly();
+    this.session.simMode = "event-flow";
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simTime = result.finishTimeSeconds;
+    this.session.simPositions = [];
+    this.session.bottlenecks = [];
     this.notifyUi();
-    return compare;
-  }
-
-  private stopBoothLoopOnly(): void {
-    if (this.boothRaf !== null) {
-      cancelAnimationFrame(this.boothRaf);
-      this.boothRaf = null;
-    }
-  }
-
-  private applyBoothFrame(): void {
-    const sim = this.boothSim;
-    if (!sim) return;
-    this.session.simPositions = sim.crowd();
-    this.session.simQueues = sim.queueLengths();
-    this.session.simTime = sim.time;
-    this.session.bottlenecks = this.boothStations()
-      .filter((s) => (this.session.simQueues[s.id] ?? 0) >= 3)
-      .map((s) => ({ x: s.x, z: s.z, count: this.session.simQueues[s.id] ?? 0 }));
-    this.syncScene();
-  }
-
-  private boothLoop(): void {
-    if (!this.session.booth.playing || !this.boothSim) return;
-    const now = performance.now();
-    // Cap one tick's worth of simulated time so a background tab or a hitch
-    // teleports nobody; the loop just catches up over the next few frames.
-    const elapsed = Math.min(0.25, (now - this.boothLast) / 1000);
-    this.boothLast = now;
-    let remain = elapsed * this.session.booth.speed;
-    while (remain > 0) {
-      const step = Math.min(BOOTH_STEP_SECONDS, remain);
-      this.boothSim.step(step);
-      remain -= step;
-    }
-    this.applyBoothFrame();
-    if (now - this.lastPanelSync > 200) {
-      this.lastPanelSync = now;
-      this.session.booth.stats = this.boothSim.stats();
-      this.notifyUi();
-    }
-    if (this.boothSim.done) {
-      this.stopBoothLoopOnly();
-      this.session.booth.playing = false;
-      this.session.booth.stats = this.boothSim.stats();
-      this.session.simPositions = [];
-      this.session.bottlenecks = [];
-      this.render();
-      return;
-    }
-    this.boothRaf = requestAnimationFrame(() => this.boothLoop());
   }
 
   startSimulation(params?: Partial<SimParams>): void {
+    // A plan with its own step list runs THAT — pressing ▶ on a booth plan
+    // must rehearse the booth's steps, not a check-in desk built out of thin air.
+    if (this.hasFlow()) { this.startFlowPlayback(); return; }
     // Prefer DES when we can build a scenario; else fall back to route-walk.
     const scn = this.ensureEventScenario(false);
     if (scn.stations.length >= 2) {
@@ -1682,16 +1733,14 @@ export class App {
   }
 
   restartSimulation(): void {
-    if (this.session.simMode === "event-flow") this.startEventPlayback();
+    if (this.hasFlow()) this.startFlowPlayback();
+    else if (this.session.simMode === "event-flow") this.startEventPlayback();
     else if (this.session.simMode === "route-walk") this.startRouteWalk();
     else this.startSimulation();
   }
 
   stopSimulation(): void {
     this.stopSimLoopOnly();
-    this.stopBoothLoopOnly();
-    this.session.booth.playing = false;
-    this.boothSim = null;
     this.session.simPlaying = false;
     this.session.simPaused = false;
     this.session.simMode = "off";
@@ -1726,7 +1775,8 @@ export class App {
     this.session.bottlenecks = result.stations
       .filter((s) => (frame.queues[s.stationId] ?? 0) >= 3)
       .map((s) => {
-        const st = this.activeScenario()?.stations.find((x) => x.id === s.stationId);
+        const st = (this.lastFlow?.stations ?? this.activeScenario()?.stations ?? [])
+          .find((x) => x.id === s.stationId);
         return {
           x: st?.x ?? 0,
           z: st?.z ?? 0,

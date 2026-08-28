@@ -33,8 +33,17 @@ async function openBooth(page: Page): Promise<void> {
   });
   await page.goto("/");
   await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
-  await expect(page.locator(".quickstart__title")).toHaveText("今天要排什麼？");
-  await page.locator(".quickstart__card button", { hasText: "戶外攤位" }).click();
+  // The wizard is three steps since the multi-project system landed: name the
+  // event, pick where it is, say how many people. This helper had been left on
+  // the old single-screen version and stopped reaching the booth at all.
+  const card = page.locator(".quickstart__card");
+  await expect(card.locator(".quickstart__title")).toHaveText("這場活動叫什麼？");
+  await card.locator(".quickstart__name").fill("擺攤測試");
+  await card.locator("button", { hasText: "下一步：選場地" }).click();
+  await expect(card.locator(".quickstart__title")).toHaveText("在哪裡辦？");
+  // A booth needs no 「這次活動需要什麼？」 step — picking the pitch is enough,
+  // so the wizard creates the project there and then.
+  await card.locator("button", { hasText: "戶外攤位" }).click();
   await settle(page);
 }
 
@@ -126,32 +135,78 @@ test.describe("outdoor booth", () => {
   test("running the simulation puts people on the canvas and moves the numbers", async ({ page }) => {
     await openBooth(page);
     await gotoSim(page);
-    await expect(page.locator(".left")).toContainText("攤位模擬");
+    // One panel for every plan: the booth's own steps, not a check-in desk.
+    await expect(page.locator(".left")).toContainText("互動流程");
 
-    await page.locator(".left button", { hasText: "▶ 模擬" }).click();
-    // People appear.
+    await page.locator(".left button", { hasText: "▶ 演練一次" }).click();
+    // The numbers land first.
+    await expect(page.locator(".left")).toContainText("全部完成");
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as {
+        planform: { app: { session: { simResult: { completed: number } | null } } };
+      }).planform.app.session.simResult?.completed ?? 0), { timeout: 15_000 })
+      .toBeGreaterThan(0);
+
+    // Then the walk-through puts people on the canvas.
+    await page.locator(".left button", { hasText: "▶ 播放走位" }).click();
     await expect
       .poll(() => page.evaluate(() => (window as unknown as {
         planform: { app: { session: { simPositions: unknown[] } } };
       }).planform.app.session.simPositions.length), { timeout: 15_000 })
       .toBeGreaterThan(0);
-    // And the readout stops saying "尚未模擬".
-    await expect(page.locator(".left")).toContainText("最大排隊人數");
     await page.locator(".left button", { hasText: "⏸ 暫停" }).click();
-    await expect(page.locator(".left button", { hasText: "▶" })).toBeVisible();
+    await expect(page.locator(".left button", { hasText: "繼續" })).toBeVisible();
   });
 
-  test("尖峰 queues longer than 正常 on the same layout", async ({ page }) => {
+  test("more people passing means a longer queue on the same layout", async ({ page }) => {
     await openBooth(page);
+    // The old 正常／尖峰 chips were a booth-only concept. The same question is
+    // now asked of any plan by changing the crowd: it is one editable number.
     const compared = await page.evaluate(() => {
       const pf = (window as unknown as {
-        planform: { app: { compareBoothScenarios(): { a: { maxQueue: number; balked: number }; b: { maxQueue: number; balked: number } } | null } };
+        planform: {
+          app: {
+            updateFlowAudience(patch: { count: number }): void;
+            runFlowSimulation(): { maxQueue: number; leftEarly: number } | null;
+            flowTemplate(): { audience: { count: number } } | null;
+          };
+        };
       }).planform;
-      return pf.app.compareBoothScenarios();
+      const before = pf.app.flowTemplate()!.audience.count;
+      const quiet = pf.app.runFlowSimulation();
+      pf.app.updateFlowAudience({ count: before * 3 });
+      const busy = pf.app.runFlowSimulation();
+      return { quiet, busy };
     });
-    expect(compared).not.toBeNull();
-    expect(compared!.b.maxQueue).toBeGreaterThan(compared!.a.maxQueue);
-    expect(compared!.b.balked).toBeGreaterThanOrEqual(compared!.a.balked);
+    expect(compared.quiet).not.toBeNull();
+    expect(compared.busy!.maxQueue).toBeGreaterThan(compared.quiet!.maxQueue);
+    expect(compared.busy!.leftEarly).toBeGreaterThanOrEqual(compared.quiet!.leftEarly);
+  });
+
+  test("editing a step changes the simulation, not just the panel", async ({ page }) => {
+    await openBooth(page);
+    await gotoSim(page);
+    const moved = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: {
+          app: {
+            flowTemplate(): { steps: { id: string; name: string; avgSeconds: number }[] } | null;
+            updateFlowStep(id: string, patch: { avgSeconds: number }): void;
+            runFlowSimulation(): { avgWaitSeconds: number; maxQueue: number } | null;
+          };
+        };
+      }).planform;
+      const before = pf.app.runFlowSimulation()!;
+      // Whatever the plan's slowest step is, tripling it has to show up.
+      const slowest = [...pf.app.flowTemplate()!.steps]
+        .sort((a, b) => b.avgSeconds - a.avgSeconds)[0];
+      pf.app.updateFlowStep(slowest.id, { avgSeconds: slowest.avgSeconds * 3 });
+      const after = pf.app.runFlowSimulation()!;
+      return { before, after, step: slowest.name };
+    });
+    // Tripling how long a step takes has to show up in the queue.
+    expect(moved.step, "the booth plan arrives with its own steps").toBeTruthy();
+    expect(moved.after.avgWaitSeconds).toBeGreaterThan(moved.before.avgWaitSeconds);
   });
 
   test("俯視 ↔ 立體 changes the camera, not the plan", async ({ page }) => {
@@ -242,7 +297,7 @@ test.describe("outdoor booth on small screens", () => {
       expect(overflow).toBeLessThanOrEqual(1);
 
       await gotoSim(page);
-      await expect(page.locator(".left")).toContainText("攤位模擬");
+      await expect(page.locator(".left")).toContainText("互動流程");
       const navBox = await page.locator(".bottomnav").boundingBox();
       expect(navBox!.height).toBeGreaterThanOrEqual(44);
     });

@@ -950,7 +950,7 @@ if (!p.interaction) delete p.interaction;
 | 3. 編譯器（純函式） | ✅ | `src/core/interactionCompile.ts` + 16 個測試 |
 | 4. 引擎（`runDiscreteEvent` 變包裝） | ✅ | `7c8b42c`；parity fixture 零改動通過，`test/interactionFlow.test.ts` 13 條 |
 | 5. 遷移與 preset | ✅ | 常數搬家、`templateFromBooth`、`migrateInteraction`、`resolveTemplateBindings`、`interactionPresets.ts`；10 個變異全部被擋下 |
-| 6. 面板（一個取代兩個） | ⬜ | |
+| 6. 面板（一個取代兩個） | ✅ | `flowPanel.ts`；刪掉 `boothFlow.ts` / `boothSimPanel.ts` / `simPanel.ts`；`boothFlow.test.ts` 的 14 條性質全部改寫進 `interactionFlow.test.ts` |
 | 7. 匯出與模板庫 | ⬜ | |
 | 8. 教室的選擇性升級 | ⬜ | |
 
@@ -967,6 +967,13 @@ if (!p.interaction) delete p.interaction;
 3. **攤位站台要標 `selfService`。** boothFlow 從來沒讀過 `staffCount`，每站就開
    `parallelServers` 個位置；照抄成有人顧的站台會讓 `effectiveServers` 取
    `min(staffCount=1, 3)`，三格展示板悄悄縮成一格。
+
+### Step 6 才發現的事
+
+`e2e/booth.spec.ts` 的 `openBooth()` 從 #18 多專案系統合併進來之後就再也沒真的
+跑到攤位過——它還在等單畫面時代的「今天要排什麼？」。**11 條攤位 e2e 全都在
+第一行就失敗**，而且是在這一步之前就已經如此。修好精靈的三步驟之後全部通過。
+（沒有刪測試、沒有 skip：§81。）
 
 **Step 2 是唯一一次允許動 parity fixture 的步驟**（新增兩個欄位，逐鍵正規化比對
 證明其餘六組跑法完全相同）。Step 4 之後每一步都必須零改動通過。

@@ -3,7 +3,7 @@ import { createDefaultProject, uid, type SceneObject } from "../src/core/model";
 import { applyVenuePreset, boothVenuePreset, createProjectFromVenuePreset, venuePresetById } from "../src/core/venues";
 import { validateProject } from "../src/core/validation";
 import { planHasContent } from "../src/core/model";
-import { isBoothProject } from "../src/core/boothFlow";
+import { isBoothProject } from "../src/core/boothCatalog";
 
 function installLocalStorage(): void {
   const store = new Map<string, string>();

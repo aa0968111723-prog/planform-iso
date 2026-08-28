@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { migrateProject } from "../src/core/migrate";
 import { PROJECT_VERSION, type Project } from "../src/core/model";
 import { boothVenuePreset, createProjectFromVenuePreset } from "../src/core/venues";
-import { isBoothProject } from "../src/core/boothFlow";
+import { isBoothProject } from "../src/core/boothCatalog";
 
 function installLocalStorage(): void {
   const store = new Map<string, string>();
