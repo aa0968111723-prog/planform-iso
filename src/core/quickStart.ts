@@ -470,7 +470,11 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
     station("checkin", "報到", checkinObj?.x ?? checkinZone.x, checkinObj?.z ?? checkinZone.z, { objectId: checkinObj?.id, zoneId: checkinZone.id, staffCount: 2, parallelServers: 2 }),
     station("payment", "現場收費", paymentObj?.x ?? paymentZone.x, paymentObj?.z ?? paymentZone.z, { objectId: paymentObj?.id, zoneId: paymentZone.id }),
     station("shoe", "鞋子", shoeZone.x, shoeZone.z, { zoneId: shoeZone.id }),
-    station("backpack", "後牆長桌", backpackZone.x, backpackZone.z, { zoneId: backpackZone.id }),
+    // Named from the zone it is bound to, so the briefing can never drift from
+    // the plan again. It used to say 後牆長桌 while the bags were on the
+    // side-wall 課桌椅 — a 夥伴 reading the brief walked to the back wall and
+    // found nothing there.
+    station("backpack", backpackZone.name, backpackZone.x, backpackZone.z, { zoneId: backpackZone.id }),
     station("seating", "巧拼座區", seatingPosition.x, seatingPosition.z),
   ];
   const ids = (types: ServiceStation["type"][]) => types.map((t) => stations.find((s) => s.type === t)!.id);

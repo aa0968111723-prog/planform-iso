@@ -202,7 +202,7 @@ html, body {
 .chip--primary { border-color: var(--accent); background: rgba(56, 189, 248, 0.22); color: var(--accent-text); font-weight: 600; }
 .btn:hover, .chip:hover { background: var(--surface-hover); }
 .btn:active, .chip:active { transform: translateY(1px); }
-.chip[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent); }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent-text); }
 
 /* --- panels: shared skin ------------------------------------------------ */
 .left, .right {
@@ -367,7 +367,7 @@ html, body {
 .nudgepad { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px; }
 .nudgepad .row { justify-content: center; }
 .nudgepad .chip { min-width: 44px; text-align: center; }
-.nudgestep[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent); }
+.nudgestep[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent-text); }
 
 /* --- bottom nav --------------------------------------------------------- */
 .bottomnav { display: none; }
@@ -498,7 +498,7 @@ html, body {
   background: var(--surface-2); color: var(--text); font: inherit;
 }
 .menuitem:hover { background: var(--surface-hover); }
-.menuitem--active { border-color: var(--accent); background: rgba(56, 189, 248, 0.18); color: var(--accent); }
+.menuitem--active { border-color: var(--accent); background: rgba(56, 189, 248, 0.18); color: var(--accent-text); }
 .menuitem--danger { border-color: var(--danger); color: var(--bad-text); }
 .menuitem__label { font-size: 13px; font-weight: 600; }
 .menuitem__sub { font-size: 11px; color: var(--text-dim); }

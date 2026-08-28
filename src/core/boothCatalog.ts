@@ -7,9 +7,14 @@
  * `kind` stays inside the original eight ObjectKinds, which is what lets an
  * older build still place, validate and export a booth plan.
  *
- * Dimensions are honest estimates read off the reference photos, not surveyed
- * measurements: every entry is `allowCustomSize`, and the UI says so until the
- * plan is calibrated on site.
+ * Dimensions are estimates from standard product sizes — a 3×3 m folding
+ * gazebo, a common 台灣 plastic stool, a 180 cm trestle table — plus an assumed
+ * 7×7 m pitch. They are NOT read off reference photos: unlike the classroom
+ * half of this product, the booth has no photographic record
+ * (`docs/field-research/REFERENCE_MAPPING.md` has no booth rows, and the
+ * club's 擺攤 folder holds two planning documents and two screen recordings,
+ * no images). Every entry is `allowCustomSize`, and the plan carries its
+ * 待校正 marking until somebody measures the real pitch.
  *
  * Nothing here bakes in text, a club name or a logo. Boards, banners and
  * standees are blank `replaceable-surface` meshes.

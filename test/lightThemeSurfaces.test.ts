@@ -10,6 +10,12 @@
  * The rule this guards is narrow on purpose: a *background* may not be a
  * hard-coded dark colour outside the dark-theme block. Borders, shadows and
  * scrims legitimately are dark in both themes.
+ *
+ * A second rule was added after `.menuitem--active` was measured at 3.53:1:
+ * a control tinted with the accent colour may not also take `var(--accent)` as
+ * its text. `--accent` is a 3-series blue meant for borders and glyphs;
+ * `--accent-text` exists precisely because text on an accent tint needs to be
+ * darker, and it measures 5.12:1 on the same fill.
  */
 
 import { describe, expect, it } from "vitest";
@@ -84,3 +90,31 @@ function isInsideRule(source: string, lineNumber: number, selector: string): boo
   }
   return false;
 }
+
+describe("accent-tinted controls use the darker accent for their text", () => {
+  /**
+   * The trap: `--accent` (#0284c7) reads fine on white but only 3.5:1 on the
+   * accent tint those same rules paint behind it — under the 4.5:1 AA floor
+   * for the 13 px / 600 labels these controls use. `--accent-text` (#0369a1)
+   * is the same hue two steps darker and measures ~5:1 on that fill.
+   *
+   * Parsed as RULES, not lines: several of these declarations wrap, and a
+   * line-based check both misses those and false-positives on the line after.
+   */
+  const rules = [...lightOnly(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map((m) => ({ selector: m[1].trim(), body: m[2] }))
+    .filter((r) => /background(-color)?\s*:\s*rgba\(\s*56\s*,\s*189\s*,\s*248/.test(r.body));
+
+  it("finds the accent-tinted rules at all, so this test cannot pass vacuously", () => {
+    expect(rules.length).toBeGreaterThan(2);
+  });
+
+  it("none of them sets color: var(--accent)", () => {
+    const offenders = rules
+      // `border-color: var(--accent)` is legitimate and contains "color:" —
+      // only a declaration that STARTS with color counts.
+      .filter((r) => /(^|[;{\s])color\s*:\s*var\(--accent\)\s*[;}]/.test(r.body))
+      .map((r) => r.selector);
+    expect(offenders, offenders.join(" / ")).toEqual([]);
+  });
+});

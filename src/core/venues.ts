@@ -197,10 +197,12 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
     id: "venue:tku-booth",
     name: "戶外攤位（3×3 帳篷）",
     builtin: true,
-    // Every number below is read off the reference photos by counting things
-    // whose size is standard (a folding tent, a paving tile) — none of it is a
-    // site survey. The 攤位範圍 in particular is an assumption: tent + 2 m of
-    // working space on each side.
+    // Every number below is an estimate from a standard product size (a 3×3 m
+    // folding gazebo, a 60 cm paving tile, a 180 cm trestle table) — none of it
+    // is a site survey, and unlike the classroom half of this product none of
+    // it comes off a photograph either: there are no booth reference photos.
+    // The 攤位範圍 in particular is an assumption: tent + 2 m of working space
+    // on each side.
     note: "戶外擺攤起點模板：3×3 帳篷、攤位桌、展示板與互動區。尺寸為可修改的估計值，到現場請用「現場校正」對一次。",
     classroom: { name: "攤位範圍", length: 7, width: 7, x: 0, z: 0 },
     corridor: { name: "石磚走道", length: 9, width: 2.4, x: -1, z: 7 },
@@ -208,7 +210,7 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
     // Outdoors: no doors, no projector screen.
     fixtures: [],
     validationOverrides: { checkScreenView: false },
-    calibrationNote: "尺寸為照片推估的起點，待現場校正",
+    calibrationNote: "尺寸為估計起點（沒有現場照片），待現場校正",
     // A tent is the thing you are checking; a top view of one is a white
     // rectangle. Open the booth in 立體 and let the user switch to 俯視.
     defaultView: "iso",

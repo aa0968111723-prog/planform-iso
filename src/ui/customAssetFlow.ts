@@ -5,10 +5,6 @@
 import type { App } from "../app/App";
 import { createCustomAssetProxy, guessSemanticFromName } from "../assets/proxy";
 import { importGltfAsset } from "../assets/importGltf";
-import {
-  MockReconstructionWorker,
-  ReconstructionQueue,
-} from "../assets/reconstruction";
 import type { SemanticAssetType, ServiceRole } from "../core/catalog";
 import { button, el, section } from "./dom";
 
@@ -67,20 +63,17 @@ export function buildCustomAssetFlow(app: App): HTMLElement {
       sourceMimeType: file.type || "image/jpeg",
     });
     app.upsertCatalogEntry(entry);
-    status.textContent = "精緻模型稍後產生，目前可先用簡化素材排場佈。";
+    // Say what actually happened.
+    //
+    // This used to promise 「精緻模型稍後產生」, run a 10 ms mock worker over a
+    // procedural box, and then announce 「精緻模型已替換完成」. No photo was
+    // ever read: the object is built from the three numbers typed above, and
+    // for every semantic type except a desk the "replacement" is byte-identical
+    // to what was already there. A volunteer watched for a change that could
+    // not come, and stopped trusting the one signal that says an import worked.
+    status.textContent = "已依你輸入的尺寸建立素材。照片存起來對照用，不會轉成模型。";
     app.notifyToast?.(status.textContent);
     app.beginPlacementByAssetId(entry.id);
-
-    // Kick mock reconstruction in background.
-    const queue = new ReconstructionQueue();
-    const job = queue.enqueue(entry.id, entry.blobIds?.sourceImage);
-    const worker = new MockReconstructionWorker(queue);
-    void worker.run(job.id, entry).then(({ entry: next }) => {
-      app.upsertCatalogEntry(next);
-      app.notifyToast?.("精緻模型已替換完成");
-    }).catch(() => {
-      /* keep proxy */
-    });
   }
 
   async function onGlb(): Promise<void> {
