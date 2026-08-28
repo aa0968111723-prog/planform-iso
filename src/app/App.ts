@@ -134,11 +134,13 @@ import {
   type VenueCaptureSession,
 } from "../assets/venueCapture";
 import { Store } from "../state/store";
-import { SceneManager, type GhostState } from "../scene/SceneManager";
+import { planBounds, SceneManager, type GhostState } from "../scene/SceneManager";
+import { workspaceModeForWidth, type WorkspaceMode } from "../core/viewport";
 import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
 import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
 import { QuickAgent } from "../agent/quickAgent";
-import { MockProvider } from "../agent/provider";
+import { createAppAgentHost } from "./agentHost";
+import { LocalPlannerProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
 /** `sim` is the outdoor-booth crowd simulation; `check` still lives inside 分享. */
@@ -349,7 +351,12 @@ export class App {
     // Light by default; a stored preference wins. Applied before the first
     // paint so the canvas and the panels never disagree for a frame.
     this.applyTheme(loadTheme(), false);
-    this.quickAgent = new QuickAgent(store, new MockProvider());
+    // The shipping provider is the local structured planner: no network, no
+    // credential, and the whole layout/validation/simulation path keeps working
+    // with no cloud AI configured. The host is attached after construction
+    // because it closes over `this`.
+    this.quickAgent = new QuickAgent(store, new LocalPlannerProvider());
+    this.quickAgent.setHost(createAppAgentHost(this));
     this.store.subscribe(() => {
       this.syncScene();
       if (!this.dragging) {
@@ -452,6 +459,15 @@ export class App {
   setView(view: ViewName): void { this.store.mutate((p) => (p.view = view), { history: false }); this.scene.setView(view); }
   setSnap(mode: SnapMode): void { this.session.snap = mode; this.notifyUi(); }
   setShowLabels(v: boolean): void { this.session.showLabels = v; this.render(); }
+
+  /** The plan currently being edited. Read-only view for the agent host. */
+  get plan(): Project { return this.store.getState(); }
+
+  /** Frame the whole plan in the canvas. */
+  fitSceneToCanvas(): void { this.scene.fitBounds(planBounds(this.store.getState())); }
+
+  /** Which workspace the user is on, so the agent can answer 「手機還是桌機」. */
+  get workspaceMode(): WorkspaceMode { return workspaceModeForWidth(this.scene.canvasWidth()); }
   toggleLayer(layer: keyof Project["layers"]): void { this.store.mutate((p) => (p.layers[layer] = !p.layers[layer]), { history: false }); }
   recenterView(): void { this.scene.recenterView(this.state); }
   undo(): void { this.store.undo(); }

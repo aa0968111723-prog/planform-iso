@@ -697,7 +697,10 @@ export function validateToolArgs(toolName: string, rawArgs: unknown): ToolArgsVa
   const out: Record<string, unknown> = {};
 
   for (const key of Object.keys(args)) {
-    if (!(key in spec.params)) {
+    // `key in spec.params` walks the prototype chain, so `__proto__`,
+    // `constructor` and `toString` all pass a plain `in` check and slip past
+    // the unknown-key rule. hasOwnProperty is the only correct test here.
+    if (!Object.prototype.hasOwnProperty.call(spec.params, key)) {
       return { ok: false, error: `${toolName} 不接受參數「${key}」（可用：${Object.keys(spec.params).join("、") || "無"}）` };
     }
   }
@@ -743,7 +746,10 @@ export function validateToolArgs(toolName: string, rawArgs: unknown): ToolArgsVa
         }
         const src = v as Record<string, unknown>;
         for (const k of Object.keys(src)) {
-          if (!(k in shape)) return { ok: false, error: `${key}[${i}] 不接受欄位「${k}」` };
+          // Same prototype-chain trap as above, one level down.
+          if (!Object.prototype.hasOwnProperty.call(shape, k)) {
+            return { ok: false, error: `${key}[${i}] 不接受欄位「${k}」` };
+          }
         }
         const item: Record<string, unknown> = {};
         for (const [k, sub] of Object.entries(shape)) {

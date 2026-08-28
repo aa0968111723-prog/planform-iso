@@ -79,8 +79,32 @@ function cjkNumber(text: string): number | null {
 const CJK_NUM_CHARS = "〇零一壹二貳兩三參四肆五伍六陸七柒八捌九玖十拾百佰千仟萬";
 
 /**
+ * Characters that mean "the thing before me was a quantity".
+ *
+ * Converting every Chinese numeral unconditionally is wrong in a way that is
+ * easy to miss: 參與感 becomes 3與感 and 一起 becomes 1起, so a cue containing
+ * either can never fire and the normalized text shown to the user is garbled.
+ * Requiring a counter (or an unambiguous compound like 六十) keeps 「六十人」,
+ * 「一公尺」 and 「三種方案」 working while leaving ordinary words alone.
+ *
+ * 次 / 遍 / 下 are deliberately NOT counters here: no slot needs them, and
+ * leaving them out keeps 跑一次 / 走一遍 / 看一下 readable.
+ */
+const COUNTERS = "人位名張個件組排列面條邊桌把份種款公米尺坪";
+
+/** 六十 / 一百二十 — a compound is a number whatever follows it. */
+function isCompound(run: string): boolean {
+  return run.length >= 2 && /[十拾百佰千仟萬]/.test(run);
+}
+
+/**
  * Fold full-width characters to ASCII and rewrite Chinese numerals as digits,
  * so a single numeric pattern can serve both 「60 人」 and 「六十人」.
+ *
+ * Every cue table in this file is written against the OUTPUT of this function.
+ * `test/agentIntent.test.ts` extracts the literal alternatives out of each cue
+ * regex and asserts `normalize(literal) === literal`, so a cue that this
+ * function would rewrite fails the suite instead of silently never matching.
  */
 export function normalize(input: string): string {
   let s = input
@@ -92,9 +116,14 @@ export function normalize(input: string): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  // Rewrite runs of Chinese numerals into digits. Bounded to runs of at most 8
-  // characters so a sentence full of 一 does not become one enormous number.
-  s = s.replace(new RegExp(`[${CJK_NUM_CHARS}]{1,8}`, "g"), (run) => {
+  // Runs are bounded to 8 characters so a sentence full of 一 cannot collapse
+  // into one enormous number.
+  s = s.replace(new RegExp(`[${CJK_NUM_CHARS}]{1,8}`, "g"), (run, offset: number, whole: string) => {
+    const next = whole[offset + run.length] ?? "";
+    // `"abc".includes("")` is true, so a numeral at the very end of the string
+    // would count as "followed by a counter" and 統一 would become 統1.
+    const followedByCounter = next !== "" && COUNTERS.includes(next);
+    if (!isCompound(run) && !followedByCounter) return run;
     const n = cjkNumber(run);
     return n === null ? run : String(n);
   });
@@ -251,7 +280,7 @@ export function extractSlots(normalized: string): ExtractedSlots {
   // --- aisle width, including the 「兩邊各保留一公尺走道」 shape.
   const aisle =
     t.match(new RegExp(`(?:走道|通道|走廊)\\s*(?:寬|寬度)?\\s*(?:至少|最少|保留|留)?\\s*${NUM}\\s*${UNIT}`)) ??
-    t.match(new RegExp(`(?:各|每邊|兩邊各)?\\s*(?:保留|留|空出)\\s*${NUM}\\s*${UNIT}\\s*(?:的)?\\s*(?:走道|通道|走廊)`));
+    t.match(new RegExp(`(?:各|每邊|\\d*邊各)?\\s*(?:保留|留|空出)\\s*${NUM}\\s*${UNIT}\\s*(?:的)?\\s*(?:走道|通道|走廊)`));
   if (aisle) {
     const m = toMeters(Number(aisle[1]), aisle[2]);
     if (m !== null) slots.aisleWidth = { value: m, evidence: aisle[0] };
@@ -378,16 +407,19 @@ export interface IntentRule {
   threshold: number;
 }
 
-const ACTION_DESIGN = /排|安排|規劃|設計|配置|佈置|布置|擺|做一個場|弄一個場/;
+// 「幫我改善」 and 「優化一下」 are layout requests too — the partner-mode
+// suggestion flow speaks exactly that way, and without them it parses as
+// unknown and the assistant answers a question nobody asked.
+const ACTION_DESIGN = /排|安排|規劃|設計|配置|佈置|布置|擺|做\d*個場|弄\d*個場|改善|優化|順一點|更好/;
 const ACTION_CHANGE = /改成|調整|移到|搬到|換到|移動|挪到|放到/;
-const ACTION_MAKE = /建立|做一個|做個|新增|生成|產生|弄一個|匯入/;
+const ACTION_MAKE = /建立|做\d*個|做個|新增|生成|產生|弄\d*個|匯入/;
 
 export const INTENT_RULES: IntentRule[] = [
   {
     type: "design-layout",
     groups: [
       { name: "action", re: ACTION_DESIGN, weight: 2 },
-      { name: "subject", re: /場|活動|茶會|禪坐|靜坐|社課|攤位|教室|位置|配置/, weight: 1 },
+      { name: "subject", re: /場|活動|茶會|禪坐|靜坐|社課|攤位|教室|位置|配置|報到|收費|動線|走道|入口/, weight: 1 },
     ],
     slotBonus: [
       { name: "participants", has: (s) => !!s.participants, weight: 2 },
@@ -453,7 +485,7 @@ export const INTENT_RULES: IntentRule[] = [
   {
     type: "export-deliverables",
     groups: [
-      { name: "action", re: /產生|輸出|匯出|給我|印|做一張/, weight: 2 },
+      { name: "action", re: /產生|輸出|匯出|給我|印|做\d*張/, weight: 2 },
       { name: "subject", re: /場佈圖|施工圖|動線圖|物資清單|物資表|夥伴|工作人員看|平面圖|清單/, weight: 3 },
     ],
     threshold: 5,

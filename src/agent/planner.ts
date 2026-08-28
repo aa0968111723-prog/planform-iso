@@ -224,7 +224,11 @@ export function planFromRequest(parsed: ParsedRequest, project: Project): PlanRe
       }
       // Two desks each asked to keep a metre of aisle need to be at least
       // desk-width + aisle apart, or they satisfy the words and not the intent.
-      const gap = ref.clearance ?? 1.0;
+      //
+      // 「兩邊各保留一公尺走道」 is one instruction about both desks, so it lands
+      // on the sentence-level aisle slot rather than on either desk. Falling
+      // back to it here is what makes that sentence do what it says.
+      const gap = ref.clearance ?? s.aisleWidth?.value ?? 1.0;
       const offset = obj.width / 2 + gap + index * 0.2;
       const p = pointFor(project, ref.relation, offset);
       add(
