@@ -41,6 +41,42 @@ export interface StationStats {
   served: number;
   utilization: number; // 0–1 over [0, horizon]
   busyServerSeconds: number;
+  /**
+   * How many service positions actually opened this run. 0 means nobody is
+   * staffing it, which is a different statement from "0% busy" — and the
+   * difference is exactly what a staffing readout has to be able to say.
+   */
+  servers: number;
+}
+
+/** One step of an interaction flow, as it actually ran. */
+export interface StepStats {
+  stepId: string;
+  name: string;
+  entered: number;
+  avgSeconds: number;
+  /** How often each option came up: 「怪獸：拖延 42 人」. Absent when there is no fork. */
+  optionCounts?: { label: string; count: number }[];
+}
+
+/** 經過 → 停下 → 參加 → 完成, for an organiser rather than for a marketer. */
+export interface FunnelStats {
+  passed: number;
+  stopped: number;
+  joined: number;
+  completed: number;
+  leftEarly: number;
+}
+
+export interface StaffLoadLine {
+  roleId: string;
+  roleName: string;
+  /** Plain language. The raw fraction is never the thing the user is shown. */
+  phrase: string;
+  busyFraction: number;
+  stationNames: string[];
+  /** A station under this role got nobody. */
+  shortage: boolean;
 }
 
 export interface SimulationResult {
@@ -64,6 +100,11 @@ export interface SimulationResult {
   bottleneckStationId: string | null;
   bottleneckName: string | null;
   summaryLines: string[];
+  /** People who queued too long and left. Always 0 for a classroom scenario. */
+  leftEarly: number;
+  steps?: StepStats[];
+  funnel?: FunnelStats;
+  staffLoad?: StaffLoadLine[];
   /** Sparse playback samples at fixed dt for canvas markers. */
   playback: PlaybackFrame[];
 }
@@ -530,6 +571,7 @@ export function runDiscreteEvent(
         ? Math.min(1, st.busyServerSeconds / (horizon * servers))
         : 0,
       busyServerSeconds: st.busyServerSeconds,
+      servers,
     };
   });
 
@@ -595,6 +637,7 @@ export function runDiscreteEvent(
     scenarioId: scenario.id,
     seed: scenario.seed,
     participantCount: scenario.participantCount,
+    leftEarly: 0,
     completed: completedAgents.length,
     unfinished,
     avgJourneySeconds: avgJourney,
@@ -645,6 +688,7 @@ function emptyResult(scenario: EventScenario, msg: string): SimulationResult {
     scenarioId: scenario.id,
     seed: scenario.seed,
     participantCount: scenario.participantCount,
+    leftEarly: 0,
     completed: 0,
     unfinished: scenario.participantCount,
     avgJourneySeconds: 0,

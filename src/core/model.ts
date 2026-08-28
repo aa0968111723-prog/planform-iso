@@ -259,7 +259,18 @@ export interface ServiceStation {
   z: number;
 }
 
-export type ParticipantProfileId = "general" | "prepaid" | "pay-on-site" | "staff";
+/**
+ * Widened from a four-value union to a string.
+ *
+ * Runtime behaviour is unchanged — "prepaid" / "pay-on-site" are still the ids
+ * the classroom scenario uses, and they must stay verbatim because
+ * `arrivalMix.test.ts` reads `profileId` out of the playback to check that the
+ * 40/20 mix really arrives mixed. The widening exists so a compiled
+ * interaction template can name its own audience segments.
+ *
+ * Not a version bump: it changes nothing in any saved file.
+ */
+export type ParticipantProfileId = string;
 
 export interface ParticipantProfile {
   id: ParticipantProfileId;
@@ -286,6 +297,15 @@ export interface SimulationSpatial {
   corridor: AreaConfig;
   classroom: AreaConfig;
   doors: SimulationDoor[];
+  /**
+   * Entry / exit rectangles.
+   *
+   * With these, "the queue is blocking the entrance" is a fact that can be
+   * stated from geometry. Without them the only way to notice is a sampled
+   * congestion accumulator — and a sampled answer changes with `sampleDt`,
+   * which would let the rendering detail quietly move the statistics.
+   */
+  zones?: { id: string; name: string; x: number; z: number; width: number; depth: number }[];
 }
 
 export interface EventScenario {
@@ -354,6 +374,198 @@ export interface BoothConfig {
   params: BoothParams;
 }
 
+// --- Interaction flow (互動流程) -----------------------------------------
+//
+// Every flow this tool rehearses is "an ordered list of steps, a few of which
+// fork". Getting into a classroom (check in → pay → shoes → sit down) is that
+// shape, and so is a campus booth (walk past → stop → join → queue → play →
+// leave). The only real differences are that a classroom forks once at the
+// door (prepaid / paying now) while a booth forks mid-flow (which face, which
+// option), and that everyone invited to a classroom turns up while most people
+// passing a booth are only passing. Everything else — queueing, parallel
+// servers, service time, walking between stations, doors, corridor overflow —
+// was always shared.
+//
+// So the core has three primitives and no Dice, no Quiz, no Booth:
+//   step   — one person, in one place, doing one thing, for a while
+//   chance — a weighted fork (a dice face, an option, do-it / skip-it)
+//   match  — a result looked up from earlier answers (the 4×4 OK 蹦 table)
+//
+// The activity the club actually runs is 「心情 OK 蹦」: several questions,
+// options per question, the combination choosing the outcome, free writing in
+// the middle, a physical card at the end. Hard-code the core as a DiceEngine
+// or a QuizEngine and that real activity cannot be expressed — which is the
+// reason this model has the shape it has.
+//
+// What the engine reads (weight / seconds / next) and what a person reads
+// (label / prompt / result text) are separate fields, so adding a sixteenth
+// quote never touches the engine.
+
+/** One weighted option: a face of a dice, an answer, or 「do it」/「skip it」. */
+export interface InteractionOption {
+  id: string;
+  /** 「還算喜歡」「拖延獸」. The organiser's own words; never hard-coded. */
+  label: string;
+  /** This face's own question or line. Content only — editing it never moves a number. */
+  prompt?: string;
+  /** Relative weight, normalised within the step. [1,1,1,1] is a fair four-sided dice. */
+  weight: number;
+  /** Extra seconds this face costs on top of the step's own time. */
+  extraSeconds?: number;
+  /** Recorded under `ChanceBranch.record` for later `match` steps. Defaults to `id`. */
+  value?: string;
+  /** undefined = use the step's own next; null = the visitor leaves here. */
+  next?: string | null;
+}
+
+/** A random fork. One roll, one rng() draw, and only when there is a real choice. */
+export interface ChanceBranch {
+  kind: "chance";
+  options: InteractionOption[];
+  /** Remember the chosen option's value under this key, for a later `match`. */
+  record?: string;
+}
+
+/** One cell of an outcome table. `when` is matched in `MatchBranch.on` order; "*" is any. */
+export interface MatchRule {
+  when: string[];
+  /** What the visitor gets — a quote, a prize, the name of a route. */
+  label: string;
+  extraSeconds?: number;
+  next?: string | null;
+}
+
+/**
+ * An outcome table: earlier answers decide what happens now.
+ *
+ * A lookup, not a roll, so it consumes NO randomness. That is deliberate:
+ * which quote you get does not change how long you stand at the table, and
+ * rolling for it would only make the same plan produce different queue lengths
+ * on every run without buying a single piece of real information.
+ */
+export interface MatchBranch {
+  kind: "match";
+  /** Record keys to look up, in order. ["q1","q3"] is a two-dimensional table. */
+  on: string[];
+  rules: MatchRule[];
+  otherwise?: Omit<MatchRule, "when">;
+}
+
+export type InteractionBranch = ChanceBranch | MatchBranch;
+
+export interface InteractionStep {
+  id: string;
+  /** The organiser's own words: 「歡迎」「Q1 科系真心話」「領 OK 蹦小卡」. */
+  name: string;
+  /** Where it happens. Omitted = wherever the step that led here happened. */
+  stationId?: string;
+  /** Mean seconds. 0 is legal — a pure fork costs no time. */
+  avgSeconds: number;
+  /**
+   * Spread of the duration. This is a VARIANCE, not seconds — same name and
+   * same meaning as `ServiceStation.serviceVariance` (the engine takes its
+   * square root as σ, defaulting to `avgSeconds * 0.2`).
+   *
+   * Deliberately not changed to "seconds": compiling a classroom scenario
+   * copies `station.serviceVariance` verbatim, and a seconds field would mean
+   * a sqrt-then-square round trip whose float drift would stop E310 being
+   * bit-identical. The panel shows 「大約差幾秒」 and squares on the way in.
+   */
+  serviceVariance?: number;
+  /** The question or instruction. Shown in the panel, printed on the 場刊圖. */
+  prompt?: string;
+  branch?: InteractionBranch;
+  /** What to bring for this step, printed on the 場刊圖 (cards, pens, a stamp). */
+  supplies?: string[];
+  /**
+   * undefined = the next row of `steps` — THE LIST ORDER IS THE FLOW
+   * null      = this visitor is finished and leaves
+   * string    = jump to a named step (only skip options and table results write this)
+   *
+   * This one rule is what lets a plain reorderable list carry a real branching
+   * flow without becoming a node editor: ↑/↓ swap two array entries and the
+   * flow genuinely changes, duplicate and delete need no edge repair, and
+   * nothing hides in a graph the organiser cannot see.
+   */
+  next?: string | null;
+}
+
+/**
+ * Where a step happens. Structurally a ServiceStation, so simSpatial's
+ * `queuePlacement` and `buildTravelPath` take it with no adapter.
+ */
+export interface InteractionStation extends ServiceStation {
+  /** Which role staffs it. Omitted → see `selfService`, then the old staffCount rule. */
+  staffRoleId?: string;
+  /**
+   * Nobody needs to staff this step (flipping a card, writing your own
+   * sentence).
+   *
+   * It has to be its own field. `effectiveServers` returns 0 when
+   * `staffCount <= 0`, so expressing a self-service step as "zero staff" would
+   * jam every visitor there forever; and giving it a fake staff member would
+   * make the staff-load line claim a human is 「一直有事做」 at a step where
+   * nobody is serving anyone.
+   */
+  selfService?: boolean;
+  /** Walk away if the queue is already this long on arrival. Omitted = nobody balks. */
+  balkQueueLength?: number;
+}
+
+export interface StaffRole {
+  id: string;
+  /** 招呼 / 主持 / 陪聊 — free text. The core never makes this an enum. */
+  name: string;
+  count: number;
+}
+
+/**
+ * A fixed split decided on arrival — this is the classroom's ParticipantProfile.
+ * Whole people are allocated by largest remainder, no dice, exactly as today.
+ */
+export interface AudienceSegment {
+  id: string;
+  name: string;
+  /** Relative share, normalised. */
+  share: number;
+  startStepId: string;
+}
+
+export interface InteractionAudience {
+  /** People who pass by in this window. A booth: passers-by. A class: invitees. */
+  count: number;
+  windowSeconds: number;
+  profile: ArrivalProfile;
+  /** 0–1. How many of those passing stop to look. An invited event is 1. */
+  stopRate: number;
+  /** 0–1. How many of those who stopped actually join. An invited event is 1. */
+  joinRate: number;
+  /**
+   * Seconds of queueing before someone gives up. 0 = nobody leaves.
+   *
+   * A fixed number, not a sampled one: drawing a personal patience would cost
+   * another rng() call and buy a distribution nobody has measured, while
+   * adding one more reason for the same plan to answer differently twice.
+   */
+  patienceSeconds: number;
+}
+
+export interface InteractionTemplate {
+  id: string;
+  name: string;
+  /** Free note; printed under the step table on the 場刊圖. */
+  note?: string;
+  steps: InteractionStep[];
+  startStepId: string;
+  stations: InteractionStation[];
+  staff: StaffRole[];
+  audience: InteractionAudience;
+  segments: AudienceSegment[];
+  seed: number;
+  settings: { speedMetersPerSecond: number };
+  spatial?: SimulationSpatial;
+}
+
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
 export interface ProjectCatalogExtra {
   id: string;
@@ -417,6 +629,12 @@ export interface Project {
   activeScenarioId: string | null;
   /** Outdoor booth simulation. Absent on classroom projects. */
   booth?: BoothConfig;
+  /**
+   * The interaction flow. Optional exactly like `booth`, and like `booth` it
+   * does NOT move PROJECT_VERSION — an older build ignores it and falls back
+   * to the `booth` block still sitting in the same file.
+   */
+  interaction?: InteractionTemplate;
 }
 
 let idCounter = 0;

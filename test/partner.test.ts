@@ -55,7 +55,7 @@ function plan(): Project {
 function station(over: Partial<StationStats> & { stationId: string; name: string }): StationStats {
   return {
     type: "checkin", maxQueue: 0, avgWaitSeconds: 0, totalWaitSeconds: 0,
-    served: 0, utilization: 0, busyServerSeconds: 0, ...over,
+    served: 0, utilization: 0, busyServerSeconds: 0, servers: 1, ...over,
   };
 }
 
@@ -63,7 +63,7 @@ function simResult(over: Partial<SimulationResult> = {}): SimulationResult {
   return {
     scenarioId: "s1", seed: 1, participantCount: 60, completed: 60, unfinished: 0,
     avgJourneySeconds: 300, maxJourneySeconds: 900, totalWaitSeconds: 7200, avgWaitSeconds: 120,
-    maxQueue: 8, maxQueueWhere: "", finishTimeSeconds: 1200,
+    maxQueue: 8, maxQueueWhere: "", finishTimeSeconds: 1200, leftEarly: 0,
     spatialBottlenecks: [],
     stations: [
       station({ stationId: "checkin", name: "報到", maxQueue: 8, avgWaitSeconds: 120 }),

@@ -44,6 +44,16 @@ installLocalStorage();
 
 const FIXTURE = new URL("./fixtures/e310-des.json", import.meta.url);
 
+/** JSON.stringify replacer that emits object keys in a stable order. */
+function sortedKeys(_key: string, value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+    out[k] = (value as Record<string, unknown>)[k];
+  }
+  return out;
+}
+
 /**
  * Everything the user is shown as a number.
  *
@@ -133,7 +143,10 @@ describe("the classroom simulation gives the same answers it gives today", () =>
     const runs = currentRuns();
     if (!existsSync(FIXTURE)) {
       // First run writes the baseline. Committing it is the point of this test.
-      writeFileSync(FIXTURE, `${JSON.stringify(runs, null, 1)}\n`, "utf8");
+      // Keys are sorted so that adding a field produces a one-line diff instead
+      // of reshuffling the whole file — the fixture is meant to be READ when it
+      // changes, not just regenerated.
+      writeFileSync(FIXTURE, `${JSON.stringify(runs, sortedKeys, 1)}\n`, "utf8");
     }
     const recorded = JSON.parse(readFileSync(FIXTURE, "utf8")) as Record<string, unknown>;
     for (const key of Object.keys(recorded)) {
