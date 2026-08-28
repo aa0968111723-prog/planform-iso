@@ -43,6 +43,8 @@ import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
 import { stackedLabelY, type PlacedLabel } from "./labelLayout";
+import { buildPropGroupCached } from "./propVisual";
+import { propFaceOptions, propForAssetId } from "../core/propCatalog";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
 
 const D2R = Math.PI / 180;
@@ -638,20 +640,32 @@ export class SceneManager {
       seen.add(o.id);
       const catalogEntry = this.catalog.resolve(o.assetId, o.kind);
       const quality = "standard";
+      // A prop's faces render from its bound station's chance options — the
+      // one live record for face colour/label. Both feed the signature: an
+      // edited face must rebuild exactly like an edited definition.
+      const propDef = catalogEntry.visualRef.startsWith("prop:")
+        ? propForAssetId(project.props, o.assetId)
+        : undefined;
+      const faceOptions = propDef ? propFaceOptions(project, o.id, propDef) : undefined;
+      const faceSig = faceOptions
+        ? faceOptions.map((opt) => `${opt.label}|${opt.color ?? ""}|${opt.imageBlobId ?? ""}`).join("¦")
+        : "";
       // entry.version is part of the identity: editing a custom definition
       // bumps it, and without it here the scene kept drawing the old visual
       // after every edit.
-      const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|v${catalogEntry.version}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
+      const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|v${catalogEntry.version}|${faceSig}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
       let entry = this.objectNodes.get(o.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.objectGroup.remove(entry.group); disposeObject(entry.group); entry.label?.dispose(); }
-        const group = resolveVisualGroup(
-          catalogEntry,
-          o.kind,
-          { width: o.width, depth: o.depth, height: o.height },
-          o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined,
-          quality,
-        );
+        const group = propDef
+          ? buildPropGroupCached(propDef, { faceOptions })
+          : resolveVisualGroup(
+            catalogEntry,
+            o.kind,
+            { width: o.width, depth: o.depth, height: o.height },
+            o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined,
+            quality,
+          );
         group.userData = { ...group.userData, type: "object", id: o.id };
         group.traverse((m) => {
           if (m instanceof Mesh) {
