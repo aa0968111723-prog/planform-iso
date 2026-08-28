@@ -172,12 +172,19 @@ describe("物資清單 names the material the 場務組 has to carry", () => {
   });
 });
 
-describe("F-03 the golden scenario is 60 人 over a 20-minute arrival window", () => {
-  it("matches the spec in REAL_REFERENCE_CONTRACT §8", () => {
+describe("F-03 the golden scenario is 60 人 over a 15-minute arrival window", () => {
+  // Cites the spec that actually states it. This test used to name
+  // REAL_REFERENCE_CONTRACT §8 — the Golden Scenario Gate, which lists the flow
+  // and contains no numbers — and assert 20 minutes, while the spec that does
+  // state a window (E310_GOLDEN_SCENARIO.md) says 15. A test citing a source
+  // that does not say what the test asserts is worse than no test: it makes the
+  // wrong value look confirmed.
+  it("matches 到達窗預設 15 分鐘 in docs/e310/E310_GOLDEN_SCENARIO.md", () => {
     const project = buildE310GoldenProject(venuePresetById("venue:tku-e310")!);
     const scenario = project.scenarios?.[0];
     expect(scenario?.participantCount).toBe(60);
-    expect(scenario?.arrivalWindowSeconds).toBe(20 * 60);
+    expect(scenario?.arrivalWindowSeconds).toBe(15 * 60);
+    expect(scenario?.arrivalProfile).toBe("front-loaded");
   });
 
   it("splits 40 prepaid / 20 paying on site", () => {

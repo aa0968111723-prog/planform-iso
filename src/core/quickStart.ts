@@ -478,9 +478,15 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
   const onsite = ids(["entrance", "guide", "queue", "checkin", "payment", "shoe", "backpack", "seating"]);
   const scenario: EventScenario = {
     id: uid("scn"), name: "E310 演講範例（60 人）", participantCount: 60,
-    // 20 minutes: the golden scenario the release gate specifies is
-    // "60 人／20 分鐘陸續到達" (docs/field-research/REAL_REFERENCE_CONTRACT.md §8).
-    arrivalWindowSeconds: 1200, arrivalProfile: "front-loaded",
+    // 15 minutes, front-loaded — the value its own spec records:
+    // docs/e310/E310_GOLDEN_SCENARIO.md 「E310 演講範例（60 人）」→「到達窗預設 15 分鐘、front-loaded」.
+    //
+    // This shipped as 1200 s citing REAL_REFERENCE_CONTRACT.md §8, which is the
+    // E310 Golden Scenario Gate and contains no numbers at all — it lists the
+    // flow, not the arrival window. Neither 15 nor 20 minutes is field-measured
+    // (both are planning assumptions the user can change), so the tie-break is
+    // simply: follow the spec that actually says something, and cite it.
+    arrivalWindowSeconds: 15 * 60, arrivalProfile: "front-loaded",
     profiles: [
       { id: "prepaid", ratio: 40 / 60, branch: prepaid },
       { id: "pay-on-site", ratio: 20 / 60, branch: onsite },
