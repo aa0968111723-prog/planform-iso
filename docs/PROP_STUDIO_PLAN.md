@@ -216,7 +216,7 @@ tag `PLANFORM_PROP_STUDIO_READY`；**不 merge**。
 | 2. parts → 3D ＋ 預覽器 | ✅ | 11 測試、5 變異全擋 |
 | 3. 內建道具＋地墊 | ✅ | 15 筆定義（10＋地墊＋4 golden）、12 條性質測試 |
 | 4. 模擬綁定（接線契約） | ✅ | 20 測試、8 變異全擋；parity 零改動 |
-| 5. Prop Studio UI＋群組 | ⬜ | |
+| 5. Prop Studio UI＋群組 | ✅ | studio overlay（預設種子、零件/互動/錨點編輯、autosave 草稿）、我的道具裝置庫、§71 fork、§93 群組吸收；live 瀏覽器煙霧測試全過 |
 | 6. 彩排／場刊／夥伴／連動 | ⬜ | |
 | 7. GLB／AI／匯入匯出 | ⬜ | |
 | 8. E2E／效能／審查／tag | ⬜ | |

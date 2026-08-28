@@ -19,6 +19,7 @@ import {
   type InteractionStation,
   type InteractionStep,
   type InteractionTemplate,
+  type PropDefinition,
   type Zone,
   type ZoneType,
 } from "../core/model";
@@ -50,7 +51,8 @@ import {
   type TemplateMeta,
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
-import { propForAssetId } from "../core/propCatalog";
+import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import { absorbSelection, forkDefinition } from "../core/propEdit";
 import {
   catalogFromProject,
   createDefaultScenario,
@@ -594,6 +596,139 @@ export class App {
     this.bindPropOnPlace(obj);
     this.setSelection([id]);
     // Stay in placement mode for continuous placing.
+  }
+
+  // --- prop studio ---------------------------------------------------------
+
+  propDefinitions(): PropDefinition[] {
+    return this.state.props ?? [];
+  }
+
+  /** Definitions come with their mirrored entry, or the library cannot place them. */
+  addPropToProject(def: PropDefinition, opts: { place?: boolean } = {}): void {
+    this.store.mutate((p) => {
+      const others = (p.props ?? []).filter((d) => d.id !== def.id);
+      p.props = [...others, def];
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+    });
+    if (opts.place !== false) this.beginPlacementByAssetId(propEntryId(def));
+  }
+
+  /**
+   * Edit a definition. The version bump is not cosmetic: the scene's rebuild
+   * signature includes entry.version, so this is what makes every placed
+   * instance redraw with the new look.
+   */
+  updatePropDefinition(def: PropDefinition): void {
+    const bumped = { ...def, version: def.version + 1 };
+    this.store.mutate((p) => {
+      p.props = (p.props ?? []).map((d) => (d.id === def.id ? bumped : d));
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+    });
+    this.resetFlowRun();
+  }
+
+  /** Delete a definition AND everything standing on it — objects and splices. */
+  deletePropDefinition(defId: string): void {
+    const entryId = `custom:${defId}`;
+    this.store.mutate((p) => {
+      const doomed = p.objects.filter((o) => o.assetId === entryId).map((o) => o.id);
+      p.objects = p.objects.filter((o) => o.assetId !== entryId);
+      if (p.interaction) {
+        for (const id of doomed) {
+          const next = removePropInteraction(p.interaction, id);
+          if (next === null) { delete p.interaction; break; }
+          p.interaction = next;
+        }
+      }
+      p.props = (p.props ?? []).filter((d) => d.id !== defId);
+      if (!p.props.length) delete p.props;
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+    });
+    this.resetFlowRun();
+  }
+
+  /**
+   * §71 「只改這一個」 — fork the definition for one placed instance. The other
+   * copies keep the original; this object gets its own editable branch. Its
+   * station splice is rebuilt against the fork so face edits land there.
+   */
+  forkPropForObject(objectId: string): PropDefinition | null {
+    const obj = this.state.objects.find((o) => o.id === objectId);
+    const def = propForAssetId(this.state.props, obj?.assetId);
+    if (!obj || !def) return null;
+    const fork = forkDefinition(def);
+    this.store.mutate((p) => {
+      p.props = [...(p.props ?? []), fork];
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+      const target = p.objects.find((o) => o.id === objectId);
+      if (target) target.assetId = propEntryId(fork);
+      if (p.interaction) {
+        const cleared = removePropInteraction(p.interaction, objectId);
+        p.interaction = cleared === null ? undefined : cleared;
+        if (!p.interaction) delete p.interaction;
+        if (fork.interaction) {
+          p.interaction = instantiatePropInteraction(p.interaction ?? propTemplateSkeleton(), fork, objectId);
+        }
+      }
+    });
+    this.resetFlowRun();
+    this.toast(`已建立「${fork.name}」——改它不會影響其他複製品`, true);
+    return fork;
+  }
+
+  /**
+   * §93 「從選取的物件建立組合道具」 — the selected placed things become ONE
+   * prop: parts merged at their relative positions, anchors and the first
+   * interactive prop's game carried over, originals (and their splices)
+   * removed, one new object placed at the selection's centre. Moving the
+   * group is now moving one thing, and the anchors ride along by construction.
+   */
+  groupSelectionIntoProp(name = "組合道具"): PropDefinition | null {
+    const ids = this.session.selection;
+    const objects = this.state.objects.filter((o) => ids.has(o.id));
+    if (objects.length < 2) {
+      this.toast("先選兩個以上的物件再組合");
+      return null;
+    }
+    const catalog = this.getCatalog();
+    const absorbed = absorbSelection({
+      objects,
+      props: this.state.props,
+      entryFor: (o) => catalog.resolve(o.assetId, o.kind),
+    }, name);
+    if (!absorbed) return null;
+    const { def, droppedInteractions } = absorbed;
+    const cx = objects.reduce((s, o) => s + o.x, 0) / objects.length;
+    const cz = objects.reduce((s, o) => s + o.z, 0) / objects.length;
+    const newId = uid("obj");
+    this.store.mutate((p) => {
+      if (p.interaction) {
+        for (const o of objects) {
+          const next = removePropInteraction(p.interaction, o.id);
+          if (next === null) { delete p.interaction; break; }
+          p.interaction = next;
+        }
+      }
+      p.objects = p.objects.filter((o) => !ids.has(o.id));
+      p.props = [...(p.props ?? []), def];
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+      p.objects.push({
+        id: newId, kind: "table", x: cx, z: cz, rotationDeg: 0,
+        width: def.dimensions.width, depth: def.dimensions.depth, height: def.dimensions.height,
+        locked: false, hidden: false, surface: "floor", elevation: 0,
+        assetId: propEntryId(def), serviceRole: "none",
+      } as SceneObject);
+    });
+    const placed = this.state.objects.find((o) => o.id === newId);
+    if (placed) this.bindPropOnPlace(placed);
+    this.setSelection([newId]);
+    if (droppedInteractions.length) {
+      this.toast(`「${droppedInteractions.join("、")}」的互動沒有帶進組合——一個組合道具只帶一個遊戲`, false);
+    } else {
+      this.toast(`已組合成「${def.name}」，整組一起移動`, true);
+    }
+    return def;
   }
 
   /**

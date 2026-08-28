@@ -1,0 +1,358 @@
+/**
+ * Prop Studio — 建立與編輯 3D 道具 (§6-10, §14-15, §23-24, §44-46).
+ *
+ * The flow the brief demands and nothing past it: 想做什麼 → 尺寸 → 外觀 →
+ * 互動 → 儲存. Everything is numbers, chips and a live preview; no vertex, no
+ * UV, no node graph, no dragging as the only path (§73 — a phone user types
+ * centimetres and taps 「放在◯◯上面」).
+ *
+ * The studio edits a DRAFT copy. Every edit autosaves the draft to
+ * localStorage (§76 — a refresh must not eat a half-built dice); committing
+ * writes through App into `project.props`, which makes further edits undoable
+ * through the store like any other change (§75).
+ *
+ * One face record: the table here edits the definition's SEED options — the
+ * same option objects that will drive the 3D faces, the panel row and the
+ * result display once placed. After placement the live copy is
+ * `project.interaction`, edited in flowPanel; 編輯道具 on a placed prop reseeds
+ * from there deliberately, never in parallel.
+ */
+
+import type { App } from "../app/App";
+import { createPropPreview, type PreviewAngle, type PropPreview } from "./propPreview";
+import { FINISH_CHOICES } from "../scene/propVisual";
+import { overlappingParts, relatePartOffset } from "../core/propEdit";
+import { propPreset, PROP_PRESETS } from "../core/propPresets";
+import { saveLibraryProp } from "../state/propLibrary";
+import { uid, type InteractionOption, type PropAnchor, type PropDefinition, type PropPart } from "../core/model";
+import { button, el, num, section, selectField, textField } from "./dom";
+
+const DRAFT_KEY = "planform-iso:prop-draft";
+
+export interface PropStudioOptions {
+  /** Edit an existing project definition; absent = build a new one. */
+  edit?: PropDefinition;
+  /** How many placed objects share the edited definition (drives §71). */
+  instanceCount?: number;
+  onClose: () => void;
+}
+
+function blankDraft(): PropDefinition {
+  return {
+    id: `prop_${uid("p")}`,
+    name: "我的道具",
+    category: "互動",
+    dimensions: { width: 0.6, depth: 0.6, height: 0.6 },
+    parts: [{
+      id: "part1", shape: "box",
+      size: { width: 0.6, depth: 0.6, height: 0.6 },
+      offset: { x: 0, y: 0, z: 0 },
+      color: "#8fb4c9", finish: "plastic-matte",
+    }],
+    anchors: [],
+    version: 1,
+    source: "user",
+  };
+}
+
+function readDraft(): PropDefinition | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? JSON.parse(raw) as PropDefinition : null;
+  } catch { return null; }
+}
+
+function writeDraft(def: PropDefinition | null): void {
+  try {
+    if (def) localStorage.setItem(DRAFT_KEY, JSON.stringify(def));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch { /* storage full — the in-memory draft still works this session */ }
+}
+
+/** The seed's first chance step — where the faces live. */
+function faceStep(def: PropDefinition) {
+  return def.interaction?.steps.find((s) => s.branch?.kind === "chance");
+}
+
+function faceOptions(def: PropDefinition): InteractionOption[] {
+  const step = faceStep(def);
+  return step?.branch?.kind === "chance" ? step.branch.options : [];
+}
+
+export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
+  const overlay = el("div", { class: "quickstart propstudio" });
+  const card = el("div", { class: "quickstart__card propstudio__card" });
+  overlay.append(card);
+
+  const editing = !!opts.edit;
+  let draft: PropDefinition = opts.edit
+    ? JSON.parse(JSON.stringify(opts.edit)) as PropDefinition
+    : readDraft() ?? blankDraft();
+  const restoredDraft = !opts.edit && !!readDraft();
+
+  let preview: PropPreview | null = null;
+  let angle: PreviewAngle = "iso";
+
+  const close = () => {
+    preview?.dispose();
+    overlay.remove();
+    opts.onClose();
+  };
+
+  const touch = () => {
+    if (!editing) writeDraft(draft);
+    render();
+  };
+
+  const scaleTo = (axis: "width" | "depth" | "height", value: number) => {
+    const factor = value / draft.dimensions[axis];
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    draft.dimensions[axis] = value;
+    // Scale parts and anchors with the box, so 「改成 80 公分」 means the prop,
+    // not one lonely number.
+    const key = axis === "height" ? "y" : axis === "width" ? "x" : "z";
+    for (const part of draft.parts) {
+      part.size[axis] = Math.max(0.01, part.size[axis] * factor);
+      part.offset[key] *= factor;
+    }
+    if (axis !== "height") {
+      for (const anchor of draft.anchors) anchor[key as "x" | "z"] *= factor;
+    }
+  };
+
+  const ensureInteraction = () => {
+    if (draft.interaction) return;
+    draft.interaction = {
+      steps: [
+        {
+          id: "play", name: "玩一輪", avgSeconds: 30,
+          branch: {
+            kind: "chance", record: "result",
+            options: Array.from({ length: 4 }, (_, i) => ({
+              id: `o${i + 1}`, label: `選項 ${i + 1}`, weight: 1, color: "#38bdf8",
+            })),
+          },
+        },
+        { id: "done", name: "完成", avgSeconds: 10, next: null },
+      ],
+      station: { meanServiceSeconds: 40, parallelServers: 1, queueCapacity: 6 },
+      staffRole: { name: draft.name, count: 1 },
+      skipRate: 0.3,
+    };
+    if (!draft.anchors.length) {
+      draft.anchors = [
+        { id: "player", role: "player", x: 0, z: draft.dimensions.depth / 2 + 0.5 },
+        { id: "staff", role: "staff", x: draft.dimensions.width / 2 + 0.5, z: 0 },
+        { id: "queue", role: "queue", x: 0, z: draft.dimensions.depth / 2 + 1.2, facingDeg: 0 },
+        { id: "exit", role: "exit", x: -(draft.dimensions.width / 2 + 0.8), z: 0 },
+      ];
+    }
+  };
+
+  const setFaceCount = (count: number) => {
+    const step = faceStep(draft);
+    if (!step || step.branch?.kind !== "chance") return;
+    const options = step.branch.options;
+    while (options.length < count) {
+      options.push({ id: `o${uid("f")}`, label: `選項 ${options.length + 1}`, weight: 1, color: "#38bdf8" });
+    }
+    step.branch.options = options.slice(0, count);
+  };
+
+  const anchorRow = (role: PropAnchor["role"], label: string): HTMLElement => {
+    const anchor = draft.anchors.find((a) => a.role === role);
+    const d = draft.dimensions;
+    const place = (x: number, z: number) => {
+      const existing = draft.anchors.find((a) => a.role === role);
+      if (existing) { existing.x = x; existing.z = z; }
+      else draft.anchors.push({ id: role, role, x, z, ...(role === "queue" ? { facingDeg: 0 } : {}) });
+      touch();
+    };
+    const dist = anchor ? Math.hypot(anchor.x, anchor.z) : 0;
+    return el("div", { class: "list__row" }, [
+      el("span", { class: "readout__label", text: label }),
+      button("前", () => place(0, d.depth / 2 + Math.max(0.5, dist || 0.6)), "chip chip--sm"),
+      button("後", () => place(0, -(d.depth / 2 + Math.max(0.5, dist || 0.6))), "chip chip--sm"),
+      button("左", () => place(-(d.width / 2 + Math.max(0.5, dist || 0.6)), 0), "chip chip--sm"),
+      button("右", () => place(d.width / 2 + Math.max(0.5, dist || 0.6), 0), "chip chip--sm"),
+      num("距離 cm", Math.round((anchor ? Math.hypot(anchor.x, anchor.z) : 0.6) * 100), 10, (v) => {
+        const a = draft.anchors.find((x) => x.role === role);
+        if (!a) return;
+        const len = Math.hypot(a.x, a.z) || 1;
+        const target = Math.max(0.2, v / 100);
+        a.x = (a.x / len) * target;
+        a.z = (a.z / len) * target;
+        touch();
+      }, 20),
+      ...(anchor ? [el("span", { class: "hint", text: "✓" })] : []),
+    ]);
+  };
+
+  const render = () => {
+    card.innerHTML = "";
+    card.append(el("div", { class: "quickstart__title", text: editing ? `編輯「${draft.name}」` : "新增道具" }));
+
+    if (restoredDraft && !editing) {
+      card.append(el("div", { class: "row wrap" }, [
+        el("span", { class: "hint", text: "已還原上次沒做完的草稿。" }),
+        button("丟掉重來", () => { writeDraft(null); draft = blankDraft(); render(); }, "chip chip--sm"),
+      ]));
+    }
+
+    // --- 類型 (new only): start from a preset ------------------------------
+    if (!editing) {
+      card.append(el("div", { class: "subhead", text: "想做什麼？" }));
+      card.append(el("div", { class: "row wrap" }, PROP_PRESETS.map((p) =>
+        button(`${p.icon ?? "▦"} ${p.name}`, () => {
+          const seed = propPreset(p.id)!;
+          draft = { ...seed, id: draft.id, source: "user", version: 1 };
+          touch();
+        }, "chip chip--sm"))));
+    }
+
+    // --- preview -----------------------------------------------------------
+    if (!preview) preview = createPropPreview(240);
+    card.append(el("div", { class: "row propstudio__preview" }, [
+      preview.canvas,
+      el("div", { class: "row wrap" }, ([["iso", "斜角"], ["front", "正面"], ["side", "側面"], ["top", "俯視"]] as [PreviewAngle, string][])
+        .map(([a, label]) => button(label, () => { angle = a; preview!.setAngle(a); },
+          angle === a ? "chip chip--sm chip--primary" : "chip chip--sm"))),
+    ]));
+    preview.update(draft, { faceOptions: faceOptions(draft) });
+    preview.setAngle(angle);
+
+    // --- 名稱與尺寸 ---------------------------------------------------------
+    card.append(el("div", { class: "row wrap" }, [
+      textField("名稱", draft.name, (v) => { draft.name = v || draft.name; touch(); }),
+      num("寬 cm", Math.round(draft.dimensions.width * 100), 5, (v) => { scaleTo("width", Math.max(5, v) / 100); touch(); }, 5),
+      num("深 cm", Math.round(draft.dimensions.depth * 100), 5, (v) => { scaleTo("depth", Math.max(5, v) / 100); touch(); }, 5),
+      num("高 cm", Math.round(draft.dimensions.height * 100), 5, (v) => { scaleTo("height", Math.max(1, v) / 100); touch(); }, 1),
+    ]));
+
+    // --- 零件 ---------------------------------------------------------------
+    const partRows: HTMLElement[] = [];
+    const overlaps = new Set(overlappingParts(draft.parts).flat());
+    draft.parts.forEach((part, i) => {
+      partRows.push(el("div", { class: "list__row" }, [
+        selectField("形狀", [
+          { value: "box", label: "方塊" }, { value: "cylinder", label: "圓柱" },
+          { value: "sphere", label: "球" }, { value: "plane", label: "面板" },
+        ], part.shape, (v) => { part.shape = v as PropPart["shape"]; touch(); }),
+        num("寬", Math.round(part.size.width * 100), 5, (v) => { part.size.width = Math.max(1, v) / 100; touch(); }, 1),
+        num("深", Math.round(part.size.depth * 100), 5, (v) => { part.size.depth = Math.max(1, v) / 100; touch(); }, 1),
+        num("高", Math.round(part.size.height * 100), 5, (v) => { part.size.height = Math.max(1, v) / 100; touch(); }, 1),
+        selectField("材質", FINISH_CHOICES.map((f) => ({ value: f.id, label: f.label })),
+          part.finish ?? "plastic-matte", (v) => { part.finish = v; touch(); }),
+        el("input", {
+          type: "color", class: "propstudio__color", value: part.color ?? "#8fb4c9",
+          onchange: (e: Event) => { part.color = (e.target as HTMLInputElement).value; touch(); },
+        } as never),
+        textField("文字", part.text ?? "", (v) => { part.text = v || undefined; touch(); }),
+        ...(overlaps.has(part.id) ? [el("span", { class: "hint", text: "⚠ 和別的零件穿插" })] : []),
+        ...(draft.parts.length > 1
+          ? [button("刪", () => { draft.parts.splice(i, 1); touch(); }, "chip chip--sm")]
+          : []),
+      ]));
+      partRows.push(el("div", { class: "row wrap" }, [
+        el("span", { class: "hint", text: "位置" }),
+        num("左右 cm", Math.round(part.offset.x * 100), 5, (v) => { part.offset.x = v / 100; touch(); }),
+        num("高度 cm", Math.round(part.offset.y * 100), 5, (v) => { part.offset.y = v / 100; touch(); }),
+        num("前後 cm", Math.round(part.offset.z * 100), 5, (v) => { part.offset.z = v / 100; touch(); }),
+        ...(i > 0 ? (["on-top", "in-front", "beside"] as const).map((rel, ri) =>
+          button(["放上一個零件上面", "放前面", "放旁邊"][ri], () => {
+            part.offset = relatePartOffset(draft.parts[i - 1], part.size, rel);
+            touch();
+          }, "chip chip--sm")) : []),
+      ]));
+    });
+    partRows.push(button("＋ 加零件", () => {
+      const base = draft.parts[draft.parts.length - 1];
+      const size = { width: 0.3, depth: 0.3, height: 0.3 };
+      draft.parts.push({
+        id: `part${uid("x")}`, shape: "box", size,
+        offset: base ? relatePartOffset(base, size, "on-top") : { x: 0, y: 0, z: 0 },
+        color: "#c8b6a6", finish: "plastic-matte",
+      });
+      touch();
+    }, "btn btn--ghost"));
+    card.append(section("外觀（零件）", partRows));
+
+    // --- 互動 ---------------------------------------------------------------
+    const interactionRows: HTMLElement[] = [];
+    if (!draft.interaction) {
+      interactionRows.push(el("p", { class: "hint", text: "純擺設（地墊、桌子）不需要互動。要做遊戲就打開。" }));
+      interactionRows.push(button("＋ 加上互動", () => { ensureInteraction(); touch(); }, "btn btn--ghost"));
+    } else {
+      const seed = draft.interaction;
+      interactionRows.push(el("div", { class: "row wrap" }, [
+        num("平均互動秒數", seed.station.meanServiceSeconds, 5, (v) => { seed.station.meanServiceSeconds = Math.max(1, v); touch(); }, 1),
+        num("同時幾人", seed.station.parallelServers, 1, (v) => { seed.station.parallelServers = Math.max(1, Math.round(v)); touch(); }, 1),
+        num("排隊容量", seed.station.queueCapacity, 1, (v) => { seed.station.queueCapacity = Math.max(1, Math.round(v)); touch(); }, 1),
+        num("路過跳過率 %", Math.round((seed.skipRate ?? 0) * 100), 5, (v) => { seed.skipRate = Math.min(1, Math.max(0, v / 100)); touch(); }, 0),
+      ]));
+      if (seed.staffRole) {
+        interactionRows.push(el("div", { class: "row wrap" }, [
+          textField("工作人員角色", seed.staffRole.name, (v) => { seed.staffRole!.name = v || seed.staffRole!.name; touch(); }),
+          num("人數", seed.staffRole.count, 1, (v) => { seed.staffRole!.count = Math.max(0, Math.round(v)); touch(); }, 0),
+        ]));
+      }
+      const step = faceStep(draft);
+      if (step?.branch?.kind === "chance") {
+        interactionRows.push(el("div", { class: "row wrap" }, [
+          el("span", { class: "readout__label", text: "面數：" }),
+          ...[2, 4, 6, 8, 10, 12].map((n) => button(String(n), () => { setFaceCount(n); touch(); },
+            faceOptions(draft).length === n ? "chip chip--sm chip--primary" : "chip chip--sm")),
+        ]));
+        faceOptions(draft).forEach((option) => {
+          interactionRows.push(el("div", { class: "list__row" }, [
+            textField("名稱", option.label, (v) => { option.label = v; touch(); }),
+            el("input", {
+              type: "color", class: "propstudio__color", value: option.color ?? "#38bdf8",
+              onchange: (e: Event) => { option.color = (e.target as HTMLInputElement).value; touch(); },
+            } as never),
+            textField("題目", option.prompt ?? "", (v) => { option.prompt = v || undefined; touch(); }),
+            num("多花秒", option.extraSeconds ?? 0, 5, (v) => { option.extraSeconds = v > 0 ? v : undefined; touch(); }, 0),
+          ]));
+        });
+      }
+      interactionRows.push(el("div", { class: "subhead", text: "站位（§14）" }));
+      interactionRows.push(anchorRow("player", "參加者"));
+      interactionRows.push(anchorRow("staff", "工作人員"));
+      interactionRows.push(anchorRow("queue", "排隊起點"));
+      interactionRows.push(anchorRow("exit", "完成出口"));
+      interactionRows.push(button("移除互動", () => {
+        delete draft.interaction;
+        touch();
+      }, "chip chip--sm"));
+    }
+    card.append(section("互動", interactionRows, !!draft.interaction));
+
+    // --- actions -----------------------------------------------------------
+    const actions: HTMLElement[] = [];
+    if (editing) {
+      actions.push(button("儲存修改", () => {
+        app.updatePropDefinition(draft);
+        app.onToast?.(`已更新「${draft.name}」——場上的每一份都會換新`);
+        close();
+      }, "btn btn--big btn--primary"));
+      if ((opts.instanceCount ?? 0) > 1) {
+        actions.push(el("p", { class: "hint", text: `目前有 ${opts.instanceCount} 份在場上；「儲存修改」會全部更新。要只改一份，回到場上選那一份按「只改這一個」。` }));
+      }
+    } else {
+      actions.push(button("加入專案並放置", () => {
+        app.addPropToProject(draft);
+        writeDraft(null);
+        close();
+      }, "btn btn--big btn--primary"));
+    }
+    actions.push(button("儲存到我的道具", () => {
+      saveLibraryProp(draft);
+      app.onToast?.(`已存到我的道具：「${draft.name}」`);
+    }, "btn btn--ghost"));
+    actions.push(el("div", { class: "quickstart__foot" }, [button("關閉", close, "chip chip--sm")]));
+    card.append(...actions);
+  };
+
+  render();
+  return overlay;
+}

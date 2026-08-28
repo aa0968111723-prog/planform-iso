@@ -352,6 +352,12 @@ function chanceRows(
     rows.push(el("div", { class: "list__row" }, [
       el("span", { class: "readout__label", text: "·" }),
       textField("", option.label, (v) => app.updateFlow((t) => patchOption(t, step.id, i, { label: v }))),
+      // The face's colour — the same option record the 3D dice renders from,
+      // so editing it here repaints the placed prop immediately.
+      el("input", {
+        type: "color", class: "propstudio__color", value: option.color ?? "#38bdf8",
+        onchange: (e: Event) => app.updateFlow((t) => patchOption(t, step.id, i, { color: (e.target as HTMLInputElement).value })),
+      } as never),
       el("span", { class: "hint", text: `機會 ${Math.round((Math.max(0, option.weight) / total) * 100)} %` }),
       num("權重", option.weight, 1,
         (v) => app.updateFlow((t) => patchOption(t, step.id, i, { weight: Math.max(0, v) })), 0),

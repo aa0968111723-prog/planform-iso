@@ -1009,3 +1009,15 @@ html, body {
 
 /* The way back to 我的專案 is a real control on every size, not a menu item. */
 .topbar__home { flex: 0 0 auto; font-weight: 700; }
+
+/* --- prop studio --------------------------------------------------------- */
+.propstudio__card { max-width: 720px; max-height: 92vh; overflow-y: auto; }
+.propstudio__preview { align-items: flex-start; gap: 12px; }
+.propstudio__preview canvas {
+  border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface-2); flex: 0 0 auto;
+}
+.propstudio__color {
+  width: 34px; height: 34px; padding: 0; border: 1px solid var(--border);
+  border-radius: 8px; background: none; cursor: pointer;
+}

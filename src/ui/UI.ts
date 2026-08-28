@@ -14,6 +14,9 @@ import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentS
 import { buildCustomAssetFlow } from "./customAssetFlow";
 import { buildVenueCaptureFlow, venueCaptureAvailable } from "./venueCapture";
 import { refreshFlowPanel } from "./flowPanel";
+import { showPropStudio } from "./propStudio";
+import type { PropDefinition } from "../core/model";
+import { deleteLibraryProp, listLibraryProps, loadLibraryProp } from "../state/propLibrary";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
@@ -613,6 +616,7 @@ export class UI {
     else if (wf === "layout") this.left.append(
       this.smartLayoutSection(),
       buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true, onPick }),
+      this.propSection(),
       buildCustomAssetFlow(this.app),
     );
     else if (wf === "route") this.left.append(this.routeSection());
@@ -901,6 +905,84 @@ export class UI {
         button("套用", () => { this.app.applyMatCandidate(c.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm chip--primary"),
       ]));
     }
+  }
+
+  /** 互動道具 — the Prop Studio launcher, the project's props, the device library. */
+  private propSection(): HTMLElement {
+    const rows: HTMLElement[] = [
+      el("p", { class: "hint", text: "自己做骰子、轉盤、抽卡箱——放進場地就能彩排。" }),
+      el("div", { class: "row wrap" }, [
+        button("＋ 新增道具", () => this.openPropStudio(), "btn btn--primary"),
+        button("從選取的物件建立組合道具", () => {
+          const name = window.prompt("組合道具的名字", "骰子遊戲站");
+          if (name === null) return;
+          this.app.groupSelectionIntoProp(name.trim() || "組合道具");
+        }, "btn btn--ghost"),
+      ]),
+    ];
+
+    const defs = this.app.propDefinitions();
+    for (const def of defs) {
+      const instances = this.app.store.getState().objects
+        .filter((o) => o.assetId === `custom:${def.id}`).length;
+      rows.push(el("div", { class: "list__row" }, [
+        el("span", { class: "list__grow", text: `${def.icon ?? "▦"} ${def.name}${instances ? `（場上 ${instances}）` : ""}` }),
+        button("放置", () => this.app.beginPlacementByAssetId(`custom:${def.id}`), "chip chip--sm"),
+        button("編輯", () => this.openPropStudio(def, instances), "chip chip--sm"),
+        button("刪除", () => {
+          if (!window.confirm(`刪除「${def.name}」？場上的 ${instances} 份和它的互動也會一起移除。`)) return;
+          this.app.deletePropDefinition(def.id);
+        }, "chip chip--sm"),
+      ]));
+      if (instances > 1) {
+        rows.push(el("div", { class: "row wrap" }, [
+          el("span", { class: "hint", text: "選取場上其中一份之後：" }),
+          button("只改這一個", () => {
+            const selected = [...this.app.session.selection][0];
+            const obj = this.app.store.getState().objects.find((o) => o.id === selected && o.assetId === `custom:${def.id}`);
+            if (!obj) { this.showToast("先在場上選取要獨立修改的那一份", false); return; }
+            const fork = this.app.forkPropForObject(obj.id);
+            if (fork) this.openPropStudio(fork, 1);
+          }, "chip chip--sm"),
+        ]));
+      }
+    }
+
+    const mine = listLibraryProps();
+    if (mine.length) {
+      rows.push(el("div", { class: "subhead", text: "我的道具（這台裝置）" }));
+      for (const meta of mine) {
+        const inProject = defs.find((d) => d.id === meta.id);
+        const newer = inProject && meta.version > inProject.version;
+        rows.push(el("div", { class: "list__row" }, [
+          el("span", { class: "list__grow", text: `${meta.icon ?? "▦"} ${meta.name}${meta.interactive ? " ·互動" : ""}` }),
+          button(newer ? "更新到新版" : "加入專案", () => {
+            const def = loadLibraryProp(meta.id);
+            if (!def) { this.showToast("這個道具讀不出來，可能已損毀", false); return; }
+            if (newer && !window.confirm(`專案裡的「${meta.name}」是舊版。更新後場上的每一份都會換新，確定？`)) return;
+            this.app.addPropToProject(def, { place: !inProject });
+            if (newer) this.showToast(`已更新「${meta.name}」到新版`);
+          }, "chip chip--sm"),
+          button("刪除", () => {
+            if (!window.confirm(`從我的道具刪除「${meta.name}」？（不影響已加入專案的）`)) return;
+            deleteLibraryProp(meta.id);
+            this.update();
+          }, "chip chip--sm"),
+        ]));
+      }
+    }
+
+    return section("互動道具", rows, defs.length > 0);
+  }
+
+  private openPropStudio(edit?: PropDefinition, instanceCount = 0): void {
+    if (this.root.querySelector(".propstudio")) return;
+    const overlay = showPropStudio(this.app, {
+      edit,
+      instanceCount,
+      onClose: () => this.update(),
+    });
+    this.root.append(overlay);
   }
 
   private routeSection(): HTMLElement {
