@@ -181,6 +181,13 @@ export class UI {
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.openPropStudioHook = (defId) => {
+      const def = this.app.propDefinitions().find((d) => d.id === defId);
+      if (!def) return;
+      const placed = this.app.store.getState().objects
+        .filter((o) => o.assetId === `custom:${defId}`).length;
+      this.openPropStudio(def, placed);
+    };
     this.app.store.onLayoutError = (action) =>
       this.showToast(action === "save" ? "儲存平面圖失敗，請先匯出 JSON" : "刪除平面圖失敗，原檔案仍保留");
     this.app.onImprove = () => this.agentSheet.runPreset("幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門");
@@ -956,12 +963,23 @@ export class UI {
         const newer = inProject && meta.version > inProject.version;
         rows.push(el("div", { class: "list__row" }, [
           el("span", { class: "list__grow", text: `${meta.icon ?? "▦"} ${meta.name}${meta.interactive ? " ·互動" : ""}` }),
-          button(newer ? "更新到新版" : "加入專案", () => {
+          button(!inProject ? "加入專案" : newer ? "更新到新版" : "改用裝置上的版本", () => {
             const def = loadLibraryProp(meta.id);
             if (!def) { this.showToast("這個道具讀不出來，可能已損毀", false); return; }
-            if (newer && !window.confirm(`專案裡的「${meta.name}」是舊版。更新後場上的每一份都會換新，確定？`)) return;
+            // Any overwrite of a copy the project already has gets a confirm,
+            // not just an upgrade. The 「加入專案」 label used to fire on an
+            // OLDER library body too, silently reverting every Studio edit
+            // with nothing on screen to notice it by.
+            if (inProject) {
+              const older = meta.version < inProject.version;
+              const warning = older
+                ? `裝置上的「${meta.name}」比專案裡的舊（v${meta.version} → 專案 v${inProject.version}）。`
+                  + `換過去會蓋掉專案裡改過的內容，場上的每一份也會跟著變。確定？`
+                : `用裝置上的「${meta.name}」覆蓋專案裡的版本？場上的每一份都會換新。`;
+              if (!window.confirm(warning)) return;
+            }
             this.app.addPropToProject(def, { place: !inProject });
-            if (newer) this.showToast(`已更新「${meta.name}」到新版`);
+            if (inProject) this.showToast(`已用裝置上的「${meta.name}」覆蓋專案版本`);
           }, "chip chip--sm"),
           button("刪除", () => {
             if (!window.confirm(`從我的道具刪除「${meta.name}」？（不影響已加入專案的）`)) return;

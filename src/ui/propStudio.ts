@@ -94,6 +94,9 @@ function resultSources(app: App): { stationId: string; label: string }[] {
   return out;
 }
 
+/** How far outside the prop's own footprint a fresh anchor lands. */
+const DEFAULT_ANCHOR_GAP = 0.6;
+
 export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
   const overlay = el("div", { class: "quickstart propstudio" });
   const card = el("div", { class: "quickstart__card propstudio__card" });
@@ -183,14 +186,19 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
       else draft.anchors.push({ id: role, role, x, z, ...(role === "queue" ? { facingDeg: 0 } : {}) });
       touch();
     };
-    const dist = anchor ? Math.hypot(anchor.x, anchor.z) : 0;
+    // Distance from the prop's CENTRE, which is the number the 距離 field also
+    // shows and the number `place` sets. The chips used to add half the prop's
+    // depth to it on every tap, so pressing 「前」 twice — the natural way to
+    // confirm a choice — walked the participant 60 cm further away each time,
+    // and the field disagreed with the chips about what the number meant.
+    const dist = Math.max(0.2, anchor ? Math.hypot(anchor.x, anchor.z) : DEFAULT_ANCHOR_GAP + d.depth / 2);
     return el("div", { class: "list__row" }, [
       el("span", { class: "readout__label", text: label }),
-      button("前", () => place(0, d.depth / 2 + Math.max(0.5, dist || 0.6)), "chip chip--sm"),
-      button("後", () => place(0, -(d.depth / 2 + Math.max(0.5, dist || 0.6))), "chip chip--sm"),
-      button("左", () => place(-(d.width / 2 + Math.max(0.5, dist || 0.6)), 0), "chip chip--sm"),
-      button("右", () => place(d.width / 2 + Math.max(0.5, dist || 0.6), 0), "chip chip--sm"),
-      num("距離 cm", Math.round((anchor ? Math.hypot(anchor.x, anchor.z) : 0.6) * 100), 10, (v) => {
+      button("前", () => place(0, dist), "chip chip--sm"),
+      button("後", () => place(0, -dist), "chip chip--sm"),
+      button("左", () => place(-dist, 0), "chip chip--sm"),
+      button("右", () => place(dist, 0), "chip chip--sm"),
+      num("距離 cm", Math.round(dist * 100), 10, (v) => {
         const a = draft.anchors.find((x) => x.role === role);
         if (!a) return;
         const len = Math.hypot(a.x, a.z) || 1;

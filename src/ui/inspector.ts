@@ -139,9 +139,15 @@ function rotationPanel(app: App, cur: number): HTMLElement {
 
 function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["getSelectedObject"]> & object, advanced: boolean, setAdvanced: (v: boolean) => void): void {
   const def = assetDef(obj.kind);
+  const prop = app.propForObject(obj.id);
   const info = app.fieldInfo(obj);
   const cm = (m: number) => `${Math.round(m * 100)} cm`;
-  root.append(el("div", { class: "subhead", text: `${def.displayName}` }));
+  // A custom prop degrades to kind "table" so old builds can still place it;
+  // that is a storage detail, and showing 「桌子」 with 長桌/方桌 presets to
+  // someone who selected their 骰子遊戲站 leaks it into the UI. The presets
+  // were worse than confusing: they resized the plan's footprint and never
+  // touched the prop.
+  root.append(el("div", { class: "subhead", text: prop ? `${prop.icon ?? "▦"} ${prop.name}` : def.displayName }));
 
   const field = el("div", { class: "readout" }, [
     el("div", { text: info.tileRef }),
@@ -156,7 +162,14 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
   root.append(field);
   root.append(button("鏡頭定位", () => { app.scene.focusOn(obj.x, obj.z); }, "chip chip--sm"));
 
-  if (def.presets.length > 1) {
+  if (prop) {
+    root.append(el("div", { class: "row wrap" }, [
+      button("編輯這個道具", () => app.openPropStudioFor(prop.id), "chip chip--sm"),
+      el("span", { class: "hint", text: "尺寸與外觀在道具工作室裡改" }),
+    ]));
+  }
+
+  if (!prop && def.presets.length > 1) {
     root.append(el("div", { class: "subhead", text: "常用尺寸" }));
     root.append(el("div", { class: "row wrap" },
       def.presets.map((pr) => button(pr.label, () => app.applyPresetToSelection(pr.id), obj.presetId === pr.id ? "chip chip--sm chip--primary" : "chip chip--sm"))));

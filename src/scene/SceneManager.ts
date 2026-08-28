@@ -48,8 +48,8 @@ import {
   buildPropGroupCached,
   clearPartResult,
   diceRollQuaternion,
-  diceSettleQuaternion,
   paintPartResult,
+  settleQuaternionFor,
 } from "./propVisual";
 import { propFaceOptions, propForAssetId } from "../core/propCatalog";
 import type { PlaybackStationResult } from "../core/eventFlow";
@@ -754,9 +754,9 @@ export class SceneManager {
       if (!entry) continue;
       const ownStation = playback?.stationOfObject[o.id];
 
-      const dice = def.parts.find((p) => p.facesFromOptions);
-      if (dice) {
-        const mesh = entry.group.getObjectByName(`part:${dice.id}`) as Mesh | undefined;
+      const roller = def.parts.find((p) => p.facesFromOptions);
+      if (roller) {
+        const mesh = entry.group.getObjectByName(`part:${roller.id}`) as Mesh | undefined;
         if (mesh) {
           if (!mesh.userData.restQuat) mesh.userData.restQuat = mesh.quaternion.clone();
           const rest = mesh.userData.restQuat as Quaternion;
@@ -764,9 +764,13 @@ export class SceneManager {
           if (result && playback) {
             const options = propFaceOptions(project, o.id, def) ?? [];
             const idx = options.findIndex((opt) => opt.id === result.optionId);
-            // A face beyond the six painted ones settles back to rest — the
-            // box cannot show it, and pretending would print the wrong label.
-            const settle = diceSettleQuaternion(idx) ?? rest.clone();
+            // Ask the PART how it comes to rest. A dice turns a face upward; a
+            // spinner turns a wedge to its pointer and stays flat. Applying the
+            // dice rotation to a disc stood the wheel on its edge for five of
+            // six outcomes and left it there for the rest of the rehearsal.
+            // An outcome the part cannot show settles back to rest rather than
+            // displaying the wrong one.
+            const settle = settleQuaternionFor(roller, idx, options.length) ?? rest.clone();
             mesh.quaternion.copy(diceRollQuaternion(playback.t - result.t, result.serial, settle));
           } else {
             mesh.quaternion.copy(rest);

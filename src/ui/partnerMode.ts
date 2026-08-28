@@ -93,8 +93,8 @@ export function buildPartnerMode(
   sheet.querySelector(".partnersheet__handle")?.addEventListener("click", () => closeSheet());
 
   let sheetKind: PartnerSheet = "none";
-  /** Which station the sheet is currently showing, so a new tap re-opens it. */
-  let shownStation: string | null = null;
+  /** Tap counter the sheet has already reacted to; a new tap reopens it. */
+  let shownTap = 0;
 
   function openSheet(kind: PartnerSheet): void {
     sheetKind = kind;
@@ -105,7 +105,7 @@ export function buildPartnerMode(
     // Clear the tap too: otherwise the next render sees a station still
     // selected and springs the sheet straight back open.
     if (app.session.partner) app.session.partner.stationObjectId = null;
-    shownStation = null;
+    shownTap = app.session.partner?.stationTap ?? 0;
     openSheet("none");
   }
 
@@ -317,9 +317,10 @@ export function buildPartnerMode(
     // driven from state rather than from a click handler here, because the tap
     // happens on the 3D canvas, not on any element this module owns.
     const tapped = app.session.partner?.stationObjectId ?? null;
-    if (tapped && tapped !== shownStation) sheetKind = "station";
+    const tick = app.session.partner?.stationTap ?? 0;
+    if (tapped && tick !== shownTap) sheetKind = "station";
     else if (!tapped && sheetKind === "station") sheetKind = "none";
-    shownStation = tapped;
+    shownTap = tick;
 
     sheet.style.display = sheetKind === "none" ? "none" : "flex";
     sheetFoot.style.display = "none";

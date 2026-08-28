@@ -55,6 +55,8 @@ import {
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import { clearPropGroupCache } from "../scene/propVisual";
+import { registerPropVisuals } from "../scene/visualRegistry";
 import type { PlaybackStationResult } from "../core/eventFlow";
 import { anchorSentences, stationNow } from "../core/rehearsal";
 import type { AnchorSentence, StationNowReadout } from "../core/rehearsal";
@@ -204,6 +206,8 @@ export interface PartnerSession {
   suggestion: PartnerSuggestion | null;
   /** §85: the interactive station a volunteer tapped, if any. */
   stationObjectId: string | null;
+  /** Bumped on every tap, so re-tapping the SAME station reopens the sheet. */
+  stationTap?: number;
   /** True while a rehearsal or suggestion is being computed. */
   busy: boolean;
 }
@@ -298,6 +302,8 @@ export class App {
 
   readonly quickAgent: QuickAgent;
   notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
+  /** Set by the UI: open the Prop Studio on a definition. */
+  openPropStudioHook: ((defId: string) => void) | null = null;
   /** UI hook: open the AI sheet with the 幫我改善 request (set by UI). */
   onImprove: (() => void) | null = null;
 
@@ -397,6 +403,9 @@ export class App {
   onChange(cb: () => void): () => void { this.uiListeners.add(cb); return () => this.uiListeners.delete(cb); }
   private notifyUi(): void { for (const cb of this.uiListeners) cb(); }
   private syncScene(): void {
+    // The ghost and the library thumbnail resolve visuals without a project in
+    // hand, so the registry is refreshed from the one we are about to draw.
+    registerPropVisuals(this.state.props);
     this.scene.sync(this.viewState, {
       selection: this.session.selection,
       ghost: this.session.ghost,
@@ -614,6 +623,16 @@ export class App {
 
   propDefinitions(): PropDefinition[] {
     return this.state.props ?? [];
+  }
+
+  /** The definition a placed object draws from, if it is a prop at all. */
+  propForObject(objectId: string): PropDefinition | undefined {
+    const obj = this.state.objects.find((o) => o.id === objectId);
+    return propForAssetId(this.state.props, obj?.assetId);
+  }
+
+  openPropStudioFor(defId: string): void {
+    this.openPropStudioHook?.(defId);
   }
 
   /** Definitions come with their mirrored entry, or the library cannot place them. */
@@ -991,6 +1010,13 @@ export class App {
   }
 
   seedSessionFromPlan(project: Project): void {
+    // Built prop groups are cached by definition id, and §39 makes each
+    // project's copy of a library prop an independently edited snapshot — so
+    // two projects can hold the same id at the same version with different
+    // parts. Without this, opening the second project drew the first one's
+    // prop, and nothing would ever correct it.
+    clearPropGroupCache();
+    registerPropVisuals(project.props);
     this.rehydrateVisuals();
     // A rehearsal belongs to the plan it was started on. Carrying the agents,
     // the queue counts or the statistics into the next project would show
@@ -2607,10 +2633,12 @@ export class App {
         const pick = this.scene.pick(e.clientX, e.clientY);
         const guide = pick?.type === "object" ? this.propAnchorGuide(pick.id) : null;
         const next = guide ? pick!.id : null;
-        if (this.session.partner.stationObjectId !== next) {
-          this.session.partner.stationObjectId = next;
-          this.notifyUi();
-        }
+        // Always notify, even when the id is unchanged: closing the sheet and
+        // tapping the same station again has to bring it back, and the sheet
+        // decides that from a tick, not from the id.
+        this.session.partner.stationObjectId = next;
+        this.session.partner.stationTap = (this.session.partner.stationTap ?? 0) + 1;
+        this.notifyUi();
       }
       return;
     }

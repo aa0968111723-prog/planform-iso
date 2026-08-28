@@ -6,6 +6,8 @@
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial } from "three";
 import type { AssetCatalogEntry } from "../core/catalog";
 import type { ObjectKind } from "../core/model";
+import { buildPropGroup } from "./propVisual";
+import type { PropDefinition } from "../core/model";
 import { buildVisualGroup, type DoorParams, type VisualQuality } from "./assets";
 import { materialFromPreset } from "./materials";
 
@@ -67,6 +69,19 @@ export function buildMissingFallbackGroup(dims: { width: number; depth: number; 
   return g;
 }
 
+/**
+ * Definitions the registry may draw, refreshed whenever the project changes.
+ * A registry rather than a parameter because `resolveVisualGroup` is called
+ * from the ghost, the library thumbnail and the scene, none of which have a
+ * project to hand.
+ */
+const propRegistry = new Map<string, PropDefinition>();
+
+export function registerPropVisuals(defs: readonly PropDefinition[] | undefined): void {
+  propRegistry.clear();
+  for (const def of defs ?? []) propRegistry.set(`prop:${def.id}`, def);
+}
+
 export function resolveVisualGroup(
   entry: AssetCatalogEntry | null | undefined,
   kind: ObjectKind,
@@ -79,6 +94,15 @@ export function resolveVisualGroup(
   }
 
   const ref = entry.visualRef;
+
+  // A custom prop draws itself. Without this the placement ghost for every
+  // prop was a generic kind box, so a person dragging a 骰子遊戲站 saw a plain
+  // rectangle until the moment they let go.
+  if (ref.startsWith("prop:")) {
+    const def = propRegistry.get(ref);
+    if (def) return buildPropGroup(def);
+    return buildProxyGroup(dims, entry.color, entry.name);
+  }
 
   if (ref.startsWith("factory:") || factoryRegistry.has(ref)) {
     const factory = factoryRegistry.get(ref);

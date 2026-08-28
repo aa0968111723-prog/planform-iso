@@ -450,7 +450,14 @@ function matchRows(app: App, t: InteractionTemplate, step: InteractionStep): HTM
   return rows;
 }
 
-function setMatchCell(
+/**
+ * Rename one cell of the 4×4 outcome table.
+ *
+ * Exported for the test that pins the quote: a cell carries a `prompt` (what
+ * is printed on the 場刊), `extraSeconds` and a `next`, and rebuilding the
+ * rule from `{ when, label }` silently deleted all three.
+ */
+export function setMatchCell(
   t: InteractionTemplate,
   stepId: string,
   when: string[],
@@ -460,12 +467,25 @@ function setMatchCell(
     ...t,
     steps: t.steps.map((s) => {
       if (s.id !== stepId || s.branch?.kind !== "match") return s;
-      const others = s.branch.rules.filter((r) => !(r.when.length === when.length && r.when.every((w, i) => w === when[i])));
+      // Rebuild the rule IN PLACE, keeping everything the cell already had.
+      // This used to construct `{ when, label }` from scratch and append it,
+      // which silently deleted the cell's `prompt` — the quote the 場刊 prints
+      // — along with its extraSeconds and its `next`, and reordered the rules
+      // that `resolveBranch` walks in order.
+      const matches = (r: { when: string[] }) =>
+        r.when.length === when.length && r.when.every((w, i) => w === when[i]);
+      const trimmed = label.trim();
+      if (!trimmed) {
+        return { ...s, branch: { ...s.branch, rules: s.branch.rules.filter((r) => !matches(r)) } };
+      }
+      const existing = s.branch.rules.find(matches);
       return {
         ...s,
         branch: {
           ...s.branch,
-          rules: label.trim() ? [...others, { when, label: label.trim() }] : others,
+          rules: existing
+            ? s.branch.rules.map((r) => (matches(r) ? { ...r, label: trimmed } : r))
+            : [...s.branch.rules, { when, label: trimmed }],
         },
       };
     }),

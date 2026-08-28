@@ -127,15 +127,54 @@ function diceMaterials(part: PropPart, options: readonly InteractionOption[]): M
   return mats;
 }
 
+/**
+ * A spinner disc: one wedge per option, coloured from the option list.
+ *
+ * CylinderGeometry emits three groups (side, top, bottom), so a single
+ * material index cannot paint wedges. Building the top cap as a fan of
+ * per-option sectors is the only way the wheel can show which segment the
+ * pointer is on — and 「一份活資料」 requires that it show exactly the options
+ * the panel edits, not a decorative approximation.
+ */
+function spinnerMesh(part: PropPart, options: readonly InteractionOption[]): Mesh {
+  const { width, height } = part.size;
+  const r = width / 2;
+  const n = Math.max(1, options.length);
+  const group = new CylinderGeometry(r, r, height, Math.max(24, n * 8));
+  const body = new Mesh(group, baseMaterial(part));
+  for (let i = 0; i < n; i++) {
+    const wedge = new CylinderGeometry(
+      r * 0.97, r * 0.97, height * 0.2, Math.max(6, Math.ceil(48 / n)), 1, false,
+      (i / n) * Math.PI * 2, (1 / n) * Math.PI * 2,
+    );
+    const mesh = new Mesh(wedge, new MeshStandardMaterial({
+      color: options[i]?.color ?? part.color ?? "#f4f4f5",
+      roughness: 0.5,
+      metalness: 0.02,
+    }));
+    mesh.position.y = height * 0.5;
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    body.add(mesh);
+  }
+  return body;
+}
+
 function buildPart(part: PropPart, options: readonly InteractionOption[] | undefined): Mesh {
   const { width, depth, height } = part.size;
   let mesh: Mesh;
   switch (part.shape) {
     case "cylinder": {
-      mesh = new Mesh(
-        new CylinderGeometry(width / 2, width / 2, height, 24),
-        baseMaterial(part),
-      );
+      // §5 scopes facesFromOptions to 「骰／轉盤 part」; only the box branch
+      // used to honour it, so the spinner's disc rendered as a plain yellow
+      // cylinder while the panel, the §26 readout and the 場刊 all listed six
+      // named wedges.
+      mesh = part.facesFromOptions && options?.length
+        ? spinnerMesh(part, options)
+        : new Mesh(
+          new CylinderGeometry(width / 2, width / 2, height, 24),
+          baseMaterial(part),
+        );
       break;
     }
     case "sphere": {
@@ -207,6 +246,31 @@ const SLOT_SETTLE: Quaternion[] = [
 export function diceSettleQuaternion(optionIndex: number): Quaternion | null {
   if (optionIndex < 0 || optionIndex >= 6) return null;
   return SLOT_SETTLE[FACE_ORDER[optionIndex]].clone();
+}
+
+/**
+ * Where a spinner comes to rest: the wedge that was rolled, turned to the
+ * pointer. A wheel turns about its own axis and stays flat — applying the
+ * dice's slot-normal-to-+y rotations to it stood the disc on its edge for
+ * five of six outcomes, floating beside the pole for the rest of the
+ * rehearsal.
+ */
+export function spinnerSettleQuaternion(optionIndex: number, optionCount: number): Quaternion | null {
+  if (optionIndex < 0 || optionCount <= 0 || optionIndex >= optionCount) return null;
+  // Wedge i spans [i/n, (i+1)/n) turns; bring its centre to the pointer at +z.
+  const centre = ((optionIndex + 0.5) / optionCount) * Math.PI * 2;
+  return new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -centre);
+}
+
+/** A part can only settle a face UPWARD if it is a box. */
+export function settleQuaternionFor(
+  part: Pick<PropPart, "shape">,
+  optionIndex: number,
+  optionCount: number,
+): Quaternion | null {
+  return part.shape === "box"
+    ? diceSettleQuaternion(optionIndex)
+    : spinnerSettleQuaternion(optionIndex, optionCount);
 }
 
 /**
@@ -331,6 +395,35 @@ export function buildPropGroupCached(def: PropDefinition, ctx: PropBuildContext 
   return group.clone(true);
 }
 
+/**
+ * Drop every built group. Called when a project is opened.
+ *
+ * The cache is keyed by definition id, and §39 makes each project's copy of a
+ * library prop an independently edited SNAPSHOT — so two projects can hold the
+ * same id at the same version with different parts, and without this the
+ * second project's build was served to the first.
+ *
+ * It deliberately does NOT dispose. `buildPropGroupCached` hands out
+ * `clone(true)`, and three.js clones SHARE geometry with their source — so
+ * disposing the cached original would delete the GPU buffers out from under
+ * every placed copy still in the scene. The scene disposes its own nodes when
+ * they leave (`syncObjects`), which is where those geometries actually die;
+ * here we only drop references and let GC take the rest.
+ */
 export function clearPropGroupCache(): void {
   propGroupCache.clear();
+}
+
+/**
+ * Release a built group's geometries. Materials come from shared caches and
+ * stay.
+ *
+ * Only safe for a group nobody cloned — the preview's own build, which it
+ * replaces on every keystroke. Never call it on a cached group; see
+ * `clearPropGroupCache`.
+ */
+export function disposePropGroup(group: Group): void {
+  group.traverse((node) => {
+    if (node instanceof Mesh) node.geometry.dispose();
+  });
 }

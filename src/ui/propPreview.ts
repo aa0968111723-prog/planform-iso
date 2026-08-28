@@ -24,7 +24,7 @@ import {
   Scene,
   WebGLRenderer,
 } from "three";
-import { buildPropGroup, type PropBuildContext } from "../scene/propVisual";
+import { buildPropGroup, disposePropGroup, type PropBuildContext } from "../scene/propVisual";
 import type { PropDefinition } from "../core/model";
 
 export type PreviewAngle = "iso" | "front" | "side" | "top";
@@ -73,7 +73,9 @@ export function createPropPreview(size = 260): PropPreview {
   return {
     canvas,
     update(def, ctx = {}) {
-      if (current) scene.remove(current);
+      // Every keystroke in the Studio rebuilds this. Without the dispose the
+      // old build's geometries stayed on the GPU for the life of the session.
+      if (current) { scene.remove(current); disposePropGroup(current); }
       current = buildPropGroup(def, ctx);
       scene.add(current);
       // Frame the prop by its declared bounds, not per-frame measuring.
@@ -85,12 +87,11 @@ export function createPropPreview(size = 260): PropPreview {
       frame();
     },
     dispose() {
-      renderer.dispose();
-      // The parts' geometries are per-build; the materials are shared caches
-      // and stay. Dropping the renderer releases the context — the leak that
-      // matters on a phone.
-      if (current) scene.remove(current);
+      // Geometries are per-build and must go with it; materials come from
+      // shared caches and stay. Dropping the renderer releases the context.
+      if (current) { scene.remove(current); disposePropGroup(current); }
       current = null;
+      renderer.dispose();
     },
   };
 }
