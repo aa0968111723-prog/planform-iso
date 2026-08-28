@@ -7,15 +7,40 @@
  * v4 → v5: Asset Catalog assetId / serviceRole / catalogExtras
  * v5 → v6: Event Flow scenarios / ServiceStations
  * v6 → v7: venue identity + independent field-calibration confirmations
+ *
+ * The outdoor booth fields are version-less: a file without them is a
+ * classroom project and stays one, and a booth file opened by a build that
+ * predates them keeps its objects, zones and routes.
  */
 
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
+import { BOOTH_STATION_TYPES, BOOTH_ZONE_ROLES, defaultBoothParams } from "./boothCatalog";
+import { templateFromBooth } from "./interactionCompile";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
   PROJECT_VERSION,
   ZONE_DEFAULTS,
   type ArrayGroup,
+  type BoothConfig,
+  type BoothParams,
+  type BoothScenarioId,
+  type BoothStation,
+  type BoothStationType,
+  type BoothZoneRole,
+  type ChanceBranch,
+  type InteractionAudience,
+  type InteractionBranch,
+  type InteractionOption,
+  type InteractionStation,
+  type InteractionStep,
+  type InteractionTemplate,
+  type MatchBranch,
+  type MatchRule,
+  type PropAnchor,
+  type PropDefinition,
+  type PropInteractionSeed,
+  type PropPart,
   type EventScenario,
   type MeasurementAnnotation,
   type ObjectKind,
@@ -31,6 +56,9 @@ import {
   uid,
 } from "./model";
 import { buildSimulationSpatial } from "./simSpatial";
+
+const BOOTH_ZONE_ROLE_SET: ReadonlySet<string> = new Set(Object.keys(BOOTH_ZONE_ROLES));
+const BOOTH_STATION_TYPE_SET: ReadonlySet<string> = new Set(Object.keys(BOOTH_STATION_TYPES));
 
 const KINDS: ReadonlySet<string> = new Set<ObjectKind>([
   "computer",
@@ -136,7 +164,8 @@ function migrateGroup(g: Partial<ArrayGroup>): ArrayGroup | null {
 
 function migrateZone(z: Zone): Zone {
   const def = ZONE_DEFAULTS[z.type] ?? ZONE_DEFAULTS.group;
-  return { ...z, icon: z.icon ?? def.icon, capacity: z.capacity ?? null };
+  const boothRole = BOOTH_ZONE_ROLE_SET.has(String(z.boothRole)) ? (z.boothRole as BoothZoneRole) : undefined;
+  return { ...z, icon: z.icon ?? def.icon, capacity: z.capacity ?? null, boothRole };
 }
 
 function migrateRoute(r: Route): Route {
@@ -146,6 +175,437 @@ function migrateRoute(r: Route): Route {
     startZoneId: r.startZoneId,
     endZoneId: r.endZoneId,
     waypointZoneIds: Array.isArray(r.waypointZoneIds) ? r.waypointZoneIds : undefined,
+    boothRole: r.boothRole === "visitor" || r.boothRole === "staff" ? r.boothRole : undefined,
+  };
+}
+
+function migrateBoothStation(raw: Partial<BoothStation>): BoothStation | null {
+  if (!raw || !BOOTH_STATION_TYPE_SET.has(String(raw.boothType))) return null;
+  const boothType = raw.boothType as BoothStationType;
+  const def = BOOTH_STATION_TYPES[boothType];
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : uid("st"),
+    name: typeof raw.name === "string" && raw.name ? raw.name : def.label,
+    // Booth stations always sit in the "custom" StationType bucket so an older
+    // build reading this file does not choke on an unknown station type.
+    type: "custom",
+    boothType,
+    x: raw.x ?? 0,
+    z: raw.z ?? 0,
+    staffCount: Math.max(0, raw.staffCount ?? 1),
+    parallelServers: Math.max(1, raw.parallelServers ?? def.servers),
+    meanServiceSeconds: Math.max(0, raw.meanServiceSeconds ?? def.dwell),
+    queueCapacity: Math.max(1, raw.queueCapacity ?? def.queueCapacity),
+    enabled: raw.enabled !== false,
+  };
+}
+
+/**
+ * A booth block survives round-tripping; a project without one stays without
+ * one. Booth data is never invented for a classroom plan — the 模擬 tab is
+ * only offered on a project that actually has a booth.
+ */
+function migrateBooth(raw: Partial<BoothConfig> | undefined): BoothConfig | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const stations = (Array.isArray(raw.stations) ? raw.stations : [])
+    .map((s) => migrateBoothStation(s as Partial<BoothStation>))
+    .filter((s): s is BoothStation => s !== null);
+  if (!stations.length) return undefined;
+  const scenarioId: BoothScenarioId = raw.scenarioId === "peak" ? "peak" : "normal";
+  const base = defaultBoothParams(scenarioId);
+  const p: Partial<BoothParams> = raw.params ?? {};
+  return {
+    stations,
+    scenarioId,
+    params: {
+      visitorCount: Math.max(1, Math.round(p.visitorCount ?? base.visitorCount)),
+      arrivalPerMin: Math.max(0.1, p.arrivalPerMin ?? base.arrivalPerMin),
+      talkSeconds: Math.max(1, p.talkSeconds ?? base.talkSeconds),
+      queueCapacity: Math.max(1, Math.round(p.queueCapacity ?? base.queueCapacity)),
+      deskStaff: Math.max(1, Math.round(p.deskStaff ?? base.deskStaff)),
+      boardDwell: Math.max(0, p.boardDwell ?? base.boardDwell),
+      gameDwell: Math.max(0, p.gameDwell ?? base.gameDwell),
+      balk: p.balk !== false,
+    },
+  };
+}
+
+// --- interaction flow -------------------------------------------------------
+//
+// Defensive in the same style as `migrateBoothStation`: repair, never reject.
+// A half-edited flow is still most of an afternoon's work, and losing the rest
+// of it because one field went bad is the failure mode this layer exists for.
+
+function migrateOption(raw: Partial<InteractionOption>, i: number): InteractionOption | null {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : `opt${i + 1}`,
+    label: typeof raw.label === "string" ? raw.label : "",
+    ...(typeof raw.prompt === "string" ? { prompt: raw.prompt } : {}),
+    weight: Number.isFinite(raw.weight) ? Math.max(0, Number(raw.weight)) : 1,
+    ...(Number.isFinite(raw.extraSeconds) ? { extraSeconds: Number(raw.extraSeconds) } : {}),
+    ...(typeof raw.value === "string" ? { value: raw.value } : {}),
+    ...(raw.next === null || typeof raw.next === "string" ? { next: raw.next } : {}),
+    // Face visuals — a dice face's colour/picture live on the option so there
+    // is exactly one record per face. Same-commit rule: a field and its
+    // whitelist entry always land together, or the field silently dies on the
+    // first save (the objectId lesson).
+    ...(typeof raw.color === "string" ? { color: raw.color } : {}),
+    ...(typeof raw.imageBlobId === "string" ? { imageBlobId: raw.imageBlobId } : {}),
+  };
+}
+
+/**
+ * An unknown `branch.kind` costs the step its fork, never its existence.
+ *
+ * This is the rule that keeps the step vocabulary open. A step is whatever the
+ * organiser typed, so a file written by a build that grew a fourth kind of
+ * fork must still open here with its names, its seconds and its order intact.
+ */
+function migrateBranch(raw: unknown): InteractionBranch | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  // Not `Partial<ChanceBranch & MatchBranch>`: two different literal `kind`s
+  // intersect to `never`, and every field below would vanish with them.
+  const branch = raw as { kind?: unknown }
+    & Partial<Omit<ChanceBranch, "kind">>
+    & Partial<Omit<MatchBranch, "kind">>;
+  if (branch.kind === "chance") {
+    const options = (Array.isArray(branch.options) ? branch.options : [])
+      .map((o, i) => migrateOption(o as Partial<InteractionOption>, i))
+      .filter((o): o is InteractionOption => o !== null);
+    // No options, or every weight zero, is not a fork — it is a plain step.
+    if (!options.length || options.every((o) => o.weight <= 0)) return undefined;
+    return {
+      kind: "chance",
+      options,
+      ...(typeof branch.record === "string" ? { record: branch.record } : {}),
+    };
+  }
+  if (branch.kind === "match") {
+    const on = (Array.isArray(branch.on) ? branch.on : []).filter((k) => typeof k === "string");
+    const rules: MatchRule[] = (Array.isArray(branch.rules) ? branch.rules : [])
+      .map((r) => r as Partial<MatchRule>)
+      .filter((r) => Array.isArray(r.when) && typeof r.label === "string")
+      .map((r) => ({
+        when: (r.when as string[]).map((w) => String(w)),
+        label: String(r.label),
+        ...(typeof r.prompt === "string" ? { prompt: r.prompt } : {}),
+        ...(Number.isFinite(r.extraSeconds) ? { extraSeconds: Number(r.extraSeconds) } : {}),
+        ...(r.next === null || typeof r.next === "string" ? { next: r.next } : {}),
+      }));
+    if (!on.length || !rules.length) return undefined;
+    const fallback = branch.otherwise;
+    const otherwise = fallback && typeof fallback.label === "string"
+      ? {
+        label: fallback.label,
+        ...(typeof fallback.prompt === "string" ? { prompt: fallback.prompt } : {}),
+      }
+      : undefined;
+    return { kind: "match", on, rules, ...(otherwise ? { otherwise } : {}) };
+  }
+  return undefined;
+}
+
+function migrateStep(raw: Partial<InteractionStep>): InteractionStep | null {
+  // No id and no name is not a half-edited step, it is noise.
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.id !== "string" || !raw.id) return null;
+  if (typeof raw.name !== "string" || !raw.name) return null;
+  const branch = migrateBranch(raw.branch);
+  return {
+    id: raw.id,
+    name: raw.name,
+    ...(typeof raw.stationId === "string" ? { stationId: raw.stationId } : {}),
+    avgSeconds: Number.isFinite(raw.avgSeconds) ? Math.max(0, Number(raw.avgSeconds)) : 30,
+    ...(Number.isFinite(raw.serviceVariance) ? { serviceVariance: Number(raw.serviceVariance) } : {}),
+    ...(typeof raw.prompt === "string" ? { prompt: raw.prompt } : {}),
+    ...(branch ? { branch } : {}),
+    ...(Array.isArray(raw.supplies)
+      ? { supplies: raw.supplies.filter((x) => typeof x === "string") }
+      : {}),
+    ...(raw.next === null || typeof raw.next === "string" ? { next: raw.next } : {}),
+  };
+}
+
+function migrateInteractionStation(raw: Partial<InteractionStation>): InteractionStation | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.id !== "string" || !raw.id) return null;
+  return {
+    id: raw.id,
+    name: typeof raw.name === "string" && raw.name ? raw.name : "站台",
+    type: "custom",
+    x: Number.isFinite(raw.x) ? Number(raw.x) : 0,
+    z: Number.isFinite(raw.z) ? Number(raw.z) : 0,
+    staffCount: Math.max(0, Math.round(raw.staffCount ?? 1)),
+    parallelServers: Math.max(1, Math.round(raw.parallelServers ?? 1)),
+    meanServiceSeconds: Math.max(0, raw.meanServiceSeconds ?? 30),
+    queueCapacity: Math.max(1, Math.round(raw.queueCapacity ?? 8)),
+    ...(typeof raw.staffRoleId === "string" ? { staffRoleId: raw.staffRoleId } : {}),
+    ...(raw.selfService === true ? { selfService: true } : {}),
+    ...(Number.isFinite(raw.balkQueueLength)
+      ? { balkQueueLength: Math.max(1, Math.round(Number(raw.balkQueueLength))) }
+      : {}),
+    // The bindings. This whitelist used to strip them, which froze every
+    // object-bound station at the coordinates it was SAVED at: convert the
+    // E310 scenario to a step list, save, reload — and moving the check-in
+    // desk no longer moved its station, silently, forever. The plan showed the
+    // desk in its new place while the simulation kept queueing people at the
+    // old one. `resolveTemplateBindings` re-reads these before every run,
+    // which is the entire mechanism by which "move the desk" changes the answer.
+    ...(typeof raw.objectId === "string" ? { objectId: raw.objectId } : {}),
+    ...(typeof raw.zoneId === "string" ? { zoneId: raw.zoneId } : {}),
+    ...(Number.isFinite(raw.serviceVariance) ? { serviceVariance: Number(raw.serviceVariance) } : {}),
+    ...(raw.anchorOffset
+      && Number.isFinite(raw.anchorOffset.x) && Number.isFinite(raw.anchorOffset.z)
+      ? { anchorOffset: { x: Number(raw.anchorOffset.x), z: Number(raw.anchorOffset.z) } }
+      : {}),
+    ...(Number.isFinite(raw.queueDirectionDeg)
+      ? { queueDirectionDeg: Number(raw.queueDirectionDeg) }
+      : {}),
+  };
+}
+
+function clampRate(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(1, Math.max(0, n));
+}
+
+export function migrateInteraction(
+  raw: Partial<InteractionTemplate> | undefined,
+): InteractionTemplate | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const stations = (Array.isArray(raw.stations) ? raw.stations : [])
+    .map((s) => migrateInteractionStation(s as Partial<InteractionStation>))
+    .filter((s): s is InteractionStation => s !== null);
+  const steps = (Array.isArray(raw.steps) ? raw.steps : [])
+    .map((s) => migrateStep(s as Partial<InteractionStep>))
+    .filter((s): s is InteractionStep => s !== null);
+  if (!steps.length || !stations.length) return undefined;
+
+  const stepIds = new Set(steps.map((s) => s.id));
+  const stationIds = new Set(stations.map((s) => s.id));
+  const repaired: InteractionStep[] = steps.map((step) => ({
+    ...step,
+    // A jump to a step that no longer exists means the visitor leaves there.
+    // It does NOT mean this step is deleted.
+    ...(typeof step.next === "string" && !stepIds.has(step.next) ? { next: null } : {}),
+    ...(step.stationId && !stationIds.has(step.stationId) ? { stationId: stations[0].id } : {}),
+    ...(step.branch?.kind === "chance"
+      ? {
+        branch: {
+          ...step.branch,
+          options: step.branch.options.map((o) => (
+            typeof o.next === "string" && !stepIds.has(o.next) ? { ...o, next: null } : o
+          )),
+        },
+      }
+      : {}),
+  }));
+
+  const staff = (Array.isArray(raw.staff) ? raw.staff : [])
+    .filter((r) => r && typeof r.id === "string" && typeof r.name === "string")
+    .map((r) => ({ id: r.id, name: r.name, count: Math.max(0, Math.round(r.count ?? 0)) }));
+
+  const a = raw.audience ?? ({} as Partial<InteractionAudience>);
+  const audience: InteractionAudience = {
+    count: Math.max(0, Math.round(a.count ?? 60)),
+    windowSeconds: Math.max(60, Math.round(a.windowSeconds ?? 3600)),
+    profile: a.profile === "front-loaded" ? "front-loaded" : "uniform",
+    stopRate: clampRate(a.stopRate),
+    joinRate: clampRate(a.joinRate),
+    patienceSeconds: Math.max(0, a.patienceSeconds ?? 0),
+  };
+
+  const segments = (Array.isArray(raw.segments) ? raw.segments : [])
+    .filter((sg) => sg && typeof sg.id === "string" && typeof sg.name === "string")
+    .map((sg) => ({
+      id: sg.id,
+      name: sg.name,
+      share: Number.isFinite(sg.share) ? Math.max(0, Number(sg.share)) : 1,
+      startStepId: stepIds.has(String(sg.startStepId)) ? String(sg.startStepId) : repaired[0].id,
+    }));
+
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : uid("flow"),
+    name: typeof raw.name === "string" && raw.name ? raw.name : "互動流程",
+    ...(typeof raw.note === "string" ? { note: raw.note } : {}),
+    steps: repaired,
+    startStepId: stepIds.has(String(raw.startStepId)) ? String(raw.startStepId) : repaired[0].id,
+    stations,
+    staff,
+    audience,
+    segments: segments.length
+      ? segments
+      : [{ id: "all", name: "參加者", share: 1, startStepId: repaired[0].id }],
+    seed: Number.isFinite(raw.seed) ? Number(raw.seed) : 1,
+    settings: {
+      speedMetersPerSecond: Math.max(0.2, raw.settings?.speedMetersPerSecond ?? 1.2),
+    },
+  };
+}
+
+// --- Prop Studio definitions -------------------------------------------------
+//
+// Defensive in the interaction style: repair what can be repaired, drop one
+// broken definition rather than the block, never let a bad prop take the
+// project down (§77 — 「這個道具需要復原」 beats a white screen).
+
+function migratePropPart(raw: Partial<PropPart>, i: number): PropPart | null {
+  if (!raw || typeof raw !== "object") return null;
+  const shape = raw.shape === "cylinder" || raw.shape === "sphere" || raw.shape === "plane"
+    ? raw.shape
+    : "box";
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : `part${i + 1}`,
+    shape,
+    size: {
+      width: Math.max(0.01, raw.size?.width ?? 0.3),
+      depth: Math.max(0.01, raw.size?.depth ?? 0.3),
+      height: Math.max(0.01, raw.size?.height ?? 0.3),
+    },
+    offset: {
+      x: Number.isFinite(raw.offset?.x) ? Number(raw.offset!.x) : 0,
+      y: Number.isFinite(raw.offset?.y) ? Number(raw.offset!.y) : 0,
+      z: Number.isFinite(raw.offset?.z) ? Number(raw.offset!.z) : 0,
+    },
+    ...(Number.isFinite(raw.rotationDeg) ? { rotationDeg: Number(raw.rotationDeg) } : {}),
+    ...(typeof raw.color === "string" ? { color: raw.color } : {}),
+    ...(typeof raw.finish === "string" ? { finish: raw.finish } : {}),
+    ...(typeof raw.text === "string" ? { text: raw.text } : {}),
+    ...(typeof raw.imageBlobId === "string" ? { imageBlobId: raw.imageBlobId } : {}),
+    ...(raw.facesFromOptions === true ? { facesFromOptions: true } : {}),
+    ...(typeof raw.showsResultOf === "string" && raw.showsResultOf
+      ? { showsResultOf: raw.showsResultOf }
+      : {}),
+  };
+}
+
+function migratePropAnchor(raw: Partial<PropAnchor>): PropAnchor | null {
+  if (!raw || typeof raw !== "object") return null;
+  const role = raw.role === "player" || raw.role === "staff" || raw.role === "queue" || raw.role === "exit"
+    ? raw.role
+    : null;
+  if (!role) return null;
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : role,
+    role,
+    x: Number.isFinite(raw.x) ? Number(raw.x) : 0,
+    z: Number.isFinite(raw.z) ? Number(raw.z) : 0,
+    ...(Number.isFinite(raw.facingDeg) ? { facingDeg: Number(raw.facingDeg) } : {}),
+  };
+}
+
+function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.id !== "string" || !raw.id) return null;
+  if (typeof raw.name !== "string" || !raw.name) return null;
+  const parts = (Array.isArray(raw.parts) ? raw.parts : [])
+    .map((p, i) => migratePropPart(p as Partial<PropPart>, i))
+    .filter((p): p is PropPart => p !== null);
+  const anchors = (Array.isArray(raw.anchors) ? raw.anchors : [])
+    .map((a) => migratePropAnchor(a as Partial<PropAnchor>))
+    .filter((a): a is PropAnchor => a !== null);
+
+  let interaction: PropInteractionSeed | undefined;
+  const seed = raw.interaction;
+  if (seed && typeof seed === "object" && Array.isArray(seed.steps)) {
+    const steps = seed.steps
+      .map((st) => migrateStep(st as Partial<InteractionStep>))
+      .filter((st): st is InteractionStep => st !== null);
+    if (steps.length) {
+      interaction = {
+        steps,
+        station: {
+          meanServiceSeconds: Math.max(0, seed.station?.meanServiceSeconds ?? 30),
+          parallelServers: Math.max(1, Math.round(seed.station?.parallelServers ?? 1)),
+          queueCapacity: Math.max(1, Math.round(seed.station?.queueCapacity ?? 8)),
+          ...(seed.station?.selfService === true ? { selfService: true } : {}),
+        },
+        ...(seed.staffRole && typeof seed.staffRole.name === "string"
+          ? {
+            staffRole: {
+              name: seed.staffRole.name,
+              count: Math.max(0, Math.round(seed.staffRole.count ?? 1)),
+            },
+          }
+          : {}),
+        ...(Number.isFinite(seed.skipRate)
+          ? { skipRate: Math.min(1, Math.max(0, Number(seed.skipRate))) }
+          : {}),
+      };
+    }
+  }
+
+  return {
+    id: raw.id,
+    name: raw.name,
+    category: typeof raw.category === "string" && raw.category ? raw.category : "互動",
+    dimensions: {
+      width: Math.max(0.05, raw.dimensions?.width ?? 0.6),
+      depth: Math.max(0.05, raw.dimensions?.depth ?? 0.6),
+      // A mat is legitimately 4 cm tall. The floor protects against zero and
+      // negative, not against thin things.
+      height: Math.max(0.01, raw.dimensions?.height ?? 0.6),
+    },
+    parts,
+    anchors,
+    ...(interaction ? { interaction } : {}),
+    ...(Number.isFinite(raw.clearance) ? { clearance: Math.max(0, Number(raw.clearance)) } : {}),
+    ...(Number.isFinite(raw.interactionZone)
+      ? { interactionZone: Math.max(0, Number(raw.interactionZone)) }
+      : {}),
+    ...(typeof raw.icon === "string" ? { icon: raw.icon } : {}),
+    version: Number.isFinite(raw.version) ? Math.max(1, Math.round(Number(raw.version))) : 1,
+    ...(typeof raw.source === "string" ? { source: raw.source } : {}),
+  };
+}
+
+export function migrateProps(raw: unknown): PropDefinition[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const defs = raw
+    .map((d) => migratePropDefinition(d as Partial<PropDefinition>))
+    .filter((d): d is PropDefinition => d !== null);
+  return defs.length ? defs : undefined;
+}
+
+/**
+ * Re-attach prop stations that an OLDER build's save stripped.
+ *
+ * Old builds rebuild interaction stations through a whitelist that predates
+ * `objectId`: a file that round-trips through one comes back with its prop
+ * stations unbound — still running, at the coordinates of the day it was
+ * saved, which is worse than losing them. Prop station ids are deterministic
+ * (`prop_<objectId>`) precisely so this pass can put the binding back.
+ */
+function rebindPropStations(p: Project): void {
+  if (!p.interaction) return;
+  const objectIds = new Set(p.objects.map((o) => o.id));
+  for (const station of p.interaction.stations) {
+    if (station.objectId || !station.id.startsWith("prop_")) continue;
+    const objectId = station.id.slice("prop_".length);
+    if (objectIds.has(objectId)) station.objectId = objectId;
+  }
+}
+
+/**
+ * The binding pass `resolveScenarioBindings` does, for a template: a station
+ * bound to an object or a zone takes that thing's real position and capacity,
+ * and the run gets the plan's own walls, doors and corridor.
+ */
+export function resolveTemplateBindings(
+  project: Project,
+  template: InteractionTemplate,
+): InteractionTemplate {
+  return {
+    ...template,
+    stations: template.stations.map((station) => ({
+      ...station,
+      ...resolveStationPosition(project, station),
+      parallelServers: zoneParallelServers(project, station),
+    })),
+    settings: { ...template.settings },
+    spatial: buildSimulationSpatial(project),
   };
 }
 
@@ -256,7 +716,24 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
 /** Resolve spatial bindings against the current project without mutating either input. */
 export function resolveStationPosition(project: Project, station: ServiceStation): { x: number; z: number } {
   const object = station.objectId && project.objects.find((item) => item.id === station.objectId && !item.hidden);
-  if (object) return { x: object.x, z: object.z };
+  if (object) {
+    // A prop's player anchor: the station stands where PEOPLE stand, not at
+    // the object's centre, and it turns with the object. Strictly gated on
+    // the field being present — absent returns the byte-identical centre
+    // every pre-prop plan has always used, which is what keeps the frozen
+    // classroom runs frozen.
+    const offset = (station as InteractionStation).anchorOffset;
+    if (offset) {
+      const rad = (object.rotationDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      return {
+        x: object.x + offset.x * cos + offset.z * sin,
+        z: object.z - offset.x * sin + offset.z * cos,
+      };
+    }
+    return { x: object.x, z: object.z };
+  }
   const zone = station.zoneId && project.zones.find((item) => item.id === station.zoneId && !item.hidden);
   if (zone) return { x: zone.x, z: zone.z };
   return { x: station.x, z: station.z };
@@ -428,6 +905,12 @@ export function createDefaultScenario(
 export function migrateProject(input: Partial<Project>): Project {
   const base = createDefaultProject();
   const p: Project = { ...base, ...input, version: PROJECT_VERSION };
+  // v8: keep an existing id. Without this the fresh uid() from
+  // createDefaultProject() would be overwritten by the spread only when the
+  // input HAS one — and a document without one must keep the fresh id rather
+  // than inherit a shared constant. Guards "" and non-strings from hand-edited
+  // or foreign JSON.
+  p.id = typeof input.id === "string" && input.id.length > 0 ? input.id : base.id;
   p.classroom = { ...base.classroom, ...input.classroom };
   p.corridor = { ...base.corridor, ...input.corridor };
   p.tile = { ...base.tile, ...input.tile };
@@ -476,6 +959,24 @@ export function migrateProject(input: Partial<Project>): Project {
   if (p.activeScenarioId && !p.scenarios.some((s) => s.id === p.activeScenarioId)) {
     p.activeScenarioId = p.scenarios[0]?.id ?? null;
   }
+
+  // Outdoor booth (optional; absent on every classroom project).
+  p.booth = migrateBooth(input.booth);
+  if (!p.booth) delete p.booth;
+
+  // The interaction flow. A saved booth plan that predates the step list gets
+  // one compiled from its booth block, so it opens with its own activity
+  // already written out rather than with an empty panel. The booth block stays
+  // in the file, frozen and no longer read: an older build opening this plan
+  // still draws the tent and still runs the flow it knows.
+  p.interaction = migrateInteraction(input.interaction);
+  if (!p.interaction && p.booth) p.interaction = templateFromBooth(p.booth);
+  if (!p.interaction) delete p.interaction;
+
+  // Prop Studio definitions — same optional-block contract as `interaction`.
+  p.props = migrateProps(input.props);
+  if (!p.props) delete p.props;
+  rebindPropStations(p);
 
   return p;
 }

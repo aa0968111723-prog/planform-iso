@@ -9,7 +9,8 @@
  * Pure functions only — no DOM, no rendering, no engine changes.
  */
 
-import type { SimulationResult } from "./eventFlow";
+import type { PlaybackStationResult, SimulationResult } from "./eventFlow";
+import type { PropAnchor, PropDefinition, SceneObject } from "./model";
 
 export const DEFAULT_START_CLOCK = "17:20";
 
@@ -109,6 +110,129 @@ export function buildRehearsalTimeline(
   const problems = events.filter((e) => e.tone === "warn").slice(0, maxEvents);
   const rest = events.filter((e) => e.tone !== "warn").slice(0, Math.max(0, maxEvents - problems.length));
   return [...problems, ...rest].sort((a, b) => a.t - b.t);
+}
+
+// --- §85 where you stand, in plain words -------------------------------------
+
+/** One anchor said out loud. `role` is kept so the UI can pick an icon. */
+export interface AnchorSentence {
+  role: PropAnchor["role"];
+  icon: string;
+  text: string;
+}
+
+const ANCHOR_LINE: Record<PropAnchor["role"], { icon: string; say: (where: string) => string }> = {
+  staff: { icon: "📍", say: (w) => `你站這裡：${w}` },
+  player: { icon: "🙋", say: (w) => `參加者站這裡：${w}` },
+  queue: { icon: "⏳", say: (w) => `排隊從這裡開始：${w}` },
+  exit: { icon: "🚪", say: (w) => `完成後往這裡走：${w}` },
+};
+
+/** Order matters: a volunteer reads their own post first. */
+const ANCHOR_ORDER: PropAnchor["role"][] = ["staff", "player", "queue", "exit"];
+
+/**
+ * 「道具的右前方 90 公分」 — an anchor as a direction and a distance, in the
+ * prop's own frame. Deliberately NOT compass directions or coordinates: a
+ * volunteer holding a phone has no idea which way north is, but 「右前方」
+ * from the thing in front of them is unambiguous.
+ */
+export function anchorPhrase(anchor: Pick<PropAnchor, "x" | "z">): string {
+  const cm = Math.round(Math.hypot(anchor.x, anchor.z) * 100);
+  if (cm < 20) return "就在道具旁邊";
+  const front = anchor.z > 0.15;
+  const back = anchor.z < -0.15;
+  const right = anchor.x > 0.15;
+  const left = anchor.x < -0.15;
+  const parts: string[] = [];
+  if (front) parts.push("前");
+  if (back) parts.push("後");
+  if (right) parts.push("右");
+  if (left) parts.push("左");
+  const where = parts.length === 2 ? `${parts[1]}${parts[0]}方` : parts.length === 1 ? `正${parts[0]}方` : "旁邊";
+  return `道具${where} ${cm} 公分`;
+}
+
+/**
+ * §85 — the four sentences Partner Mode shows when a volunteer taps an
+ * interactive station. A prop with no anchors returns an empty list rather
+ * than inventing a spot to stand in.
+ */
+export function anchorSentences(def: Pick<PropDefinition, "anchors">): AnchorSentence[] {
+  const out: AnchorSentence[] = [];
+  for (const role of ANCHOR_ORDER) {
+    const anchor = def.anchors.find((a) => a.role === role);
+    if (!anchor) continue;
+    const line = ANCHOR_LINE[role];
+    out.push({ role, icon: line.icon, text: line.say(anchorPhrase(anchor)) });
+  }
+  return out;
+}
+
+// --- §26 what this station is doing right now --------------------------------
+
+export interface StationNowReadout {
+  /** 「④ 認識自己」 — the face that was rolled, or null before the first roll. */
+  result: string | null;
+  /** The rolled option's own colour, for the swatch. */
+  resultColor?: string;
+  /** 「對談中」 — the step the served visitors are on. */
+  doing: string | null;
+  /** 「01:12」 — how long since this station last rolled. */
+  since: string | null;
+  /** How many people are standing at this station right now. */
+  serving: number;
+  queued: number;
+}
+
+/** "01:12" — minutes:seconds, the format §26 asks for. */
+export function formatElapsed(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/**
+ * §26 — 「骰到 ④ 認識自己 / 目前：對談中 / 已互動 01:12」 for ONE station.
+ *
+ * Honest approximation, and worth naming: the engine records the fork outcome
+ * per station, not per person, so 「目前」 is the step the station's chance
+ * fork leads into — right for the common case of one server, an approximation
+ * when several people are being served at once. It is attached to the station
+ * a volunteer selected, never floating over every head (§26's own 不要).
+ */
+export function stationNow(
+  input: {
+    stationId: string;
+    result?: PlaybackStationResult;
+    /** Step name the fork leads into, resolved by the caller from the flow. */
+    nextStepName?: string | null;
+    now: number;
+    serving: number;
+    queued: number;
+  },
+): StationNowReadout {
+  const r = input.result;
+  return {
+    result: r ? r.label : null,
+    resultColor: r?.color,
+    doing: r ? input.nextStepName ?? null : null,
+    since: r ? formatElapsed(Math.max(0, input.now - r.t)) : null,
+    serving: input.serving,
+    queued: input.queued,
+  };
+}
+
+/** The placed objects a partner can tap for §85, newest binding wins. */
+export function propStationObjects(
+  objects: readonly SceneObject[],
+  defFor: (o: SceneObject) => PropDefinition | undefined,
+): { object: SceneObject; def: PropDefinition }[] {
+  const out: { object: SceneObject; def: PropDefinition }[] = [];
+  for (const o of objects) {
+    const def = defFor(o);
+    if (def?.anchors.length) out.push({ object: o, def });
+  }
+  return out;
 }
 
 // --- before / after in plain language --------------------------------------

@@ -56,6 +56,51 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
   return root;
 }
 
+/**
+ * §26 — 「骰到 ④ 認識自己 / 目前：對談中 / 已互動 01:12」 for the selected
+ * station, plus §85's four anchor sentences.
+ *
+ * On the SELECTED object only. §26's own 不要 is 「不要所有人頭上一直顯示」 —
+ * a plan with ten interactive props would otherwise be unreadable exactly
+ * when you are trying to watch the crowd.
+ */
+function propStationPanel(root: HTMLElement, app: App, objectId: string): void {
+  const guide = app.propAnchorGuide(objectId);
+  if (!guide) return;
+
+  const now = app.propStationNow(objectId);
+  if (now) {
+    root.append(el("div", { class: "subhead", text: "彩排中" }));
+    const box = el("div", { class: "readout" });
+    if (now.result) {
+      const row = el("div", { class: "row" }, [
+        el("span", { class: "readout__label", text: "骰到" }),
+        ...(now.resultColor
+          ? [el("span", { class: "swatch", style: `background:${now.resultColor}` })]
+          : []),
+        el("strong", { text: now.result }),
+      ]);
+      box.append(row);
+      if (now.doing) box.append(el("div", { text: `目前：${now.doing}` }));
+      if (now.since) box.append(el("div", { text: `已互動：${now.since}` }));
+    } else {
+      box.append(el("div", { text: "還沒有人玩過（按 ▶ 播放走位看現場）" }));
+    }
+    box.append(el("div", { text: `現在：${now.serving} 人在玩、${now.queued} 人在排` }));
+    root.append(box);
+  }
+
+  root.append(el("div", { class: "subhead", text: "大家站哪裡" }));
+  const lines = el("div", { class: "readout" });
+  for (const line of guide.lines) {
+    lines.append(el("div", {}, [
+      el("span", { class: "readout__label", text: line.icon }),
+      el("span", { text: line.text }),
+    ]));
+  }
+  root.append(lines);
+}
+
 function nudgePanel(app: App): HTMLElement {
   const tile = app.store.getState().tile;
   const steps: { label: string; v: number }[] = [
@@ -127,6 +172,8 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
   if (obj.kind === "computer") {
     root.append(button(obj.parentId ? "解除桌面關聯" : "（未在桌面上）", () => app.detachComputer(), "chip chip--sm"));
   }
+
+  propStationPanel(root, app, obj.id);
 
   if (obj.surface !== "wall") root.append(rotationPanel(app, obj.rotationDeg));
   root.append(nudgePanel(app));

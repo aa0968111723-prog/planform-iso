@@ -11,6 +11,7 @@ import { BUILTIN_CATALOG } from "../src/core/catalog";
 import { BUILTIN_VENUE_PRESETS, venuePresetById } from "../src/core/venues";
 import { planSymbolForKind } from "../src/core/planSymbol";
 import { MATERIAL_PRESETS } from "../src/scene/materials";
+import { MAT_COLORS } from "../src/core/theme";
 import { buildE310GoldenProject } from "../src/core/quickStart";
 import { inventoryLines } from "../src/export/constructionPlan";
 
@@ -43,6 +44,41 @@ describe("M-01 巧拼 are green, as in the club's event photos", () => {
   it("the plan symbol used in the exported 場刊圖 matches too", () => {
     expect(isGreenish(planSymbolForKind("mat").fill)).toBe(true);
   });
+
+  /**
+   * The colour is measured, and every surface must use the SAME measurement.
+   *
+   * Before this, the 3D scene painted the mats `#4fb89a` while the exported
+   * 場刊圖 painted them `#3f8f71` — so the plan you edited and the plan you
+   * sent to LINE were literally different colours, which is the one thing
+   * src/core/theme.ts promises never happens.
+   */
+  it("scene, catalog and plan symbol all use the one measured colour", () => {
+    expect(MAT_COLORS.base).toBe("#29bcaa");
+    expect(entry("builtin:mat").color).toBe(MAT_COLORS.base);
+    expect(MATERIAL_PRESETS["mat-soft"].baseColor).toBe(MAT_COLORS.base);
+    expect(planSymbolForKind("mat").fill).toBe(MAT_COLORS.base);
+  });
+
+  it("the measured colour really is the teal in the photos, not sage green", () => {
+    // Median of ~90 000 mat pixels across six of the club's own event photos
+    // (REFERENCE_MAPPING M-01). Guards against a later 'tidy up' nudging the
+    // hue back toward the generic green it used to be.
+    const rgb = (hex: string) => {
+      const n = parseInt(hex.replace("#", ""), 16);
+      return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    };
+    const [r, g, b] = rgb(MAT_COLORS.base);
+    // Teal: blue is much closer to green than red is — that is what separates
+    // the photographed mats from the old sage `#3f8f71` / `#65ae91` guesses.
+    expect(g - b).toBeLessThan(40);
+    expect(g - r).toBeGreaterThan(100);
+    // Seam is a shaded version of the same hue, never a black grid line.
+    const [sr, sg, sb] = rgb(MAT_COLORS.seam);
+    expect(sg).toBeLessThan(g);
+    expect(sg - sb).toBeLessThan(40);
+    expect(sg - sr).toBeGreaterThan(100);
+  });
 });
 
 describe("M-02 the club's mat is a 60 × 60 巧拼", () => {
@@ -68,7 +104,11 @@ describe("V-01..V-05 E310 stays honest about being uncalibrated", () => {
     expect(e310!.corridor!.z).toBeCloseTo(e310!.classroom.width, 6);
   });
 
-  it("puts the door on the back wall so it opens onto the corridor", () => {
+  // The mapping's 門 row is about OTHER activity rooms (left wall). E310's own
+  // evidence is different and is what the preset follows: both side walls are
+  // windows, so the door can only be front or back, and the back one opens onto
+  // the corridor — `docs/e310/E310_GOLDEN_SCENARIO.md` §3–4.
+  it("puts the door on the back wall, per E310_GOLDEN_SCENARIO §3–4, not the mapping's 左側牆 row", () => {
     const door = e310!.fixtures.find((f) => f.kind === "door");
     expect(door).toBeDefined();
     expect(door!.edge).toBe("s");
@@ -127,20 +167,28 @@ describe("物資清單 names the material the 場務組 has to carry", () => {
     expect(matLine!.count).toBeGreaterThan(50);
   });
 
-  it("still lists the service kit the example places", () => {
+  it("lists evidenced service kit and does not invent a shoe rack", () => {
     const names = inventoryLines(buildE310GoldenProject(venuePresetById("venue:tku-e310")!)).map((l) => l.name);
-    for (const expected of ["報到桌", "收費桌", "鞋架", "電腦"]) {
+    for (const expected of ["報到桌", "收費桌", "電腦"]) {
       expect(names).toContain(expected);
     }
+    expect(names).not.toContain("鞋架");
   });
 });
 
-describe("F-03 the golden scenario is 60 人 over a 20-minute arrival window", () => {
-  it("matches the spec in REAL_REFERENCE_CONTRACT §8", () => {
+describe("F-03 the golden scenario is 60 人 over a 15-minute arrival window", () => {
+  // Cites the spec that actually states it. This test used to name
+  // REAL_REFERENCE_CONTRACT §8 — the Golden Scenario Gate, which lists the flow
+  // and contains no numbers — and assert 20 minutes, while the spec that does
+  // state a window (E310_GOLDEN_SCENARIO.md) says 15. A test citing a source
+  // that does not say what the test asserts is worse than no test: it makes the
+  // wrong value look confirmed.
+  it("matches 到達窗預設 15 分鐘 in docs/e310/E310_GOLDEN_SCENARIO.md", () => {
     const project = buildE310GoldenProject(venuePresetById("venue:tku-e310")!);
     const scenario = project.scenarios?.[0];
     expect(scenario?.participantCount).toBe(60);
-    expect(scenario?.arrivalWindowSeconds).toBe(20 * 60);
+    expect(scenario?.arrivalWindowSeconds).toBe(15 * 60);
+    expect(scenario?.arrivalProfile).toBe("front-loaded");
   });
 
   it("splits 40 prepaid / 20 paying on site", () => {

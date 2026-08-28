@@ -15,8 +15,8 @@
  */
 
 import type { Project } from "../core/model";
-import { buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
-import { BUILTIN_VENUE_PRESETS, listUserVenuePresets, type VenuePreset } from "../core/venues";
+import { buildE310ClubGoldenProject, buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
+import { BUILTIN_VENUE_PRESETS, createProjectFromVenuePreset, listUserVenuePresets, type VenuePreset } from "../core/venues";
 import { button, el } from "./dom";
 
 export interface NewProjectResult {
@@ -126,7 +126,23 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     const e310 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e310");
 
     if (e310) {
+      // The 30-person club class is the setup the club actually photographs
+      // itself in, so it leads: continuous green 巧拼, check-in inside the
+      // room, shoes at the mat edge, corridor left clear.
       card.append(
+        el("div", { class: "quickstart__recommended" }, [
+          el("span", { class: "quickstart__eyebrow", text: "實景推薦起點" }),
+          el("strong", { text: "E310 禪學社社課" }),
+          el("span", { class: "hint", text: "30 人・綠色連續巧拼・教室內報到・走廊淨空" }),
+          button("建立 30 人實景場佈", () => {
+            finish({
+              name: projectName,
+              project: buildE310ClubGoldenProject(e310),
+              venue: e310,
+              participants: 30,
+            });
+          }, "btn btn--big btn--primary"),
+        ]),
         button(`🎤 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
         el("p", { class: "hint", text: e310.note }),
         button("⚡ 直接用 E310 演講範例（60 人）", () => {
@@ -136,7 +152,24 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
             venue: e310,
             participants: 60,
           });
-        }, "btn btn--big btn--primary"),
+        }, "btn btn--big btn--ghost"),
+      );
+    }
+
+    // 攤位 skips step 3 on purpose: the template already ships its own tent,
+    // table, zones, flows and stations, so there is nothing left to tick.
+    const booth = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-booth");
+    if (booth) {
+      card.append(
+        button(`⛺ ${booth.name}`, () => {
+          finish({
+            name: projectName,
+            project: createProjectFromVenuePreset(booth, projectName),
+            venue: booth,
+            participants: 40,
+          });
+        }, "btn btn--big"),
+        el("p", { class: "hint", text: booth.note }),
       );
     }
     card.append(

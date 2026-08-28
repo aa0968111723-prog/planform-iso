@@ -1,18 +1,46 @@
 /**
  * Venue Capture UI — photo upload → review detections → calibrate → commit.
+ *
+ * NOT MOUNTED IN PRODUCTION, and the reason matters.
+ *
+ * The only `VenueProvider` that exists is `MockVenueProvider`, which throws the
+ * photograph away (`void _dataUrl`) and derives six "detections" from
+ * `imageName.length % 7` — four of them `confirmed: true`. Mounted, this asked
+ * a volunteer standing in E310 to photograph the real room and answered with
+ * 門 82% / 投影幕 71% / 桌子 64% / 報到桌 58%, none of which came from their
+ * photo, then wrote those four invented objects into the plan the setup team
+ * would follow. Two different photos with equal-length filenames produced
+ * byte-identical results; the same photo renamed produced different ones.
+ *
+ * The flow could not be used honestly even in principle: the captured photo is
+ * never drawn, so the two-point calibration it asks for cannot be aimed at
+ * anything — the reference line is hard-coded to (0.1,0.9)→(0.4,0.9).
+ *
+ * So the machinery stays (session, calibration, commit are all real and
+ * tested), and the switch is a single binding: give `provider` a real vision
+ * provider and the section appears again, with no other change.
  */
 
 import type { App } from "../app/App";
 import {
-  MockVenueProvider,
   applyVenueCalibration,
   createVenueSession,
   type VenueCaptureSession,
   type VenueDetection,
+  type VenueProvider,
 } from "../assets/venueCapture";
 import { button, el, section } from "./dom";
 
-const provider = new MockVenueProvider();
+/**
+ * The vision provider. `null` until a real one exists — a mock must never be
+ * wired here, because everything downstream treats a detection as observed.
+ */
+const provider: VenueProvider | null = null;
+
+/** Whether 掃描場地 may be offered to a user at all. */
+export function venueCaptureAvailable(): boolean {
+  return provider !== null;
+}
 
 export function buildVenueCaptureFlow(app: App): HTMLElement {
   const host = el("div", { class: "venue-capture" });
@@ -112,6 +140,7 @@ export function buildVenueCaptureFlow(app: App): HTMLElement {
     fileInput.value = "";
     if (!f) return;
     const dataUrl = await readAsDataUrl(f);
+    if (!provider) return;
     const detections = await provider.detect(f.name, dataUrl);
     session = createVenueSession(f.name, dataUrl, detections);
     render();

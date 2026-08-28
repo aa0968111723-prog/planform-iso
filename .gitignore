@@ -7,6 +7,10 @@ dev-dist/
 docs/FIELD_PRECISION_MOBILE_VALIDATION_PLAN.md
 test-results/
 playwright-report/
+.playwright-cli/
+output/
+scripts/exports/
+scripts/phone/
 baseline_gates.log
 _audit_grok.md
 _smoke/

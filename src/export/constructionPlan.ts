@@ -10,9 +10,11 @@ import { assetDef } from "../core/assets";
 import { catalogFromProject } from "../core/migrate";
 import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
 import { calibrationComplete, venueNeedsCalibration, type Project, type SceneObject } from "../core/model";
+import { audienceJoiners, stationForStep, normalizeTemplate } from "../core/interactionCompile";
 import { groupFootprint, groupMembers, memberLabel } from "../core/arrays";
 
 import { doorSweep, facingVec, rectCorners } from "../core/placement";
+import { MAT_COLORS } from "../core/theme";
 
 const NEUTRAL_STROKE = "#334155";
 const TEXT = "#0f172a";
@@ -26,7 +28,7 @@ function font(spec: string): string {
   return `${adjusted} system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif`;
 }
 
-export type PlanPreset = "full" | "mats" | "route" | "zones" | "staff" | "partner" | "inventory";
+export type PlanPreset = "full" | "mats" | "route" | "zones" | "staff" | "partner" | "inventory" | "flow";
 export type PageSize = "a4" | "a3" | "phone";
 export type PageOrientation = "landscape" | "portrait";
 
@@ -100,6 +102,7 @@ const PRESET_TITLE: Record<PlanPreset, string> = {
   staff: "工作人員配置圖",
   partner: "夥伴觀看圖",
   inventory: "物資清單",
+  flow: "互動流程",
 };
 
 interface Xform { X: (wx: number) => number; Y: (wz: number) => number; s: number }
@@ -194,6 +197,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const opt = { ...DEFAULT_OPTIONS, ...options };
   activePageSize = opt.page;
   if (opt.preset === "inventory") return renderInventorySheet(project, opt);
+  if (opt.preset === "flow") return renderFlowSheet(project, opt);
   project = applyRoleFilter(project, opt.roleFilter, opt.simplify);
   const bounds = contentBounds(project);
   const minX = bounds.minX;
@@ -255,7 +259,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const fadeFurniture = opt.preset === "route" || opt.preset === "staff" || opt.preset === "zones" || opt.preset === "mats";
 
   drawFloors(ctx, project, t);
-  withAlpha(ctx, showTilesFaint ? 0.4 : 1, () => drawTiles(ctx, project, t, minX, minZ, maxX, maxZ));
+  withAlpha(ctx, showTilesFaint ? 0.4 : 1, () => drawTiles(ctx, project, t));
   drawZones(ctx, project, t, emphasizeZones);
 
   if (opt.preset !== "route") {
@@ -285,11 +289,16 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
     });
   }
 
-  withAlpha(ctx, emphasizeRoutes ? 1 : opt.preset === "mats" ? 0.5 : 0.85, () =>
-    drawRoutes(ctx, project, t, showRouteBadges));
-
-  // Titles last: everything that could paint over them is already down.
-  drawZoneLabels(ctx, project, t, emphasizeZones);
+  if (emphasizeRoutes) {
+    // Route/partner sheets prioritise numbered stops. Draw zone names first so
+    // a long label cannot erase a stop badge (the previous 背包 label hid ④).
+    drawZoneLabels(ctx, project, t, emphasizeZones);
+    drawRoutes(ctx, project, t, showRouteBadges);
+  } else {
+    withAlpha(ctx, opt.preset === "mats" ? 0.5 : 0.85, () => drawRoutes(ctx, project, t, showRouteBadges));
+    // On non-route sheets labels remain the topmost communication layer.
+    drawZoneLabels(ctx, project, t, emphasizeZones);
+  }
 
   if (opt.dims) drawDimensions(ctx, project, t);
   const subtitle = opt.titleSuffix
@@ -324,6 +333,160 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
 }
 
 /** 物資清單圖 — the item list is the page, with a small locator plan. */
+/** One printed line of the 互動流程 sheet. */
+export interface FlowSheetLine {
+  kind: "head" | "step" | "detail" | "option" | "note";
+  text: string;
+}
+
+/**
+ * The interaction flow, as words on paper.
+ *
+ * Printed, not drawn. A volunteer standing at the table needs to read what to
+ * say and what to hand over; a box-and-arrow diagram of the same thing is
+ * slower to read and impossible to check against.
+ *
+ * What is deliberately NOT here: step ids, `next` targets, option weights,
+ * station ids, seeds. Those are how the SIMULATION walks the flow. Nobody
+ * running the booth needs them, and printing them would turn a briefing sheet
+ * into a data dump. The one place a jump appears is where the flow genuinely
+ * branches out of order, and then it is named, not numbered.
+ */
+export function flowSheetLines(project: Project): FlowSheetLine[] {
+  const template = project.interaction;
+  if (!template) return [];
+  const n = normalizeTemplate(template);
+  const lines: FlowSheetLine[] = [];
+
+  const funnel = audienceJoiners(template.audience);
+  const minutes = Math.round(template.audience.windowSeconds / 60);
+  lines.push({
+    kind: "head",
+    text: template.audience.stopRate < 1
+      ? `${minutes} 分鐘內經過 ${funnel.passed} 人，預計 ${funnel.joined} 人會參加`
+      : `${funnel.joined} 人，${minutes} 分鐘內到齊`,
+  });
+  if (template.staff.length) {
+    lines.push({
+      kind: "head",
+      text: `人手：${template.staff.map((r) => `${r.name} ${r.count} 人`).join("、")}`,
+    });
+  }
+
+  const supplies = new Set<string>();
+  let inherited: string | null = null;
+  template.steps.forEach((step, i) => {
+    const station = stationForStep(step, inherited, n);
+    inherited = station?.id ?? inherited;
+    const where = station ? `（${station.name}）` : "";
+    const seconds = step.avgSeconds > 0 ? ` · 約 ${Math.round(step.avgSeconds)} 秒` : "";
+    lines.push({ kind: "step", text: `${i + 1}. ${step.name}${where}${seconds}` });
+    if (step.prompt) lines.push({ kind: "detail", text: step.prompt });
+
+    if (step.branch?.kind === "chance") {
+      for (const option of step.branch.options) {
+        if (!option.label.trim()) continue;
+        lines.push({ kind: "option", text: `· ${option.label}${option.prompt ? `：${option.prompt}` : ""}` });
+      }
+    } else if (step.branch?.kind === "match") {
+      for (const rule of step.branch.rules) {
+        lines.push({ kind: "option", text: `· ${rule.label}${rule.prompt ? `：${rule.prompt}` : ""}` });
+      }
+      if (step.branch.otherwise) {
+        lines.push({ kind: "option", text: `· 其他：${step.branch.otherwise.label}` });
+      }
+    }
+
+    for (const item of step.supplies ?? []) supplies.add(item);
+  });
+
+  if (supplies.size) {
+    lines.push({ kind: "head", text: "要帶的東西" });
+    for (const item of supplies) lines.push({ kind: "option", text: `· ${item}` });
+  }
+  if (template.note) lines.push({ kind: "note", text: template.note });
+  return lines;
+}
+
+function renderFlowSheet(project: Project, opt: PlanOptions): string {
+  const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
+  const phone = opt.page === "phone";
+  const scale = Math.max(1, opt.scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(cw * scale);
+  canvas.height = Math.round(ch * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, cw, ch);
+  drawHeader(ctx, project, cw, PRESET_TITLE.flow);
+
+  const lines = flowSheetLines(project);
+  let y = phone ? 132 : 112;
+  const bottom = ch - 56;
+  const columnWidth = phone ? cw - 64 : cw / 2 - 56;
+  let x = 32;
+  let omitted = 0;
+
+  if (!lines.length) {
+    ctx.fillStyle = "#64748b";
+    ctx.font = font("400 16px");
+    ctx.fillText("這份計畫還沒有互動流程 — 到「模擬」分頁排一份。", 32, y);
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (y > bottom) {
+      // One column on a phone, two on paper: move over rather than truncate.
+      if (!phone && x < cw / 2) {
+        x = cw / 2 + 24;
+        y = 112;
+      } else {
+        omitted = lines.length - i;
+        break;
+      }
+    }
+    if (line.kind === "head") {
+      ctx.fillStyle = TEXT;
+      ctx.font = font("700 18px");
+      y += 8;
+    } else if (line.kind === "step") {
+      ctx.fillStyle = TEXT;
+      ctx.font = font("700 16px");
+      y += 6;
+    } else if (line.kind === "option") {
+      ctx.fillStyle = "#334155";
+      ctx.font = font("400 15px");
+    } else if (line.kind === "note") {
+      ctx.fillStyle = "#b45309";
+      ctx.font = font("400 14px");
+      y += 8;
+    } else {
+      ctx.fillStyle = "#475569";
+      ctx.font = font("400 15px");
+    }
+    const indent = line.kind === "option" ? 18 : line.kind === "detail" ? 14 : 0;
+    // Wrapped, not clipped: the quote on the card IS the content of this sheet.
+    const wrapped = wrapText(ctx, line.text, columnWidth - indent);
+    for (let w = 0; w < wrapped.length; w++) {
+      // Continuation lines hang under the first character, not under the dot.
+      ctx.fillText(wrapped[w], x + indent + (w > 0 ? 12 : 0), y);
+      if (w < wrapped.length - 1) y += 22;
+    }
+    y += line.kind === "head" ? 30 : 26;
+  }
+
+  if (omitted) {
+    ctx.fillStyle = "#b45309";
+    ctx.font = font("700 15px");
+    ctx.fillText(`還有 ${omitted} 行沒印出來 — 用 A3 或手機版分兩張`, 32, ch - 34);
+  }
+
+  if (phone) drawPhoneFooter(ctx, project, cw, ch, "flow");
+  drawCalibrationFooter(ctx, project, cw, ch);
+  return canvas.toDataURL("image/png");
+}
+
 function renderInventorySheet(project: Project, opt: PlanOptions): string {
   const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
   const phone = opt.page === "phone";
@@ -446,7 +609,9 @@ function renderMiniPlan(project: Project, w: number, h: number): HTMLCanvasEleme
     if (!o.hidden) drawObject(ctx, o, t, "full", project);
   }
   drawGroups(ctx, project, t, false);
-  drawZoneLabels(ctx, project, t, false);
+  // The inventory page already lists every zone and object at full size above.
+  // Repeating all labels inside this small locator map turns it into an
+  // unreadable knot; retain the geometry and the field label only.
   labelBoxes = hostBoxes;
   labelFrame = hostFrame;
   return canvas;
@@ -460,30 +625,42 @@ function withAlpha(ctx: CanvasRenderingContext2D, a: number, fn: () => void): vo
 }
 
 function drawFloors(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {
+  const e310 = p.venuePresetId === "venue:tku-e310";
   for (const a of [p.classroom, p.corridor]) {
-    ctx.fillStyle = a.id === "classroom" ? "#ffffff" : "#f1f5f9";
-    ctx.strokeStyle = "#0f172a";
+    ctx.fillStyle = e310
+      ? (a.id === "classroom" ? "#e2ded5" : "#d2a0a2")
+      : (a.id === "classroom" ? "#ffffff" : "#f1f5f9");
+    ctx.strokeStyle = e310 ? "#465552" : "#0f172a";
     ctx.lineWidth = 3;
     const x = t.X(a.x), y = t.Y(a.z), w = a.length * t.s, h = a.width * t.s;
     ctx.fillRect(x, y, w, h);
     ctx.strokeRect(x, y, w, h);
-    ctx.fillStyle = "#64748b";
+    ctx.fillStyle = e310 ? "#455853" : "#64748b";
     ctx.font = font("600 20px");
     planText(ctx, fitText(ctx, a.name, Math.max(120, w - 16)), x + 8, y + 24);
   }
+  if (e310) {
+    const k = p.corridor;
+    ctx.fillStyle = "#d7ad38";
+    ctx.fillRect(t.X(k.x + k.length * 0.06), t.Y(k.z + k.width * 0.67), k.length * 0.72 * t.s, 0.26 * t.s);
+  }
 }
 
-function drawTiles(ctx: CanvasRenderingContext2D, p: Project, t: Xform, minX: number, minZ: number, maxX: number, maxZ: number): void {
-  ctx.strokeStyle = "#e2e8f0";
-  ctx.lineWidth = 1;
+function drawTiles(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {
   const w = Math.max(p.tile.width, 0.05);
   const d = Math.max(p.tile.depth, 0.05);
-  ctx.beginPath();
-  let sx = p.tile.originX; while (sx > minX) sx -= w;
-  for (let x = sx; x <= maxX + 1e-6; x += w) { ctx.moveTo(t.X(x), t.Y(minZ)); ctx.lineTo(t.X(x), t.Y(maxZ)); }
-  let sz = p.tile.originZ; while (sz > minZ) sz -= d;
-  for (let z = sz; z <= maxZ + 1e-6; z += d) { ctx.moveTo(t.X(minX), t.Y(z)); ctx.lineTo(t.X(maxX), t.Y(z)); }
-  ctx.stroke();
+  const e310 = p.venuePresetId === "venue:tku-e310";
+  for (const area of [p.classroom, p.corridor]) {
+    const minX = area.x, minZ = area.z, maxX = area.x + area.length, maxZ = area.z + area.width;
+    ctx.strokeStyle = e310 ? (area.id === "classroom" ? "rgba(96,91,84,.25)" : "rgba(112,63,68,.28)") : "#e2e8f0";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let sx = p.tile.originX; while (sx > minX) sx -= w;
+    for (let x = sx; x <= maxX + 1e-6; x += w) { ctx.moveTo(t.X(x), t.Y(minZ)); ctx.lineTo(t.X(x), t.Y(maxZ)); }
+    let sz = p.tile.originZ; while (sz > minZ) sz -= d;
+    for (let z = sz; z <= maxZ + 1e-6; z += d) { ctx.moveTo(t.X(minX), t.Y(z)); ctx.lineTo(t.X(maxX), t.Y(z)); }
+    ctx.stroke();
+  }
 }
 
 interface LabelBox { x: number; y: number; w: number; h: number }
@@ -578,8 +755,12 @@ function drawZoneLabels(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emp
     ctx.fillStyle = TEXT;
     // 34px is the PHONE floor — on A4/A3 it blew labels up to 講師… ellipses.
     ctx.font = font(activePageSize === "phone" ? "700 34px" : "700 22px");
-    const label = `${z.icon ? `${z.icon} ` : ""}${z.name}`;
-    const labelW = Math.min(Math.max(w - 12, activePageSize === "phone" ? 300 : 240), Math.max(240, t.s * 6));
+    const displayName = z.type === "backpack" ? "背包" : z.name;
+    const label = `${z.icon ? `${z.icon} ` : ""}${displayName}`;
+    const labelW = Math.min(
+      Math.max(w - 12, activePageSize === "phone" ? 260 : 150),
+      activePageSize === "phone" ? 420 : 300,
+    );
     const lineH = activePageSize === "phone" ? 42 : 26;
     // A zone shorter than its own title cannot hold it without covering the
     // furniture inside — put the title just above the zone instead.
@@ -592,7 +773,9 @@ function drawZoneLabels(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emp
 
 function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: boolean): void {
   for (const r of p.routes) {
-    if (!r.visible || r.points.length < 2) continue;
+    // Photo-grounded Golden Scenes may hide editing overlays by default; a
+    // dedicated route/partner sheet must still be able to reveal the route.
+    if ((!r.visible && !bold) || r.points.length < 2) continue;
     ctx.strokeStyle = r.color;
     ctx.lineWidth = bold ? 5 : 3;
     ctx.beginPath();
@@ -680,26 +863,41 @@ function isFieldMatGroup(g: Project["groups"][number]): boolean {
 }
 
 function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][number], t: Xform, seatMap = false): void {
-  const points = groupMembers(g).flatMap((m) => rectCorners(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
+  const members = groupMembers(g);
+  const points = members.flatMap((m) => rectCorners(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
   if (!points.length) return;
   const minX = Math.min(...points.map((p) => p.x));
   const maxX = Math.max(...points.map((p) => p.x));
   const minZ = Math.min(...points.map((p) => p.z));
   const maxZ = Math.max(...points.map((p) => p.z));
   const x = t.X(minX), y = t.Y(minZ), w = (maxX - minX) * t.s, h = (maxZ - minZ) * t.s;
-  const color = assetDef(g.sourceKind).color;
-  ctx.fillStyle = hexA(color, 0.12);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([10, 6]);
+  const color = MAT_COLORS.base;
+  ctx.fillStyle = hexA(color, seatMap ? 0.72 : 0.88);
+  ctx.strokeStyle = MAT_COLORS.outline;
+  ctx.lineWidth = 3.5;
   ctx.fillRect(x, y, w, h);
   ctx.strokeRect(x, y, w, h);
-  ctx.setLineDash([]);
+
+  // Draw every 60 cm EVA seam and a small joint mark. The overall field stays
+  // visually continuous while still reading as interlocking pieces.
+  ctx.strokeStyle = hexA(MAT_COLORS.seam, 0.62);
+  ctx.lineWidth = 1.5;
+  for (const member of members) {
+    const corners = rectCorners(member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg);
+    ctx.beginPath();
+    ctx.moveTo(t.X(corners[0].x), t.Y(corners[0].z));
+    for (let i = 1; i < corners.length; i++) ctx.lineTo(t.X(corners[i].x), t.Y(corners[i].z));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(t.X(corners[0].x), t.Y(corners[0].z), Math.max(2, t.s * 0.025), 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   if (seatMap) {
     const rows = new Map<number, ReturnType<typeof groupMembers>[number]>();
-    for (const member of groupMembers(g)) {
-      drawRectAt(ctx, member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg, t, color, undefined, 0.08, 2.5);
+    for (const member of members) {
+      drawRectAt(ctx, member.x, member.z, g.itemWidth, g.itemDepth, member.rotationDeg, t, color, undefined, 0.13, 2.5);
       if (!rows.has(member.row)) rows.set(member.row, member);
     }
     ctx.fillStyle = TEXT;
@@ -818,6 +1016,14 @@ function drawScreen(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): vo
   ctx.lineTo(t.X(o.x + tangent.x * 0.15), t.Y(o.z + tangent.z * 0.15));
   ctx.lineTo(t.X(tip.x), t.Y(tip.z));
   ctx.closePath(); ctx.fill();
+  ctx.font = font(activePageSize === "phone" ? "700 30px" : "700 16px");
+  const label = "投影幕";
+  const labelW = ctx.measureText(label).width;
+  const labelX = t.X(o.x) - labelW / 2;
+  const labelY = t.Y(o.z + f.z * 0.52) - (activePageSize === "phone" ? 34 : 18);
+  const spot = placeLabel(labelX, labelY, labelW, activePageSize === "phone" ? 34 : 18, 20);
+  ctx.fillStyle = "#1e40af";
+  planText(ctx, label, spot.x, spot.y + (activePageSize === "phone" ? 28 : 15));
 }
 
 function drawSwitch(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): void {
@@ -967,6 +1173,44 @@ function arrowHead(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: nu
   ctx.lineTo(mx + Math.cos(ang + 2.5) * 8, my + Math.sin(ang + 2.5) * 8);
   ctx.lineTo(mx + Math.cos(ang - 2.5) * 8, my + Math.sin(ang - 2.5) * 8);
   ctx.closePath(); ctx.fill();
+}
+
+/**
+ * Break a line to fit a column instead of cutting it off.
+ *
+ * A truncated 「不用每個人都喜歡你，那樣太…」 is worse than useless on a
+ * briefing sheet: the volunteer has to guess the rest of the sentence they are
+ * supposed to hand somebody. Chinese has no spaces, so this measures character
+ * by character and breaks where it must, preferring a space when Latin text
+ * offers one.
+ */
+function wrapText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number, maxLines = 4): string[] {
+  if (ctx.measureText(value).width <= maxWidth) return [value];
+  const lines: string[] = [];
+  let line = "";
+  for (const ch of value) {
+    const next = line + ch;
+    if (ctx.measureText(next).width > maxWidth && line) {
+      // Prefer breaking at the last space so a Latin word survives intact.
+      const space = line.lastIndexOf(" ");
+      if (space > 0 && line.length - space < 12) {
+        lines.push(line.slice(0, space));
+        line = `${line.slice(space + 1)}${ch}`;
+      } else {
+        lines.push(line);
+        line = ch;
+      }
+      if (lines.length === maxLines - 1 && ctx.measureText(value).width > maxWidth * maxLines) {
+        // Runaway text still gets an ellipsis rather than eating the page.
+        lines.push(fitText(ctx, value.slice(lines.join("").length), maxWidth));
+        return lines;
+      }
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }
 
 function fitText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number): string {

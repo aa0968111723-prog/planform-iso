@@ -1,0 +1,662 @@
+{
+ "e310-bound": {
+  "avgJourneySeconds": 610.7728491826837,
+  "avgWaitSeconds": 409.1211672415474,
+  "bottleneckName": "報到",
+  "bottleneckStationId": "報到",
+  "completed": 60,
+  "finishTimeSeconds": 1558.6938194279483,
+  "leftEarly": 0,
+  "maxJourneySeconds": 902.5592543768826,
+  "maxQueue": 21,
+  "maxQueueWhere": "報到",
+  "participantCount": 60,
+  "seed": 310,
+  "spatialBottlenecks": [
+   {
+    "count": 14,
+    "id": "corridor",
+    "kind": "corridor",
+    "name": "走廊",
+    "x": 6,
+    "z": 10.2
+   }
+  ],
+  "stations": [
+   {
+    "avgWaitSeconds": 144.50639687030144,
+    "busyServerSeconds": 896.9993447772079,
+    "maxQueue": 17,
+    "name": "走廊入口",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 8670.383812218086,
+    "type": "entrance",
+    "utilization": 0.5754814278447662
+   },
+   {
+    "avgWaitSeconds": 8.34544070906088,
+    "busyServerSeconds": 894.8770605133484,
+    "maxQueue": 2,
+    "name": "走廊引導",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 500.7264425436528,
+    "type": "guide",
+    "utilization": 0.5741198491707464
+   },
+   {
+    "avgWaitSeconds": 8.591453327941817,
+    "busyServerSeconds": 896.4026223161732,
+    "maxQueue": 2,
+    "name": "走廊排隊",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 515.487199676509,
+    "type": "queue",
+    "utilization": 0.5750985929007913
+   },
+   {
+    "avgWaitSeconds": 221.49700388326372,
+    "busyServerSeconds": 2743.0787463991132,
+    "maxQueue": 21,
+    "name": "報到",
+    "served": 60,
+    "servers": 2,
+    "totalWaitSeconds": 13289.820232995822,
+    "type": "checkin",
+    "utilization": 0.8799286659793912
+   },
+   {
+    "avgWaitSeconds": 65.27907179295246,
+    "busyServerSeconds": 1204.278220595437,
+    "maxQueue": 3,
+    "name": "現場收費",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 1305.5814358590492,
+    "type": "payment",
+    "utilization": 0.7726201294859921
+   },
+   {
+    "avgWaitSeconds": 3.1632155444232124,
+    "busyServerSeconds": 894.444679696082,
+    "maxQueue": 2,
+    "name": "鞋子",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 189.79293266539275,
+    "type": "shoe",
+    "utilization": 0.5738424497149476
+   },
+   {
+    "avgWaitSeconds": 0.6386224969856281,
+    "busyServerSeconds": 883.8857399425077,
+    "maxQueue": 1,
+    "name": "背包｜課桌椅",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 38.31734981913769,
+    "type": "backpack",
+    "utilization": 0.5670682265660745
+   },
+   {
+    "avgWaitSeconds": 0.6193438119199314,
+    "busyServerSeconds": 897.0872838881335,
+    "maxQueue": 1,
+    "name": "巧拼座區",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 37.160628715195884,
+    "type": "seating",
+    "utilization": 0.5755378463086297
+   }
+  ],
+  "summaryLines": [
+   "完成 60/60 人，總時長約 25 分 59 秒。",
+   "最塞：報到（最大排隊 21 人，平均等待 221 秒）。",
+   "排隊人龍會塞滿走廊（約多出 14 人）——建議提早分流或加人力。",
+   "平均全程 611 秒。"
+  ],
+  "totalWaitSeconds": 24547.270034492845,
+  "unfinished": 0
+ },
+ "e310-golden": {
+  "avgJourneySeconds": 575.5133046185197,
+  "avgWaitSeconds": 392.19514696532497,
+  "bottleneckName": "報到",
+  "bottleneckStationId": "報到",
+  "completed": 60,
+  "finishTimeSeconds": 1506.80610282609,
+  "leftEarly": 0,
+  "maxJourneySeconds": 836.7175627768797,
+  "maxQueue": 20,
+  "maxQueueWhere": "報到",
+  "participantCount": 60,
+  "seed": 310,
+  "spatialBottlenecks": [],
+  "stations": [
+   {
+    "avgWaitSeconds": 142.93315129229373,
+    "busyServerSeconds": 888.4236018384179,
+    "maxQueue": 16,
+    "name": "走廊入口",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 8575.989077537624,
+    "type": "entrance",
+    "utilization": 0.5896071167830653
+   },
+   {
+    "avgWaitSeconds": 6.626827372973769,
+    "busyServerSeconds": 897.8378740221199,
+    "maxQueue": 2,
+    "name": "走廊引導",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 397.60964237842614,
+    "type": "guide",
+    "utilization": 0.5958549493117795
+   },
+   {
+    "avgWaitSeconds": 11.182405222355804,
+    "busyServerSeconds": 900.8764773446044,
+    "maxQueue": 2,
+    "name": "走廊排隊",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 670.9443133413482,
+    "type": "queue",
+    "utilization": 0.597871534801303
+   },
+   {
+    "avgWaitSeconds": 204.30800299605627,
+    "busyServerSeconds": 2698.72490805332,
+    "maxQueue": 20,
+    "name": "報到",
+    "served": 60,
+    "servers": 2,
+    "totalWaitSeconds": 12258.480179763377,
+    "type": "checkin",
+    "utilization": 0.895511672998844
+   },
+   {
+    "avgWaitSeconds": 59.80422145058577,
+    "busyServerSeconds": 1224.150364552896,
+    "maxQueue": 3,
+    "name": "現場收費",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 1196.0844290117154,
+    "type": "payment",
+    "utilization": 0.8124139942471303
+   },
+   {
+    "avgWaitSeconds": 4.7915505652820265,
+    "busyServerSeconds": 889.6169585439756,
+    "maxQueue": 2,
+    "name": "鞋子",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 287.4930339169216,
+    "type": "shoe",
+    "utilization": 0.5903990943993753
+   },
+   {
+    "avgWaitSeconds": 1.2875177427602271,
+    "busyServerSeconds": 910.5010901796444,
+    "maxQueue": 1,
+    "name": "背包｜課桌椅",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 77.25106456561363,
+    "type": "backpack",
+    "utilization": 0.6042589610381549
+   },
+   {
+    "avgWaitSeconds": 1.130951290074477,
+    "busyServerSeconds": 892.1123577344987,
+    "maxQueue": 1,
+    "name": "巧拼座區",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 67.85707740446861,
+    "type": "seating",
+    "utilization": 0.5920551795359055
+   }
+  ],
+  "summaryLines": [
+   "完成 60/60 人，總時長約 25 分 7 秒。",
+   "最塞：報到（最大排隊 20 人，平均等待 204 秒）。",
+   "平均全程 576 秒。"
+  ],
+  "totalWaitSeconds": 23531.708817919498,
+  "unfinished": 0
+ },
+ "mini-seed42": {
+  "avgJourneySeconds": 315.564505601474,
+  "avgWaitSeconds": 236.79948697382315,
+  "bottleneckName": "checkin",
+  "bottleneckStationId": "checkin",
+  "completed": 20,
+  "finishTimeSeconds": 860.5129553850883,
+  "leftEarly": 0,
+  "maxJourneySeconds": 595.8953053372123,
+  "maxQueue": 13,
+  "maxQueueWhere": "checkin",
+  "participantCount": 20,
+  "seed": 42,
+  "spatialBottlenecks": [],
+  "stations": [
+   {
+    "avgWaitSeconds": 0.10050858404450196,
+    "busyServerSeconds": 43.193405131202475,
+    "maxQueue": 1,
+    "name": "entrance",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 2.010171680890039,
+    "type": "entrance",
+    "utilization": 0.05019495041986089
+   },
+   {
+    "avgWaitSeconds": 235.25361730181513,
+    "busyServerSeconds": 782.3115254045995,
+    "maxQueue": 13,
+    "name": "checkin",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 4705.072346036302,
+    "type": "checkin",
+    "utilization": 0.9091223095583809
+   },
+   {
+    "avgWaitSeconds": 2.577849168906873,
+    "busyServerSeconds": 496.4902805164254,
+    "maxQueue": 1,
+    "name": "payment",
+    "served": 10,
+    "servers": 1,
+    "totalWaitSeconds": 25.77849168906873,
+    "type": "payment",
+    "utilization": 0.576970140204619
+   },
+   {
+    "avgWaitSeconds": 0.15643650351009342,
+    "busyServerSeconds": 93.30516150078822,
+    "maxQueue": 1,
+    "name": "seating",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 3.1287300702018683,
+    "type": "seating",
+    "utilization": 0.10842969988642787
+   }
+  ],
+  "summaryLines": [
+   "完成 20/20 人，總時長約 14 分 21 秒。",
+   "最塞：checkin（最大排隊 13 人，平均等待 235 秒）。",
+   "平均全程 316 秒。"
+  ],
+  "totalWaitSeconds": 4735.989739476463,
+  "unfinished": 0
+ },
+ "variant-combined": {
+  "avgJourneySeconds": 536.1895538177365,
+  "avgWaitSeconds": 353.2552846203173,
+  "bottleneckName": "走廊入口",
+  "bottleneckStationId": "走廊入口",
+  "completed": 60,
+  "finishTimeSeconds": 1473.3160830616496,
+  "leftEarly": 0,
+  "maxJourneySeconds": 715.1169850231354,
+  "maxQueue": 19,
+  "maxQueueWhere": "報到＋收費",
+  "participantCount": 60,
+  "seed": 310,
+  "spatialBottlenecks": [],
+  "stations": [
+   {
+    "avgWaitSeconds": 214.2082559376722,
+    "busyServerSeconds": 894.8525831369735,
+    "maxQueue": 26,
+    "name": "走廊入口",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 12852.495356260331,
+    "type": "entrance",
+    "utilization": 0.6096254378102791
+   },
+   {
+    "avgWaitSeconds": 7.7152775661170425,
+    "busyServerSeconds": 892.9065969319282,
+    "maxQueue": 2,
+    "name": "走廊引導",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 462.91665396702257,
+    "type": "guide",
+    "utilization": 0.6082997192343046
+   },
+   {
+    "avgWaitSeconds": 8.209305603838702,
+    "busyServerSeconds": 900.8185636797292,
+    "maxQueue": 3,
+    "name": "走廊排隊",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 492.5583362303221,
+    "type": "queue",
+    "utilization": 0.6136898094943785
+   },
+   {
+    "avgWaitSeconds": 187.76172169671767,
+    "busyServerSeconds": 3890.4829500025608,
+    "maxQueue": 19,
+    "name": "報到＋收費",
+    "served": 60,
+    "servers": 3,
+    "totalWaitSeconds": 11265.70330180306,
+    "type": "checkin",
+    "utilization": 0.8834741484734957
+   },
+   {
+    "avgWaitSeconds": 0,
+    "busyServerSeconds": 0,
+    "maxQueue": 0,
+    "name": "現場收費",
+    "served": 0,
+    "servers": 0,
+    "totalWaitSeconds": 0,
+    "type": "payment",
+    "utilization": 0
+   },
+   {
+    "avgWaitSeconds": 5.983793933631646,
+    "busyServerSeconds": 898.3245720093666,
+    "maxQueue": 2,
+    "name": "鞋子",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 359.02763601789877,
+    "type": "shoe",
+    "utilization": 0.6119907578376127
+   },
+   {
+    "avgWaitSeconds": 0.5763726076957767,
+    "busyServerSeconds": 879.7225615746632,
+    "maxQueue": 1,
+    "name": "背包｜課桌椅",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 34.5823564617466,
+    "type": "backpack",
+    "utilization": 0.5993179903124263
+   },
+   {
+    "avgWaitSeconds": 1.2418214156167082,
+    "busyServerSeconds": 893.1849895032855,
+    "maxQueue": 1,
+    "name": "巧拼座區",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 74.50928493700249,
+    "type": "seating",
+    "utilization": 0.60848937638722
+   }
+  ],
+  "summaryLines": [
+   "完成 60/60 人，總時長約 24 分 28 秒。",
+   "最塞：走廊入口（最大排隊 26 人，平均等待 214 秒）。",
+   "平均全程 608 秒。"
+  ],
+  "totalWaitSeconds": 21195.31707721904,
+  "unfinished": 0
+ },
+ "variant-corridor": {
+  "avgJourneySeconds": 558.6198435981319,
+  "avgWaitSeconds": 394.5326715663384,
+  "bottleneckName": "走廊入口",
+  "bottleneckStationId": "走廊入口",
+  "completed": 60,
+  "finishTimeSeconds": 1502.986461458168,
+  "leftEarly": 0,
+  "maxJourneySeconds": 825.8119776695785,
+  "maxQueue": 20,
+  "maxQueueWhere": "報到",
+  "participantCount": 60,
+  "seed": 310,
+  "spatialBottlenecks": [],
+  "stations": [
+   {
+    "avgWaitSeconds": 202.61414749812033,
+    "busyServerSeconds": 872.1431449893972,
+    "maxQueue": 26,
+    "name": "走廊入口",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 12156.84884988722,
+    "type": "entrance",
+    "utilization": 0.5830717749202121
+   },
+   {
+    "avgWaitSeconds": 236.11077961869526,
+    "busyServerSeconds": 2691.349005343282,
+    "maxQueue": 21,
+    "name": "報到",
+    "served": 60,
+    "servers": 2,
+    "totalWaitSeconds": 14166.646777121716,
+    "type": "checkin",
+    "utilization": 0.8996514221838735
+   },
+   {
+    "avgWaitSeconds": 85.51057196207134,
+    "busyServerSeconds": 1208.045482281276,
+    "maxQueue": 4,
+    "name": "現場收費",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 1710.2114392414267,
+    "type": "payment",
+    "utilization": 0.8076394655909959
+   },
+   {
+    "avgWaitSeconds": 4.726244793130977,
+    "busyServerSeconds": 912.8845595470676,
+    "maxQueue": 2,
+    "name": "鞋子",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 283.57468758785865,
+    "type": "shoe",
+    "utilization": 0.6103094698277262
+   },
+   {
+    "avgWaitSeconds": 0.6869979342960358,
+    "busyServerSeconds": 898.661139808395,
+    "maxQueue": 1,
+    "name": "背包｜課桌椅",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 41.21987605776215,
+    "type": "backpack",
+    "utilization": 0.6008003948093542
+   },
+   {
+    "avgWaitSeconds": 0.3156851291123388,
+    "busyServerSeconds": 898.7500976516588,
+    "maxQueue": 1,
+    "name": "巧拼座區",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 18.94110774674033,
+    "type": "seating",
+    "utilization": 0.6008598676239523
+   },
+   {
+    "avgWaitSeconds": 0,
+    "busyServerSeconds": 327.27533176554783,
+    "maxQueue": 1,
+    "name": "預繳引導",
+    "served": 40,
+    "servers": 1,
+    "totalWaitSeconds": 0,
+    "type": "guide",
+    "utilization": 0.21880010142424397
+   },
+   {
+    "avgWaitSeconds": 0,
+    "busyServerSeconds": 111.82809574179937,
+    "maxQueue": 1,
+    "name": "預繳排隊",
+    "served": 40,
+    "servers": 1,
+    "totalWaitSeconds": 0,
+    "type": "queue",
+    "utilization": 0.07476273435699717
+   },
+   {
+    "avgWaitSeconds": 0,
+    "busyServerSeconds": 151.35830695050925,
+    "maxQueue": 1,
+    "name": "現場引導",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 0,
+    "type": "guide",
+    "utilization": 0.10119067860543077
+   },
+   {
+    "avgWaitSeconds": 0,
+    "busyServerSeconds": 58.28832101681061,
+    "maxQueue": 1,
+    "name": "現場排隊",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 0,
+    "type": "queue",
+    "utilization": 0.038968688784229384
+   }
+  ],
+  "summaryLines": [
+   "完成 60/60 人，總時長約 24 分 56 秒。",
+   "最塞：走廊入口（最大排隊 26 人，平均等待 203 秒）。",
+   "平均全程 637 秒。"
+  ],
+  "totalWaitSeconds": 23671.960293980304,
+  "unfinished": 0
+ },
+ "variant-separated": {
+  "avgJourneySeconds": 575.5133046185197,
+  "avgWaitSeconds": 392.19514696532497,
+  "bottleneckName": "走廊入口",
+  "bottleneckStationId": "走廊入口",
+  "completed": 60,
+  "finishTimeSeconds": 1512.632079608619,
+  "leftEarly": 0,
+  "maxJourneySeconds": 851.2933263062097,
+  "maxQueue": 20,
+  "maxQueueWhere": "報到",
+  "participantCount": 60,
+  "seed": 310,
+  "spatialBottlenecks": [],
+  "stations": [
+   {
+    "avgWaitSeconds": 209.63489418677815,
+    "busyServerSeconds": 879.7617833685209,
+    "maxQueue": 26,
+    "name": "走廊入口",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 12578.09365120669,
+    "type": "entrance",
+    "utilization": 0.5816098939248677
+   },
+   {
+    "avgWaitSeconds": 13.369150181674645,
+    "busyServerSeconds": 898.4972437372867,
+    "maxQueue": 2,
+    "name": "走廊引導",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 802.1490109004786,
+    "type": "guide",
+    "utilization": 0.5939958935485259
+   },
+   {
+    "avgWaitSeconds": 4.428651809163637,
+    "busyServerSeconds": 884.6676201964483,
+    "maxQueue": 1,
+    "name": "走廊排隊",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 265.7191085498182,
+    "type": "queue",
+    "utilization": 0.5848531391885783
+   },
+   {
+    "avgWaitSeconds": 212.84608101128825,
+    "busyServerSeconds": 2696.6646648843666,
+    "maxQueue": 20,
+    "name": "報到",
+    "served": 60,
+    "servers": 2,
+    "totalWaitSeconds": 12770.764860677295,
+    "type": "checkin",
+    "utilization": 0.8913815531342248
+   },
+   {
+    "avgWaitSeconds": 82.98572873723103,
+    "busyServerSeconds": 1206.4485524981221,
+    "maxQueue": 4,
+    "name": "現場收費",
+    "served": 20,
+    "servers": 1,
+    "totalWaitSeconds": 1659.7145747446207,
+    "type": "payment",
+    "utilization": 0.7975822863748074
+   },
+   {
+    "avgWaitSeconds": 3.841061127916481,
+    "busyServerSeconds": 895.7082387084038,
+    "maxQueue": 2,
+    "name": "鞋子",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 230.46366767498884,
+    "type": "shoe",
+    "utilization": 0.5921520842928049
+   },
+   {
+    "avgWaitSeconds": 0.613866014275168,
+    "busyServerSeconds": 889.1634699603414,
+    "maxQueue": 1,
+    "name": "背包｜課桌椅",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 36.83196085651008,
+    "type": "backpack",
+    "utilization": 0.5878253422936826
+   },
+   {
+    "avgWaitSeconds": 0.5325658944312617,
+    "busyServerSeconds": 908.398722218809,
+    "maxQueue": 1,
+    "name": "巧拼座區",
+    "served": 60,
+    "servers": 1,
+    "totalWaitSeconds": 31.9539536658757,
+    "type": "seating",
+    "utilization": 0.6005417539827991
+   }
+  ],
+  "summaryLines": [
+   "完成 60/60 人，總時長約 25 分 13 秒。",
+   "最塞：走廊入口（最大排隊 26 人，平均等待 210 秒）。",
+   "平均全程 656 秒。"
+  ],
+  "totalWaitSeconds": 23531.708817919498,
+  "unfinished": 0
+ }
+}

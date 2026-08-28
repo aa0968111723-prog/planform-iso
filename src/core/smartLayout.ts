@@ -162,8 +162,13 @@ function generateFieldLayouts(input: LayoutInput): LayoutCandidate[] {
     anchorX: cx - (cols * tile) / 2,
     anchorZ: cz - (rows * tile) / 2,
   });
-  const make = (id: string, base: string, groups: GroupSpec[], pitch: number): LayoutCandidate => {
-    const capacity = groups.reduce((sum, g) => sum + seatsIn(g.rows, g.cols, pitch), 0);
+  const make = (id: string, base: string, groups: GroupSpec[], pitch: number, seatFraction = 1): LayoutCandidate => {
+    // seatFraction < 1 means part of the (still continuous) field is left
+    // deliberately unoccupied — a walking lane made of empty seats, not of
+    // missing mats.
+    const capacity = Math.floor(
+      groups.reduce((sum, g) => sum + seatsIn(g.rows, g.cols, pitch), 0) * seatFraction,
+    );
     const minX = Math.min(...groups.map((g) => g.anchorX));
     const minZ = Math.min(...groups.map((g) => g.anchorZ));
     const maxX = Math.max(...groups.map((g) => g.anchorX + g.cols * tile));
@@ -184,25 +189,44 @@ function generateFieldLayouts(input: LayoutInput): LayoutCandidate[] {
   const out: LayoutCandidate[] = [];
 
   // A — one centred field, favouring a compact rectangle.
-  const pitchFactor = FIELD_PITCH_DENSE / tile;
-  const targetCols = Math.max(1, Math.min(colsMax, Math.ceil(Math.sqrt((n * pitchFactor * W) / Math.max(D, tile)))));
-  const rowsA = rowsFor(targetCols, n, FIELD_PITCH_DENSE);
-  const a = centered(rowsA, targetCols);
-  out.push(make("field-balanced", "A 整片座區", [group(rowsA, targetCols, a.anchorX, a.anchorZ)], FIELD_PITCH_DENSE));
+  /*
+   * A — 一整片，用滿可用寬度。
+   *
+   * 原本用 sqrt 求一個接近正方形的區塊，那在寬教室裡會過度保守：一間 12 m 寬的
+   * 教室只鋪出 8 m 寬，白白少一排人，而且和實況不像。活動照片裡的墊區是**寬扁**
+   * 的——佔房間寬度 55–65%，深度只有幾排（REFERENCE_MAPPING 一）。所以用寬度
+   * 優先、排數由人數決定，坐得下時自然比留走道的 B 多。
+   */
+  const rowsA = rowsFor(colsMax, n, FIELD_PITCH_DENSE);
+  const a = centered(rowsA, colsMax);
+  out.push(make("field-balanced", "A 整片座區", [group(rowsA, colsMax, a.anchorX, a.anchorZ)], FIELD_PITCH_DENSE));
 
-  // B — two contiguous fields with a real central walking lane.
+  /*
+   * B — 中央走道，但**墊子不切開**。
+   *
+   * 這裡原本產生兩塊分開的墊區，中間空 0.9 m。實況照片顯示的不是這樣：墊子
+   * 一路對接成一整片連續矩形，走道是靠「中間那一列不坐人」做出來的
+   * （docs/field-research/REFERENCE_MAPPING.md 一、中央走道）。
+   *
+   * 差別不只是外觀。切成兩塊會把 0.9 m 的地板永遠讓給走道，在 12 × 9 這種
+   * 尺寸下等於直接少一排人；留空位則是走道要用時就在、要坐人時也坐得下。
+   * 所以 B 與 A 是同一片墊子，只有可坐人數不同。
+   */
   const aisle = Math.max(0.9, input.aisleWidth);
-  const sideCols = Math.floor(Math.max(0, (W - aisle) / 2) / tile);
-  if (sideCols > 0) {
-    const rowsB = rowsFor(sideCols, Math.ceil(n / 2), FIELD_PITCH_DENSE);
-    const sideW = sideCols * tile;
-    const totalW = sideW * 2 + aisle;
-    const startX = cx - totalW / 2;
-    const az = cz - (rowsB * tile) / 2;
-    out.push(make("field-aisle", "B 中央走道", [
-      group(rowsB, sideCols, startX, az),
-      group(rowsB, sideCols, startX + sideW + aisle, az),
-    ], FIELD_PITCH_DENSE));
+  const aisleCols = Math.max(1, Math.round(aisle / tile));
+  const colsB = colsMax;
+  if (colsB > aisleCols + 1) {
+    const seatCols = colsB - aisleCols;
+    const rowsB = rowsFor(seatCols, n, FIELD_PITCH_DENSE);
+    const b = centered(rowsB, colsB);
+    out.push(make(
+      "field-aisle",
+      "B 中央留走道",
+      [group(rowsB, colsB, b.anchorX, b.anchorZ)],
+      FIELD_PITCH_DENSE,
+      // 整片鋪好，但中間 aisleCols 格留著走路，不算進可坐人數。
+      seatCols / colsB,
+    ));
   }
 
   // C — same tiles, more space per person (larger seat pitch).

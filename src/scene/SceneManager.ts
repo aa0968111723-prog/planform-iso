@@ -17,6 +17,8 @@ import {
   OrthographicCamera,
   Plane,
   PlaneGeometry,
+  Quaternion,
+  PCFShadowMap,
   Raycaster,
   Scene,
   Sprite,
@@ -29,16 +31,28 @@ import {
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { AssetCatalog } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
+import { isBoothProject } from "../core/boothCatalog";
+import { calibrationComplete, venueNeedsCalibration } from "../core/model";
 import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
 import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
 import { SimCrowd } from "./crowd";
-import { DEFAULT_THEME, EXPORT_PALETTE, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
+import { DEFAULT_THEME, EXPORT_PALETTE, MAT_COLORS, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
+import { stackedLabelY, type PlacedLabel } from "./labelLayout";
+import {
+  buildPropGroupCached,
+  clearPartResult,
+  diceRollQuaternion,
+  diceSettleQuaternion,
+  paintPartResult,
+} from "./propVisual";
+import { propFaceOptions, propForAssetId } from "../core/propCatalog";
+import type { PlaybackStationResult } from "../core/eventFlow";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
 
 const D2R = Math.PI / 180;
@@ -54,6 +68,14 @@ export interface GhostState {
   elevation: number;
   validity: "ok" | "warn" | "bad";
   door?: { hinge?: "left" | "right"; openInward?: boolean; openDeg?: number };
+}
+
+export interface PropPlaybackView {
+  /** Continuous rehearsal clock, seconds. */
+  t: number;
+  results: Record<string, PlaybackStationResult>;
+  /** Placed object id → the station bound to it. */
+  stationOfObject: Record<string, string>;
 }
 
 export interface PickResult {
@@ -74,6 +96,14 @@ interface SessionView {
   bottlenecks?: { x: number; z: number; count: number; name?: string; kind?: "door" | "corridor" | "route" }[];
   simQueues?: Record<string, number>;
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
+  /** Playback draws a station badge per stop; route names on top are soup. */
+  hideRouteLabels?: boolean;
+  /**
+   * Latest rolled result per station while a rehearsal plays — the feed for
+   * §25 (dice settling) and §31 (screens showing a result). Null when the
+   * crowd is off; the scene then puts every prop back to rest.
+   */
+  propPlayback?: PropPlaybackView | null;
   /** Non-null in Partner Mode: emphasis per entity plus red/orange/green marks. */
   partner?: PartnerPresentation | null;
 }
@@ -89,6 +119,12 @@ const MARK_COLOR: Record<PartnerMark["tone"], string> = {
   bad: "#ef4444",
   warn: "#f59e0b",
   ok: "#22c55e",
+};
+
+/** Ground colours for an outdoor booth: grass under the pitch, paving alongside. */
+const OUTDOOR_GROUND: Record<ThemeName, { pitch: number; paving: number }> = {
+  light: { pitch: 0xb9c7a8, paving: 0xc3cad2 },
+  dark: { pitch: 0x33402f, paving: 0x2a3340 },
 };
 
 const SIMPLIFY_HIDE: ReadonlySet<ObjectKind> = new Set<ObjectKind>(["switch", "computer"]);
@@ -155,6 +191,8 @@ export class SceneManager {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     applyRendererLook(this.renderer);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFShadowMap;
 
     this.scene = new Scene();
     this.scene.background = new Color(this.palette.background);
@@ -190,13 +228,17 @@ export class SceneManager {
   // --- camera ------------------------------------------------------------
 
   setView(view: ViewName): void {
+    this.currentView = view;
+    this.applyRoofVisibility();
     // Whatever sat at the centre of the *visible* canvas should still be there
     // after the camera swings around; the framing offset differs per basis.
     const anchor = this.getFocusAnchor();
     const d = 60;
     const t = this.target;
     switch (view) {
-      case "iso": this.camera.position.set(t.x + d, d, t.z + d); this.controls.enableRotate = true; break;
+      // A slightly elevated isometric angle keeps the plan readable while the
+      // stage, desks and classroom chairs still show their real volume.
+      case "iso": this.camera.position.set(t.x + d, d * 1.32, t.z + d * 0.92); this.controls.enableRotate = true; break;
       case "top": this.camera.position.set(t.x, d, t.z + 0.001); this.controls.enableRotate = false; break;
       case "front": this.camera.position.set(t.x, 4, t.z + d); this.controls.enableRotate = true; break;
       case "left": this.camera.position.set(t.x - d, 4, t.z); this.controls.enableRotate = true; break;
@@ -221,6 +263,20 @@ export class SceneManager {
 
   setControlsEnabled(enabled: boolean): void {
     this.controls.enabled = enabled;
+  }
+
+  private currentView: ViewName = "iso";
+
+  /**
+   * A top view is a floor plan: a tent canopy has to come off, or the table
+   * and stools underneath it are neither visible nor selectable. Hidden meshes
+   * are also skipped by the raycast, so this fixes picking as well as drawing.
+   */
+  private applyRoofVisibility(): void {
+    const hide = this.currentView === "top";
+    this.objectGroup.traverse((m) => {
+      if (m instanceof Mesh && m.userData.roof) m.visible = !hide;
+    });
   }
 
   private resize(): void {
@@ -354,9 +410,10 @@ export class SceneManager {
     this.partner = partner;
     this.syncAreasAndTiles(project, simplify);
     this.syncObjects(project, session.showLabels, simplify);
+    this.syncPropPlayback(project, session.propPlayback ?? null);
     this.syncArrays(project);
     this.syncZones(project);
-    this.syncRoutes(project, session.focusRouteId ?? null);
+    this.syncRoutes(project, session.focusRouteId ?? null, session.hideRouteLabels ?? false);
     this.syncGhost(session.ghost);
     this.syncMeasurements(project, simplify);
     this.syncOverlay(project, session);
@@ -451,41 +508,77 @@ export class SceneManager {
     const { tile } = project;
     this.floorGroup.visible = this.layersState.areas;
     this.tileGroup.visible = this.layersState.tiles && tile.visible && !simplify;
-    const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile });
+    const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile, venue: project.venuePresetId, theme: this.theme });
     if (sig === this.lastAreaSig) return;
     this.lastAreaSig = sig;
     if (!this.hasCentered) { this.recenter(project); this.hasCentered = true; }
     clearGroup(this.floorGroup);
     clearGroup(this.tileGroup);
+    const e310 = project.venuePresetId === "venue:tku-e310";
+    // An outdoor pitch is grass and paving, and it has no walls — a raised
+    // wall rail around it would read as a room the stall is standing inside.
+    const outdoor = isBoothProject(project);
     for (const area of [project.classroom, project.corridor]) {
       const areaGroup = new Group();
       const floor = new Mesh(
-        new PlaneGeometry(area.length, area.width),
+        new BoxGeometry(area.length, 0.055, area.width),
         new MeshStandardMaterial({
-          color: area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor,
-          roughness: 1,
-          side: DoubleSide,
+          color: outdoor
+            ? (area.id === "classroom" ? OUTDOOR_GROUND[this.theme].pitch : OUTDOOR_GROUND[this.theme].paving)
+            : e310 && this.theme === "light"
+              ? (area.id === "classroom" ? "#ddd9d0" : "#c99698")
+              : (area.id === "classroom" ? this.palette.floorClassroom : this.palette.floorCorridor),
+          roughness: area.id === "classroom" ? 0.84 : 0.94,
         }),
       );
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.set(area.x + area.length / 2, 0, area.z + area.width / 2);
+      floor.position.set(area.x + area.length / 2, -0.03, area.z + area.width / 2);
+      floor.receiveShadow = true;
       areaGroup.add(floor);
-      areaGroup.add(this.buildAreaWalls(area));
+      areaGroup.add(outdoor ? this.buildAreaOutline(area) : this.buildAreaWalls(area));
       const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
+      // Always the pale palette colour. TextLabel paints its own dark pill
+      // behind the text (label.ts: rgba(15,23,42,.72)), so the label's contrast
+      // is against the PILL, never against the floor. An E310-only override to
+      // a dark slate `#43534f` was reading it as floor text and landed at
+      // 1.04:1 — the room and corridor names were invisible on the venue the
+      // release uses as its visual baseline.
       label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
-      label.sprite.scale.set(1.8, 0.42, 1);
-      label.sprite.position.set(area.x + area.length / 2, 0.14, area.z + area.width / 2);
+      label.sprite.scale.set(1.55, 0.36, 1);
+      label.sprite.position.set(area.x + 1.25, 0.14, area.z + 0.55);
       areaGroup.add(label.sprite);
       this.floorGroup.add(areaGroup);
     }
-    this.tileGroup.add(this.buildTileGrid(project));
+    if (e310) this.floorGroup.add(this.buildE310Fixtures(project));
+    this.tileGroup.add(this.buildTileGrid(project, project.classroom, e310 ? 0x8b918c : 0x64748b, e310 ? 0.26 : 0.42));
+    this.tileGroup.add(this.buildTileGrid(project, project.corridor, e310 ? 0x8f5f64 : 0x64748b, e310 ? 0.3 : 0.42));
+  }
+
+  /**
+   * Outdoors the pitch boundary is paint on the ground, not a rail: a flat
+   * outline says "this is your 攤位範圍" without inventing a wall.
+   */
+  private buildAreaOutline(area: Project["classroom"]): Group {
+    const g = new Group();
+    const y = 0.014;
+    const color = this.theme === "light" ? 0x475569 : 0xcbd5e1;
+    const positions = [
+      area.x, y, area.z, area.x + area.length, y, area.z,
+      area.x + area.length, y, area.z, area.x + area.length, y, area.z + area.width,
+      area.x + area.length, y, area.z + area.width, area.x, y, area.z + area.width,
+      area.x, y, area.z + area.width, area.x, y, area.z,
+    ];
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    g.add(new LineSegments(geo, new LineBasicMaterial({ color, transparent: true, opacity: 0.8 })));
+    return g;
   }
 
   /** Raised, thick wall rails make an empty classroom and its corridor legible. */
   private buildAreaWalls(area: Project["classroom"]): Group {
     const walls = new Group();
-    const material = new MeshBasicMaterial({
+    const material = new MeshStandardMaterial({
       color: area.id === "classroom" ? this.palette.wallClassroom : this.palette.wallCorridor,
+      roughness: 0.88,
     });
     const thickness = 0.1;
     const height = 0.12;
@@ -498,17 +591,17 @@ export class SceneManager {
     for (const [width, depth, x, z] of rails) {
       const wall = new Mesh(new BoxGeometry(width, height, depth), material);
       wall.position.set(x, height / 2, z);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
       walls.add(wall);
     }
     return walls;
   }
 
-  private buildTileGrid(project: Project): Object3D {
-    const { classroom, corridor, tile } = project;
-    const minX = Math.min(classroom.x, corridor.x);
-    const minZ = Math.min(classroom.z, corridor.z);
-    const maxX = Math.max(classroom.x + classroom.length, corridor.x + corridor.length);
-    const maxZ = Math.max(classroom.z + classroom.width, corridor.z + corridor.width);
+  private buildTileGrid(project: Project, area: Project["classroom"], color: number, opacity: number): Object3D {
+    const { tile } = project;
+    const minX = area.x, minZ = area.z;
+    const maxX = area.x + area.length, maxZ = area.z + area.width;
     const positions: number[] = [];
     const w = Math.max(tile.width, 0.05);
     const d = Math.max(tile.depth, 0.05);
@@ -518,10 +611,49 @@ export class SceneManager {
     for (let z = sz; z <= maxZ + 1e-6; z += d) positions.push(minX, 0, z, maxX, 0, z);
     const geo = new BufferGeometry();
     geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
-    const grid = new LineSegments(geo, new LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.5 }));
+    const grid = new LineSegments(geo, new LineBasicMaterial({ color, transparent: true, opacity }));
     grid.position.y = 0.003;
     grid.rotation.y = tile.rotationDeg * D2R;
     return grid;
+  }
+
+  /** Low-cost architectural cues copied from the E310 field photographs. */
+  private buildE310Fixtures(project: Project): Group {
+    const g = new Group();
+    const c = project.classroom, k = project.corridor;
+    const trim = new MeshStandardMaterial({ color: 0x8c9aa0, roughness: 0.92 });
+    const curtain = new MeshStandardMaterial({ color: 0x7f929b, roughness: 1 });
+    const glass = new MeshStandardMaterial({ color: 0xc9dde0, roughness: 0.28, metalness: 0.04 });
+    // Blue-grey lower wall band and a few curtain/window bays, kept low enough
+    // that the editable floor remains unobstructed from the iso camera.
+    for (const [len, dep, x, z] of [
+      [c.length, 0.06, c.x + c.length / 2, c.z],
+      [0.06, c.width, c.x, c.z + c.width / 2],
+    ] as const) {
+      const base = new Mesh(new BoxGeometry(len, 0.3, dep), trim);
+      base.position.set(x, 0.15, z);
+      base.receiveShadow = true;
+      g.add(base);
+    }
+    for (let i = 0; i < 3; i++) {
+      const z = c.z + 1.5 + i * 2.05;
+      const pane = new Mesh(new BoxGeometry(0.035, 1.28, 1.55), glass);
+      pane.position.set(c.x + 0.02, 0.95, z);
+      g.add(pane);
+      const drape = new Mesh(new BoxGeometry(0.08, 1.46, 0.24), curtain);
+      drape.position.set(c.x + 0.08, 0.9, z - 0.74);
+      drape.castShadow = true;
+      g.add(drape);
+    }
+    // Yellow tactile strip crossing the pink-tiled open corridor lobby.
+    const tactile = new Mesh(
+      new BoxGeometry(Math.max(1.2, k.length * 0.72), 0.018, 0.28),
+      new MeshStandardMaterial({ color: 0xd8ad35, roughness: 0.82 }),
+    );
+    tactile.position.set(k.x + k.length * 0.42, 0.014, k.z + k.width * 0.72);
+    tactile.receiveShadow = true;
+    g.add(tactile);
+    return g;
   }
 
   private syncObjects(project: Project, showLabels: boolean, simplify: boolean): void {
@@ -531,19 +663,42 @@ export class SceneManager {
       seen.add(o.id);
       const catalogEntry = this.catalog.resolve(o.assetId, o.kind);
       const quality = "standard";
-      const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
+      // A prop's faces render from its bound station's chance options — the
+      // one live record for face colour/label. Both feed the signature: an
+      // edited face must rebuild exactly like an edited definition.
+      const propDef = catalogEntry.visualRef.startsWith("prop:")
+        ? propForAssetId(project.props, o.assetId)
+        : undefined;
+      const faceOptions = propDef ? propFaceOptions(project, o.id, propDef) : undefined;
+      const faceSig = faceOptions
+        ? faceOptions.map((opt) => `${opt.label}|${opt.color ?? ""}|${opt.imageBlobId ?? ""}`).join("¦")
+        : "";
+      // entry.version is part of the identity: editing a custom definition
+      // bumps it, and without it here the scene kept drawing the old visual
+      // after every edit.
+      const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|v${catalogEntry.version}|${faceSig}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
       let entry = this.objectNodes.get(o.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.objectGroup.remove(entry.group); disposeObject(entry.group); entry.label?.dispose(); }
-        const group = resolveVisualGroup(
-          catalogEntry,
-          o.kind,
-          { width: o.width, depth: o.depth, height: o.height },
-          o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined,
-          quality,
-        );
-        group.userData = { type: "object", id: o.id };
-        group.traverse((m) => { if (m instanceof Mesh) m.userData = { type: "object", id: o.id }; });
+        const group = propDef
+          ? buildPropGroupCached(propDef, { faceOptions })
+          : resolveVisualGroup(
+            catalogEntry,
+            o.kind,
+            { width: o.width, depth: o.depth, height: o.height },
+            o.kind === "door" ? { hinge: o.hinge, openInward: o.openInward, openDeg: o.openDeg } : undefined,
+            quality,
+          );
+        group.userData = { ...group.userData, type: "object", id: o.id };
+        group.traverse((m) => {
+          if (m instanceof Mesh) {
+            // Spread, not replace: the tent canopy tags itself `roof` at build
+            // time and that tag has to survive being adopted into the scene.
+            m.userData = { ...m.userData, type: "object", id: o.id };
+            m.castShadow = o.kind !== "mat";
+            m.receiveShadow = true;
+          }
+        });
         // Enlarged invisible pick proxy for thin wall assets (easier touch targets).
         if (catalogEntry.placementType === "wall") {
           const pw = Math.max(o.width, 0.5), ph = Math.max(o.height, 1.0), pd = Math.max(o.depth, 0.45);
@@ -568,7 +723,7 @@ export class SceneManager {
       if (entry.label) {
         entry.label.sprite.visible = showLabels && !o.hidden;
         if (showLabels) {
-          entry.label.set(catalogEntry.name, "#e2e8f0");
+          entry.label.set(catalogEntry.name, this.theme === "light" ? "#334155" : "#e2e8f0");
           entry.label.sprite.position.set(o.x, o.elevation + o.height + 0.35, o.z);
         }
       }
@@ -578,6 +733,55 @@ export class SceneManager {
         this.objectGroup.remove(entry.group); disposeObject(entry.group);
         entry.label?.dispose();
         this.objectNodes.delete(id);
+      }
+    }
+    this.applyRoofVisibility();
+  }
+
+  /**
+   * §25/§31 — animate placed props from the rehearsal's per-station results.
+   *
+   * Mutates only mesh transforms and per-mesh painted materials inside the
+   * already-built groups; the rebuild signature never sees any of it, so a
+   * spinning dice cannot trigger a rebuild and a rebuild mid-spin just
+   * re-settles deterministically on the next tick.
+   */
+  private syncPropPlayback(project: Project, playback: PropPlaybackView | null): void {
+    for (const o of project.objects) {
+      const def = propForAssetId(project.props, o.assetId);
+      if (!def) continue;
+      const entry = this.objectNodes.get(o.id);
+      if (!entry) continue;
+      const ownStation = playback?.stationOfObject[o.id];
+
+      const dice = def.parts.find((p) => p.facesFromOptions);
+      if (dice) {
+        const mesh = entry.group.getObjectByName(`part:${dice.id}`) as Mesh | undefined;
+        if (mesh) {
+          if (!mesh.userData.restQuat) mesh.userData.restQuat = mesh.quaternion.clone();
+          const rest = mesh.userData.restQuat as Quaternion;
+          const result = playback && ownStation ? playback.results[ownStation] : undefined;
+          if (result && playback) {
+            const options = propFaceOptions(project, o.id, def) ?? [];
+            const idx = options.findIndex((opt) => opt.id === result.optionId);
+            // A face beyond the six painted ones settles back to rest — the
+            // box cannot show it, and pretending would print the wrong label.
+            const settle = diceSettleQuaternion(idx) ?? rest.clone();
+            mesh.quaternion.copy(diceRollQuaternion(playback.t - result.t, result.serial, settle));
+          } else {
+            mesh.quaternion.copy(rest);
+          }
+        }
+      }
+
+      for (const part of def.parts) {
+        if (!part.showsResultOf) continue;
+        const mesh = entry.group.getObjectByName(`part:${part.id}`) as Mesh | undefined;
+        if (!mesh) continue;
+        const stationId = part.showsResultOf === "self" ? ownStation : part.showsResultOf;
+        const result = playback && stationId ? playback.results[stationId] : undefined;
+        if (result) paintPartResult(mesh, part, result.label, result.color ?? part.color ?? "#f8fafc");
+        else clearPartResult(mesh);
       }
     }
   }
@@ -601,11 +805,26 @@ export class SceneManager {
         const geom = buildMergedGeometry(g.sourceKind, { width: g.itemWidth, depth: g.itemDepth, height: g.itemHeight });
         const material = assetInstanceMaterial(g.sourceKind).clone();
         if (isFieldMatGroup(g)) {
-          // The individual meshes remain pickable, but the field itself reads
-          // as a plan rather than a single purple slab.
-          material.transparent = true;
-          material.opacity = 0.08;
-          material.depthWrite = false;
+          // Opaque EVA with slight piece-to-piece variation reads as the
+          // photographed continuous puzzle-mat field, not a transparent zone.
+          //
+          // `vertexColors` must stay OFF. `setColorAt` writes `instanceColor`,
+          // which three.js applies on its own; turning on `vertexColors` also
+          // switches on USE_COLOR, and with no `color` attribute on the merged
+          // geometry the albedo multiplies by (0,0,0) — the field renders
+          // BLACK and only an emissive term can be seen at all. Measured:
+          // vertexColors on + no emissive → `#516672` (the floor showing
+          // through dead mats); vertexColors off + no emissive → `#27aa94`,
+          // the photographed teal, straight out of real lighting.
+          //
+          // That is why the emissive is now a whisper instead of 0.65: the
+          // diffuse term is doing the work again, so thickness, seams and the
+          // shaded side of each piece are visible instead of washed flat.
+          material.color.set("#ffffff");
+          material.roughness = 0.96;
+          material.vertexColors = false;
+          material.emissive.set(MAT_COLORS.base);
+          material.emissiveIntensity = 0.12;
         }
         const mesh = new InstancedMesh(geom, material, Math.max(members.length, 1));
         mesh.count = members.length;
@@ -615,8 +834,22 @@ export class SceneManager {
           dummy.rotation.set(0, members[i].rotationDeg * D2R, 0);
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
+          if (isFieldMatGroup(g)) {
+            // Piece-to-piece variation, measured range (dark .. base .. light).
+            // Cycled on row+col rather than a flat index so the variation does
+            // not read as stripes down one axis, the way `i % 3` did.
+            const v = (members[i].row + members[i].col * 2) % 3;
+            mesh.setColorAt(i, new Color(v === 0 ? MAT_COLORS.base : v === 1 ? MAT_COLORS.light : MAT_COLORS.dark));
+          }
         }
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        mesh.receiveShadow = true;
+        // Same rule an individually placed object gets: everything casts a
+        // contact shadow except mats, which lie flat on the floor. Sixteen
+        // array chairs used to float shadowless beside one placed chair that
+        // sat on the ground.
+        mesh.castShadow = g.sourceKind !== "mat";
         const overlay = this.buildArrayOverlay(g, members);
         this.arrayGroupRoot.add(mesh);
         this.arrayGroupRoot.add(overlay);
@@ -642,6 +875,13 @@ export class SceneManager {
     const overlay = new Group();
     if (!isFieldMatGroup(g) || !members.length) return overlay;
 
+    // Trace the joints, do not float over them. This was a hard-coded 0.12
+    // against a mat whose top is `itemHeight * 0.89` (0.036 m for a 4 cm mat),
+    // so the seam grid hovered 8.6 cm up and read as an overlay drawn on the
+    // field instead of the seams between interlocking 巧拼 — displaced
+    // diagonally by about a seventh of a tile at the default iso camera.
+    // Derived, not a constant: the top scales with the mat's own thickness.
+    const seamY = g.itemHeight * 0.89 + 0.004;
     const positions: number[] = [];
     for (const member of members) {
       const r = member.rotationDeg * D2R;
@@ -652,16 +892,20 @@ export class SceneManager {
       ].map(([x, z]) => ({ x: member.x + x * cos - z * sin, z: member.z + x * sin + z * cos }));
       for (let i = 0; i < corners.length; i++) {
         const a = corners[i], b = corners[(i + 1) % corners.length];
-        positions.push(a.x, 0.12, a.z, b.x, 0.12, b.z);
+        positions.push(a.x, seamY, a.z, b.x, seamY, b.z);
       }
     }
     const geo = new BufferGeometry();
     geo.setAttribute("position", new Float32BufferAttribute(positions, 3));
-    overlay.add(new LineSegments(geo, new LineBasicMaterial({ color: 0xf5d0fe, transparent: true, opacity: 0.95 })));
+    // The seam between two interlocking pieces, in the colour the photographs
+    // show it — a shaded joint, not a drawn black grid.
+    overlay.add(new LineSegments(geo, new LineBasicMaterial({
+      color: new Color(MAT_COLORS.seam), transparent: true, opacity: 0.62,
+    })));
 
     const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
     const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
-    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, "#f8fafc");
+    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, this.theme === "light" ? "#134e4a" : "#d1fae5");
     label.sprite.scale.set(3.25, 0.52, 1);
     const center = groupCenter(g);
     label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
@@ -673,12 +917,12 @@ export class SceneManager {
     this.zoneGroup.visible = this.layersState.zones;
     const partner = this.partner;
     const seen = new Set<string>();
-    const placedLabels: { x: number; z: number; width: number; depth: number; y: number }[] = [];
+    const placedLabels: PlacedLabel[] = [];
     for (const zone of project.zones) {
       seen.add(zone.id);
       // Partner labels are drawn at a higher texture resolution, so the mode
       // is part of the signature and the node is rebuilt when it changes.
-      const sig = `${zone.width}|${zone.depth}|${partner ? "partner" : "editor"}`;
+      const sig = `${zone.type}|${zone.width}|${zone.depth}|${partner ? "partner" : "editor"}`;
       let entry = this.zoneNodes.get(zone.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.zoneGroup.remove(entry.group); entry.label.dispose(); }
@@ -695,14 +939,9 @@ export class SceneManager {
       fillMat.color.set(zone.color);
       edgeMat.color.set(zone.color);
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
-      let labelY = partner ? 0.8 : 0.5;
-      while (placedLabels.some((other) =>
-        Math.abs(zone.x - other.x) < (zone.width + other.width) / 2 &&
-        Math.abs(zone.z - other.z) < (zone.depth + other.depth) / 2 &&
-        Math.abs(labelY - other.y) < 0.5
-      )) labelY += 0.55;
+      const labelY = stackedLabelY(zone, placedLabels, partner ? 0.8 : 0.5);
       entry.label.sprite.position.y = labelY;
-      placedLabels.push({ x: zone.x, z: zone.z, width: zone.width, depth: zone.depth, y: labelY });
+      placedLabels.push({ x: zone.x, z: zone.z, y: labelY });
       if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the
         // rest stay as faint context so the room still makes sense.
@@ -715,7 +954,7 @@ export class SceneManager {
         fillMat.opacity = 0.2;
         edgeMat.opacity = 0.9;
         entry.label.sprite.visible = true;
-        entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), "#e2e8f0");
+        entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), this.theme === "light" ? "#334155" : "#e2e8f0");
       }
     }
     for (const [id, entry] of this.zoneNodes) {
@@ -742,6 +981,7 @@ export class SceneManager {
     edges.position.y = 0.02;
     edges.name = "edges";
     group.add(edges);
+    group.add(this.buildZoneProps(zone));
     const label = partner
       ? new TextLabel({ width: 640, height: 140, fontSize: 62 })
       : new TextLabel();
@@ -751,7 +991,50 @@ export class SceneManager {
     return { group, label, sig };
   }
 
-  private syncRoutes(project: Project, focusRouteId: string | null): void {
+  /** Small non-interactive props make operational zones recognizable at a glance. */
+  private buildZoneProps(zone: Zone): Group {
+    const props = new Group();
+    const addBox = (w: number, h: number, d: number, x: number, y: number, z: number, color: string, rotation = 0) => {
+      const mesh = new Mesh(new BoxGeometry(w, h, d), new MeshStandardMaterial({ color, roughness: 0.9 }));
+      mesh.position.set(x, y, z);
+      mesh.rotation.y = rotation;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      props.add(mesh);
+    };
+    if (zone.type === "shoe") {
+      const count = Math.max(2, Math.min(5, Math.floor(zone.depth / 0.55)));
+      for (let i = 0; i < count; i++) {
+        const z = -zone.depth / 2 + 0.3 + i * ((zone.depth - 0.6) / Math.max(count - 1, 1));
+        const tone = i % 2 ? "#d9d4ca" : "#313a3d";
+        addBox(0.12, 0.065, 0.25, -0.09, 0.045, z, tone, -0.12);
+        addBox(0.12, 0.065, 0.25, 0.09, 0.045, z, tone, 0.12);
+      }
+    } else if (zone.type === "backpack") {
+      // KNOWN, DEFERRED: the field research says the bags go ON the parked
+      // 課桌椅, and these are drawn on the floor beside them — in the 30-person
+      // example the middle one is speared through a chair.
+      //
+      // Lifting them to seat height was tried, rendered and rejected: they then
+      // passed through the chairs instead of resting on them, because this
+      // function knows the ZONE rectangle and not where the carriers actually
+      // stand. Doing it properly means feeding the carrier positions in, which
+      // is more than a constant and not a release-freeze change.
+      for (let i = -1; i <= 1; i++) {
+        const z = i * Math.min(0.72, zone.depth / 3.4);
+        addBox(0.34, 0.42, 0.2, 0, 0.23, z, i === 0 ? "#b85b42" : "#3f6670");
+        addBox(0.2, 0.07, 0.08, 0, 0.47, z, i === 0 ? "#8f4332" : "#304e57");
+      }
+    } else if (zone.type === "meditation") {
+      addBox(Math.min(0.72, zone.width * 0.22), 0.035, Math.min(1.5, zone.depth * 0.72), 0, 0.035, 0, "#38785f");
+    } else if (zone.type === "life") {
+      addBox(0.55, 0.25, 0.42, -0.35, 0.14, 0, "#b88b53");
+      addBox(0.55, 0.2, 0.42, 0.35, 0.11, 0, "#d0aa72");
+    }
+    return props;
+  }
+
+  private syncRoutes(project: Project, focusRouteId: string | null, hideLabels = false): void {
     this.routeGroup.visible = this.layersState.routes;
     this.routeNodeMeshes = [];
     const seen = new Set<string>();
@@ -772,7 +1055,9 @@ export class SceneManager {
       // In the 全部 overview the arrows, colours and ①②③ badges carry the flow;
       // adding four route names on top is what made a phone-sized plan
       // unreadable. Names come back as soon as a role narrows the picture.
-      entry.label.sprite.visible = partner ? partner.role !== "all" && !dim : true;
+      entry.label.sprite.visible = hideLabels
+        ? false
+        : partner ? partner.role !== "all" && !dim : true;
       entry.label.set(partner ? `${routeIcon(route)} ${route.name}` : route.name, dim ? "#64748b" : route.color);
       entry.group.traverse((o) => { if (o instanceof Mesh && o.userData.type === "routeNode") this.routeNodeMeshes.push(o); });
     }
@@ -1154,6 +1439,25 @@ export class SceneManager {
   }
 
   /** Recenter + zoom the camera so the whole plan fills the visible canvas. */
+  /**
+   * A stored visual finished loading after the fact (GLB rehydration): the
+   * objects adopted with the proxy box while the bytes were still in
+   * IndexedDB must be rebuilt. Their signatures did not change — the cache
+   * behind `resolveVisualGroup` did — so these nodes are dropped by hand and
+   * the next sync builds them from the now-cached model.
+   */
+  invalidateVisualRefs(refs: readonly string[]): void {
+    if (!refs.length) return;
+    const marks = refs.map((ref) => `|${ref}|`);
+    for (const [id, entry] of [...this.objectNodes]) {
+      if (!marks.some((m) => entry.sig.includes(m))) continue;
+      this.objectGroup.remove(entry.group);
+      disposeObject(entry.group);
+      entry.label?.dispose();
+      this.objectNodes.delete(id);
+    }
+  }
+
   recenterView(project: Project): void {
     this.userAdjustedCamera = false;
     this.fitBounds(planBounds(project));
@@ -1198,7 +1502,7 @@ export class SceneManager {
       this.applyPalette(EXPORT_PALETTE);
       this.syncAreasAndTiles(project, false);
       this.renderer.render(this.scene, this.camera);
-      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background);
+      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background, project);
     } finally {
       editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
       this.applyPalette(scenePalette(this.theme));
@@ -1258,7 +1562,7 @@ export class SceneManager {
   }
 
   /** Remove the solid scene background around the fitted plan. */
-  private cropExportBackground(source: HTMLCanvasElement, background: number): string {
+  private cropExportBackground(source: HTMLCanvasElement, background: number, project: Project): string {
     const raster = document.createElement("canvas");
     raster.width = source.width;
     raster.height = source.height;
@@ -1282,11 +1586,31 @@ export class SceneManager {
     const margin = 24;
     minX = Math.max(0, minX - margin); minY = Math.max(0, minY - margin);
     maxX = Math.min(source.width - 1, maxX + margin); maxY = Math.min(source.height - 1, maxY + margin);
-    const cropped = document.createElement("canvas");
-    cropped.width = maxX - minX + 1;
-    cropped.height = maxY - minY + 1;
-    cropped.getContext("2d")!.putImageData(image, -minX, -minY);
-    return cropped.toDataURL("image/png");
+    const croppedW = maxX - minX + 1;
+    const croppedH = maxY - minY + 1;
+    const headerH = 118;
+    const framed = document.createElement("canvas");
+    framed.width = croppedW;
+    framed.height = croppedH + headerH;
+    const out = framed.getContext("2d")!;
+    out.fillStyle = "#e9eef5";
+    out.fillRect(0, 0, framed.width, framed.height);
+    out.fillStyle = "#0f172a";
+    out.font = "700 42px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+    out.fillText(project.name, 34, 51);
+    out.fillStyle = "#64748b";
+    out.font = "600 24px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+    // Asked, not asserted. This line used to be hard-coded, so it stamped
+    // 「尺寸待現場校正」 over a plan whose owner had typed their own measured
+    // room size — and it kept saying it after a full field calibration, while
+    // the other seven sheets correctly dropped it. One artifact in the album
+    // contradicting the rest is worse than either answer alone.
+    const pending = venueNeedsCalibration(project) && !calibrationComplete(project)
+      ? " · 尺寸待現場校正"
+      : "";
+    out.fillText(`3D 場佈圖 · 微立體視角${pending}`, 34, 88);
+    out.drawImage(source, minX, minY, croppedW, croppedH, 0, headerH, croppedW, croppedH);
+    return framed.toDataURL("image/png");
   }
 }
 

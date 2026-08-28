@@ -5,8 +5,10 @@
 
 import type { AssetCatalogEntry, SemanticAssetType, ServiceRole } from "../core/catalog";
 import type { ObjectKind, SceneObject } from "../core/model";
+import { MAT_COLORS } from "./theme";
 
 export type PlanSymbolKind =
+  | "prop"
   | "door"
   | "switch"
   | "screen"
@@ -35,6 +37,15 @@ export interface PlanSymbolSpec {
 export type PlanSymbolTheme = "paper" | "dark";
 
 export function planSymbolForEntry(entry: AssetCatalogEntry): PlanSymbolSpec {
+  // §96: planSymbolRef is read for ONE prefix and nothing else. Every entry
+  // that existed before the Studio — booth assets, GLB imports, the eight
+  // built-in kinds — carries a `plan:<semantic>` ref that this function has
+  // always ignored, and honouring it now would silently redraw a 場刊 that
+  // volunteers already know. A custom prop is the only thing whose symbol has
+  // no semantic to derive from, so it is the only thing that gets to say.
+  if (entry.planSymbolRef?.startsWith("plan:prop:")) {
+    return { kind: "prop", label: entry.name, fill: entry.color, showFacing: true, icon: entry.name };
+  }
   if (entry.id === "builtin:stage-platform") {
     return { kind: "stage-platform", label: "講台", fill: entry.color, showFacing: false, icon: "講台" };
   }
@@ -68,7 +79,7 @@ export function planSymbolForKind(kind: ObjectKind, serviceRole?: ServiceRole): 
       icon: serviceRole === "payment" ? "收費" : undefined,
     },
     chair: { kind: "chair", fill: "#b8c0cc", showFacing: true },
-    mat: { kind: "mat", fill: "#5fa877", showFacing: false },
+    mat: { kind: "mat", fill: MAT_COLORS.base, showFacing: false },
     computer: { kind: "computer", fill: "#94a3b8", showFacing: true },
     regTable: { kind: "checkin-desk", label: "報到", fill: "#a8b3a0", showFacing: true, icon: "報到" },
   };
@@ -189,6 +200,25 @@ export function drawPlanSymbolOverlay(
     ctx.stroke();
     ctx.strokeStyle = "#f8fafc";
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, dPx * 0.4); ctx.stroke();
+  } else if (spec.kind === "prop") {
+    // A double outline says 「這裡有一個互動關卡」 on a black-and-white 場刊,
+    // where colour is the first thing a photocopier throws away.
+    ctx.fillStyle = hexA(spec.fill, paper ? 0.7 : 0.45);
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1.6;
+    roundRect(ctx, -wPx / 2, -dPx / 2, wPx, dPx, 4);
+    ctx.fill();
+    ctx.stroke();
+    const inset = Math.min(4, wPx * 0.08, dPx * 0.08);
+    ctx.lineWidth = 1;
+    roundRect(ctx, -wPx / 2 + inset, -dPx / 2 + inset, wPx - inset * 2, dPx - inset * 2, 3);
+    ctx.stroke();
+    if (spec.showFacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, dPx * 0.45);
+      ctx.stroke();
+    }
   } else if (spec.kind === "storage") {
     ctx.fillStyle = hexA(spec.fill, paper ? 0.8 : 0.5);
     ctx.strokeStyle = outline;

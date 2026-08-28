@@ -9,12 +9,23 @@
 
 import type {
   EventScenario,
+  InteractionOption,
+  InteractionStation,
+  InteractionStep,
+  InteractionTemplate,
   ParticipantProfile,
   ParticipantProfileId,
   RoutePoint,
   ServiceStation,
+  StaffRole,
 } from "./model";
-import { buildTravelPath, pointAtPolyline, queuePlacement, routeLength } from "./simSpatial";
+import {
+  audienceJoiners,
+  normalizeTemplate,
+  stepAfter,
+  templateFromScenario,
+} from "./interactionCompile";
+import { buildTravelPath, pointAtPolyline, queuePlacement, routeLength, stationRoom } from "./simSpatial";
 
 // --- PRNG -----------------------------------------------------------------
 
@@ -41,6 +52,42 @@ export interface StationStats {
   served: number;
   utilization: number; // 0–1 over [0, horizon]
   busyServerSeconds: number;
+  /**
+   * How many service positions actually opened this run. 0 means nobody is
+   * staffing it, which is a different statement from "0% busy" — and the
+   * difference is exactly what a staffing readout has to be able to say.
+   */
+  servers: number;
+}
+
+/** One step of an interaction flow, as it actually ran. */
+export interface StepStats {
+  stepId: string;
+  name: string;
+  entered: number;
+  avgSeconds: number;
+  /** How often each option came up: 「怪獸：拖延 42 人」. Absent when there is no fork. */
+  optionCounts?: { label: string; count: number }[];
+}
+
+/** 經過 → 停下 → 參加 → 完成, for an organiser rather than for a marketer. */
+export interface FunnelStats {
+  passed: number;
+  stopped: number;
+  joined: number;
+  completed: number;
+  leftEarly: number;
+}
+
+export interface StaffLoadLine {
+  roleId: string;
+  roleName: string;
+  /** Plain language. The raw fraction is never the thing the user is shown. */
+  phrase: string;
+  busyFraction: number;
+  stationNames: string[];
+  /** A station under this role got nobody. */
+  shortage: boolean;
 }
 
 export interface SimulationResult {
@@ -64,6 +111,11 @@ export interface SimulationResult {
   bottleneckStationId: string | null;
   bottleneckName: string | null;
   summaryLines: string[];
+  /** People who queued too long and left. Always 0 for a classroom scenario. */
+  leftEarly: number;
+  steps?: StepStats[];
+  funnel?: FunnelStats;
+  staffLoad?: StaffLoadLine[];
   /** Sparse playback samples at fixed dt for canvas markers. */
   playback: PlaybackFrame[];
 }
@@ -81,6 +133,25 @@ export interface PlaybackFrame {
   t: number;
   agents: PlaybackAgent[];
   queues: Record<string, number>;
+  /**
+   * Latest served-fork outcome per station, when any station has rolled one.
+   * Playback-only — the parity fixture excludes `playback`, and nothing here
+   * feeds a number the user reads. A dice face settling (§25), the screen a
+   * result shows on (§31) and the 「目前結果」 readout (§26) all render from
+   * this record.
+   */
+  results?: Record<string, PlaybackStationResult>;
+}
+
+export interface PlaybackStationResult {
+  stepId: string;
+  optionId: string;
+  label: string;
+  color?: string;
+  /** When this outcome was rolled (service start). */
+  t: number;
+  /** Increments per roll at this station, so a repeated face still reads as a new roll. */
+  serial: number;
 }
 
 export interface ScenarioCompareResult {
@@ -112,7 +183,7 @@ export interface ScenarioVariantCompareResult {
   reason: string;
 }
 
-type EventKind = "arrive" | "arriveStation" | "startService" | "finishService";
+type EventKind = "arrive" | "arriveStation" | "startService" | "finishService" | "giveUp";
 
 interface SimEvent {
   t: number;
@@ -126,8 +197,18 @@ interface SimEvent {
 interface AgentRuntime {
   id: number;
   profileId: ParticipantProfileId;
-  branch: string[];
-  branchIndex: number;
+  /**
+   * Where this visitor is in the flow.
+   *
+   * This used to be `branch: string[]` plus an index — a fixed list of station
+   * ids decided on arrival. A flow that forks cannot be a list decided in
+   * advance, so the visitor now carries the step they are on and the next one
+   * is resolved when they finish. For a classroom, which never forks, walking
+   * the steps visits exactly the same stations in exactly the same order.
+   */
+  stepId: string | null;
+  /** Answers recorded by `chance` steps, for a later `match` to look up. */
+  memory: Record<string, string>;
   arrivalT: number;
   journeyStart: number;
   journeyEnd: number | null;
@@ -177,6 +258,16 @@ export function allocateProfiles(count: number, profiles: ParticipantProfile[]):
   return normalized.flatMap((profile, index) => Array.from({ length: counts[index] }, () => profile));
 }
 
+/** Fisher-Yates on a copy, driven by the scenario's own seeded rng. */
+function shuffled<T>(items: T[], rng: () => number): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 function arrivalTimes(
   count: number,
   windowSeconds: number,
@@ -192,6 +283,126 @@ function arrivalTimes(
   }
   times.sort((a, b) => a - b);
   return times;
+}
+
+/**
+ * How long one step takes for one visitor.
+ *
+ * Deliberately the same arithmetic as `serviceDuration` below, reading the
+ * step's own mean and variance instead of a station's. Same Box-Muller draw,
+ * same two rng() calls, same 0.3×–2.5× truncation — which is what makes a
+ * compiled classroom scenario produce bit-identical numbers.
+ */
+function sampleDuration(step: InteractionStep, extraSeconds: number, rng: () => number): number {
+  const mean = Math.max(1, step.avgSeconds + extraSeconds);
+  const variance = step.serviceVariance ?? mean * 0.2;
+  const u1 = Math.max(1e-9, rng());
+  const u2 = rng();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  const raw = mean + z * Math.sqrt(Math.max(0, variance));
+  return Math.min(mean * 2.5, Math.max(mean * 0.3, raw));
+}
+
+/**
+ * How many service positions a station opens.
+ *
+ * `selfService` is its own answer rather than "zero staff", because zero staff
+ * means zero servers and a queue that never drains — a visitor flipping their
+ * own card would wait there forever.
+ */
+function serversFor(st: InteractionStation, alloc?: Map<string, number>): number {
+  if (st.staffRoleId) {
+    // Allocated 0 means 0. Rounding an unstaffed station up to one server is
+    // exactly how a shortage goes invisible: three volunteers standing behind
+    // a four-station table would read as four people.
+    const people = alloc?.get(st.id) ?? 0;
+    return people <= 0 ? 0 : Math.max(1, Math.min(people, st.parallelServers));
+  }
+  if (st.selfService) return Math.max(1, st.parallelServers);
+  return effectiveServers(st);
+}
+
+/**
+ * Spread each role's people over the stations that asked for that role.
+ *
+ * Largest remainder, ties broken by the longest service time and then by list
+ * order — the same shape as `allocateProfiles`, and just as deterministic. A
+ * role with fewer people than stations really does leave a station empty; that
+ * is the report the organiser needs, not a rounding that hides it.
+ */
+export function allocateStaff(
+  roles: StaffRole[],
+  stations: InteractionStation[],
+): Map<string, number> {
+  const alloc = new Map<string, number>();
+  for (const role of roles) {
+    const mine = stations.filter((s) => s.staffRoleId === role.id);
+    if (!mine.length) continue;
+    const people = Math.max(0, Math.floor(role.count));
+    const weightTotal = mine.reduce((sum, s) => sum + Math.max(1, s.parallelServers), 0);
+    const exact = mine.map((s) => (people * Math.max(1, s.parallelServers)) / weightTotal);
+    const base = exact.map((v) => Math.floor(v));
+    let left = people - base.reduce((a, b) => a + b, 0);
+    const order = mine
+      .map((s, i) => ({ i, frac: exact[i] - base[i], mean: s.meanServiceSeconds }))
+      .sort((a, b) => b.frac - a.frac || b.mean - a.mean || a.i - b.i);
+    for (const row of order) {
+      if (left <= 0) break;
+      base[row.i] += 1;
+      left -= 1;
+    }
+    mine.forEach((s, i) => alloc.set(s.id, base[i]));
+  }
+  return alloc;
+}
+
+interface BranchOutcome {
+  extraSeconds: number;
+  /** undefined = follow the step's own next; otherwise this wins. */
+  jump: string | null | undefined;
+  optionLabel?: string;
+  /** The picked chance option itself, for the playback result record. */
+  option?: InteractionOption;
+}
+
+/**
+ * Resolve a step's fork for one visitor.
+ *
+ * A `chance` costs exactly one rng() draw, and only when there is a real choice
+ * — a single-option fork is not a choice, and spending a draw on it would shift
+ * every later number for no reason. A `match` costs none at all: it is a
+ * lookup, and which quote you get does not change how long you stand there.
+ */
+function resolveBranch(step: InteractionStep, agent: AgentRuntime, rng: () => number): BranchOutcome {
+  const branch = step.branch;
+  if (!branch) return { extraSeconds: 0, jump: undefined };
+
+  if (branch.kind === "chance") {
+    const options = branch.options.filter((o) => o.weight > 0);
+    if (!options.length) return { extraSeconds: 0, jump: undefined };
+    let picked = options[0];
+    if (options.length > 1) {
+      const total = options.reduce((sum, o) => sum + o.weight, 0);
+      let roll = rng() * total;
+      for (const option of options) {
+        roll -= option.weight;
+        if (roll <= 0) { picked = option; break; }
+        picked = option;
+      }
+    }
+    if (branch.record) agent.memory[branch.record] = picked.value ?? picked.id;
+    return { extraSeconds: picked.extraSeconds ?? 0, jump: picked.next, optionLabel: picked.label, option: picked };
+  }
+
+  const key = branch.on.map((k) => agent.memory[k] ?? "");
+  for (const rule of branch.rules) {
+    const hit = rule.when.every((want, i) => want === "*" || want === key[i]);
+    if (hit) return { extraSeconds: rule.extraSeconds ?? 0, jump: rule.next, optionLabel: rule.label };
+  }
+  const other = branch.otherwise;
+  return other
+    ? { extraSeconds: other.extraSeconds ?? 0, jump: other.next, optionLabel: other.label }
+    : { extraSeconds: 0, jump: undefined };
 }
 
 function serviceDuration(st: ServiceStation, profileId: ParticipantProfileId, rng: () => number): number {
@@ -229,35 +440,58 @@ export interface RunOptions {
   maxHorizonSeconds?: number;
 }
 
+/**
+ * The classroom scenario is now one shape of an interaction flow, not its own
+ * code path.
+ *
+ * The wrapper stays rather than changing every caller: `EventScenario` is what
+ * sits in saved projects and what `e310.test.ts` asserts structurally. The
+ * model lands first; the storage format retires later, when somebody
+ * deliberately re-approves the golden numbers.
+ */
 export function runDiscreteEvent(
   scenario: EventScenario,
   opts: RunOptions = {},
 ): SimulationResult {
-  const rng = createRng(scenario.seed >>> 0 || 1);
-  const profiles = normalizeProfiles(scenario.profiles);
-  if (!scenario.stations.length || !profiles.length) {
-    return emptyResult(scenario, "沒有站點或參與者設定。");
+  return runInteraction(templateFromScenario(scenario), opts);
+}
+
+export function runInteraction(
+  template: InteractionTemplate,
+  opts: RunOptions = {},
+): SimulationResult {
+  const rng = createRng(template.seed >>> 0 || 1);
+  const n = normalizeTemplate(template);
+  // Segments reuse ParticipantProfile's allocator verbatim, so whole people are
+  // still handed out by largest remainder in exactly the same order.
+  const profiles = normalizeProfiles(
+    template.segments.map((s) => ({ id: s.id, ratio: s.share, branch: [] as string[] })),
+  );
+  const startStepOf = new Map(template.segments.map((s) => [s.id, s.startStepId]));
+  if (!template.stations.length || !profiles.length || !template.steps.length) {
+    return emptyTemplateResult(template, "沒有站點或參與者設定。");
   }
-  const stationMap = new Map(scenario.stations.map((s) => [s.id, s]));
-  for (const p of profiles) {
-    for (const sid of p.branch) {
-      if (!stationMap.has(sid)) {
-        return emptyResult(scenario, `站點 ${sid} 不存在於流程中。`);
-      }
+  for (const segment of template.segments) {
+    if (!n.stepById.has(segment.startStepId)) {
+      return emptyTemplateResult(template, `步驟 ${segment.startStepId} 不存在於流程中。`);
     }
   }
 
   const sampleDt = opts.sampleDt ?? 1;
   const maxHorizon =
-    opts.maxHorizonSeconds ?? scenario.arrivalWindowSeconds + 7200;
+    opts.maxHorizonSeconds ?? template.audience.windowSeconds + 7200;
 
+  const staffAlloc = allocateStaff(template.staff, template.stations);
+  /** Seconds of queueing before someone gives up. 0 = nobody ever does. */
+  const patienceSeconds = Math.max(0, template.audience.patienceSeconds || 0);
+  let leftEarly = 0;
   const stations: Record<string, StationRuntime> = {};
-  for (const s of scenario.stations) {
-    const n = effectiveServers(s);
+  for (const s of template.stations) {
+    const servers = serversFor(s, staffAlloc);
     stations[s.id] = {
       def: s,
       queue: [],
-      busyUntil: Array.from({ length: n }, () => 0),
+      busyUntil: Array.from({ length: servers }, () => 0),
       maxQueue: 0,
       totalWait: 0,
       served: 0,
@@ -265,30 +499,65 @@ export function runDiscreteEvent(
     };
   }
 
+  // Only the people who actually take part are simulated. A booth may have 600
+  // people walk past; spawning the 480 who never stopped would put half a
+  // million objects in a phone's memory to model nobody doing anything.
+  const funnel = audienceJoiners(template.audience);
+  const joinerCount = funnel.joined;
+
   const arrivals = arrivalTimes(
-    scenario.participantCount,
-    scenario.arrivalWindowSeconds,
-    scenario.arrivalProfile,
+    joinerCount,
+    template.audience.windowSeconds,
+    template.audience.profile,
     rng,
   );
-  const assignedProfiles = allocateProfiles(scenario.participantCount, profiles);
+  // Shuffled, because `allocateProfiles` returns them grouped — every prepaid
+  // attendee, then every pay-on-site one — and arrivals are sorted ascending
+  // before the two are zipped positionally. Unshuffled, a 40/20 mix meant the
+  // payment desk sat idle for two thirds of the arrival window and was then hit
+  // by twenty consecutive payers. That is not how a 40/20 mix arrives, and it
+  // is the exact input to the 同桌／分桌 staffing comparison the user is asked
+  // to trust. Seeded, so the run stays reproducible.
+  const assignedProfiles = shuffled(allocateProfiles(joinerCount, profiles), rng);
 
   const agents: AgentRuntime[] = [];
   const events: SimEvent[] = [];
   let seq = 0;
   let maxCorridorOverflow = 0;
   const traversedDoors = new Set<string>();
+  /** Where a fork decided this visitor goes, held until the step finishes. */
+  const pendingJump = new Map<number, string | null | undefined>();
+  /** How often each option came up, per step, for 「拖延獸 42 人」. */
+  const optionCounts = new Map<string, Map<string, number>>();
 
-  const firstStationPos = stationPos(stationMap.get(profiles[0].branch[0])!);
+  /**
+   * The station a step happens at.
+   *
+   * A step with no station of its own happens wherever the visitor already is
+   * — that is what `InteractionStep.stationId` being optional MEANS, and it is
+   * what makes a zero-time decision free: no walk, so no travel time to a
+   * station the organiser never mentioned. Falls back to the first station for
+   * a visitor who is not anywhere yet.
+   */
+  const stationOfStep = (
+    step: InteractionStep | null,
+    here: string | null = null,
+  ): InteractionStation =>
+    (step?.stationId ? n.stationById.get(step.stationId) : undefined)
+    ?? (here ? n.stationById.get(here) : undefined)
+    ?? template.stations[0];
+
+  const firstStep = n.stepById.get(startStepOf.get(profiles[0].id) ?? "") ?? template.steps[0];
+  const firstStationPos = stationPos(stationOfStep(firstStep));
 
   for (let i = 0; i < arrivals.length; i++) {
     const profile = assignedProfiles[i] ?? profiles[profiles.length - 1];
-    const branch = profile.branch.length ? profile.branch : [scenario.stations[0].id];
+    const startId = startStepOf.get(profile.id) ?? template.steps[0].id;
     agents.push({
       id: i,
       profileId: profile.id,
-      branch,
-      branchIndex: 0,
+      stepId: startId,
+      memory: {},
       arrivalT: arrivals[i],
       journeyStart: arrivals[i],
       journeyEnd: null,
@@ -305,19 +574,31 @@ export function runDiscreteEvent(
     pushEvent(events, { t: arrivals[i], kind: "arrive", agentId: i, seq: seq++ });
   }
 
-  const speed = Math.max(0.2, scenario.settings.speedMetersPerSecond);
+  const speed = Math.max(0.2, template.settings.speedMetersPerSecond);
   const playback: PlaybackFrame[] = [];
+  // Served-fork outcomes only (tryStartService): a 0-second ask-step is a
+  // decision, and 「要不要玩」 answered 路過 is not a dice result. A run with
+  // no served forks — every classroom — never allocates a `results` key.
+  const latestResults: Record<string, PlaybackStationResult> = {};
+  const resultSerials: Record<string, number> = {};
   let nextSample = 0;
 
   const refreshQueuePositions = (st: StationRuntime) => {
     for (let index = 0; index < st.queue.length; index++) {
       const agent = agents[st.queue[index]];
       if (!agent) continue;
-      const placement = queuePlacement(st.def, index, scenario.spatial);
+      const placement = queuePlacement(st.def, index, template.spatial);
       agent.x = placement.point.x;
       agent.z = placement.point.z;
       const queueOverflow = index + 1 > st.def.queueCapacity ? index + 1 - st.def.queueCapacity : 0;
-      if (placement.overflow || queueOverflow > 0) maxCorridorOverflow = Math.max(maxCorridorOverflow, index + 1 - Math.min(placement.capacity, st.def.queueCapacity));
+      // Only a queue that is actually IN the corridor can fill the corridor.
+      // This used to take every station, so a line backing up inside the
+      // classroom printed 「排隊人龍會塞滿走廊」 and put a red 走廊 marker in the
+      // middle of a corridor with nobody in it.
+      if ((placement.overflow || queueOverflow > 0)
+        && stationRoom(st.def, template.spatial) === "corridor") {
+        maxCorridorOverflow = Math.max(maxCorridorOverflow, index + 1 - Math.min(placement.capacity, st.def.queueCapacity));
+      }
     }
   };
 
@@ -334,7 +615,7 @@ export function runDiscreteEvent(
       agent.x = point.x;
       agent.z = point.z;
     }
-    playback.push({
+    const frame: PlaybackFrame = {
       t,
       agents: agents.map((a) => ({
         id: a.id,
@@ -345,7 +626,9 @@ export function runDiscreteEvent(
         state: a.state,
       })),
       queues: { ...queues },
-    });
+    };
+    if (Object.keys(latestResults).length) frame.results = { ...latestResults };
+    playback.push(frame);
   };
 
   const tryStartService = (stationId: string, t: number) => {
@@ -373,7 +656,30 @@ export function runDiscreteEvent(
     agent.stationId = stationId;
     agent.x = st.def.x;
     agent.z = st.def.z;
-    const dur = serviceDuration(st.def, agent.profileId, rng);
+    const step = agent.stepId ? n.stepById.get(agent.stepId) ?? null : null;
+    // Roll the fork here, not on arrival: the option's extra seconds then land
+    // straight on this server's occupancy.
+    const outcome = step ? resolveBranch(step, agent, rng) : { extraSeconds: 0, jump: undefined };
+    if (step?.branch?.kind === "chance" && outcome.option) {
+      const serial = (resultSerials[stationId] = (resultSerials[stationId] ?? 0) + 1);
+      latestResults[stationId] = {
+        stepId: step.id,
+        optionId: outcome.option.id,
+        label: outcome.option.label,
+        color: outcome.option.color,
+        t,
+        serial,
+      };
+    }
+    if (outcome.jump !== undefined) pendingJump.set(agentId, outcome.jump);
+    if (outcome.optionLabel && step) {
+      const counts = optionCounts.get(step.id) ?? new Map<string, number>();
+      counts.set(outcome.optionLabel, (counts.get(outcome.optionLabel) ?? 0) + 1);
+      optionCounts.set(step.id, counts);
+    }
+    const dur = step
+      ? sampleDuration(step, outcome.extraSeconds, rng)
+      : serviceDuration(st.def, agent.profileId, rng);
     st.busyUntil[freeIdx] = t + dur;
     st.busyServerSeconds += dur;
     pushEvent(events, {
@@ -385,8 +691,63 @@ export function runDiscreteEvent(
     });
   };
 
+  /**
+   * A step that costs no time is a DECISION, not a visit.
+   *
+   * 「0 是合法的——純分岔不花時間」 is written into the model, and this is the
+   * line that makes it true. Without it a zero-second fork would still queue
+   * for a server and hold it for the one-second floor in `sampleDuration`, so
+   * a booth visitor deciding NOT to sit on a cushion would first have to wait
+   * for a free cushion — the plan would answer a question nobody asked.
+   *
+   * An option's extra seconds still count: the visitor stands there thinking
+   * that much longer before walking on. They just do not occupy a server while
+   * they do it.
+   */
+  const isDecision = (step: InteractionStep): boolean => step.avgSeconds <= 0;
+
+  const decide = (agent: AgentRuntime, step: InteractionStep, t: number) => {
+    const outcome = resolveBranch(step, agent, rng);
+    if (outcome.optionLabel) {
+      const counts = optionCounts.get(step.id) ?? new Map<string, number>();
+      counts.set(outcome.optionLabel, (counts.get(outcome.optionLabel) ?? 0) + 1);
+      optionCounts.set(step.id, counts);
+    }
+    const nextStep = stepAfter(step, outcome.jump, n);
+    agent.stepId = nextStep?.id ?? null;
+    if (!nextStep) {
+      agent.state = "done";
+      agent.stationId = null;
+      agent.journeyEnd = t + outcome.extraSeconds;
+      return;
+    }
+    sendToStation(agent, stationOfStep(nextStep, agent.stationId).id, t + outcome.extraSeconds);
+  };
+
+  /**
+   * Someone who walks away instead of joining, and someone who waits and then
+   * gives up. Both end the visit; neither exists for a classroom.
+   *
+   * `balkQueueLength` is its own field on purpose. `queueCapacity` is NOT this
+   * threshold — nothing in `enqueue` has ever read it, it only feeds the
+   * corridor-overflow arithmetic, and pressing it into service here would
+   * quietly change every saved classroom scenario (their capacities are 30–80).
+   */
+  const leaveEarly = (agent: AgentRuntime) => {
+    agent.state = "done";
+    agent.stationId = null;
+    agent.stepId = null;
+    agent.journeyEnd = null;
+    leftEarly += 1;
+  };
+
   const enqueue = (agent: AgentRuntime, stationId: string, t: number) => {
     const st = stations[stationId];
+    const balkAt = (st.def as InteractionStation).balkQueueLength;
+    if (balkAt !== undefined && st.queue.length >= balkAt) {
+      leaveEarly(agent);
+      return;
+    }
     agent.state = "queued";
     agent.stationId = stationId;
     agent.x = st.def.x;
@@ -395,14 +756,25 @@ export function runDiscreteEvent(
     st.queue.push(agent.id);
     st.maxQueue = Math.max(st.maxQueue, st.queue.length);
     refreshQueuePositions(st);
+    // Only pushed when someone can actually run out of patience, so a
+    // classroom run has exactly the events it has today — same seq, same heap.
+    if (patienceSeconds > 0) {
+      pushEvent(events, {
+        t: t + patienceSeconds,
+        kind: "giveUp",
+        agentId: agent.id,
+        stationId,
+        seq: seq++,
+      });
+    }
     tryStartService(stationId, t);
   };
 
   const sendToStation = (agent: AgentRuntime, stationId: string, t: number) => {
-    const st = stationMap.get(stationId)!;
+    const st = n.stationById.get(stationId)!;
     const from = { x: agent.x, z: agent.z };
     const to = stationPos(st);
-    const travel = buildTravelPath(from, to, scenario.spatial, speed);
+    const travel = buildTravelPath(from, to, template.spatial, speed);
     for (const doorId of travel.doorIds) traversedDoors.add(doorId);
     agent.state = "traveling";
     agent.stationId = stationId;
@@ -438,22 +810,28 @@ export function runDiscreteEvent(
     switch (ev.kind) {
       case "arrive": {
         agent.journeyStart = ev.t;
-        const first = agent.branch[0];
-        if (!first) {
+        const step = agent.stepId ? n.stepById.get(agent.stepId) ?? null : null;
+        if (!step) {
           agent.state = "done";
           agent.journeyEnd = ev.t;
           break;
         }
+        const first = stationOfStep(step).id;
         // Spawn at first station (zero travel from "outside").
-        agent.x = stationMap.get(first)!.x;
-        agent.z = stationMap.get(first)!.z;
+        agent.x = n.stationById.get(first)!.x;
+        agent.z = n.stationById.get(first)!.z;
+        agent.stationId = first;
+        if (isDecision(step)) { decide(agent, step, ev.t); break; }
         enqueue(agent, first, ev.t);
         break;
       }
       case "arriveStation": {
         if (!ev.stationId) break;
-        agent.x = stationMap.get(ev.stationId)!.x;
-        agent.z = stationMap.get(ev.stationId)!.z;
+        agent.x = n.stationById.get(ev.stationId)!.x;
+        agent.z = n.stationById.get(ev.stationId)!.z;
+        agent.stationId = ev.stationId;
+        const here = agent.stepId ? n.stepById.get(agent.stepId) ?? null : null;
+        if (here && isDecision(here)) { decide(agent, here, ev.t); break; }
         enqueue(agent, ev.stationId, ev.t);
         break;
       }
@@ -461,16 +839,40 @@ export function runDiscreteEvent(
         if (!ev.stationId) break;
         const st = stations[ev.stationId];
         st.served += 1;
-        agent.branchIndex += 1;
-        if (agent.branchIndex >= agent.branch.length) {
+        const done = agent.stepId ? n.stepById.get(agent.stepId) ?? null : null;
+        // The fork resolves when the step FINISHES, so a face that takes longer
+        // has already occupied the server for longer — "a slower option makes
+        // the queue longer" is a fact of the machinery, not a label.
+        const jump = pendingJump.get(agent.id);
+        pendingJump.delete(agent.id);
+        const nextStep = done ? stepAfter(done, jump, n) : null;
+        agent.stepId = nextStep?.id ?? null;
+        if (!nextStep) {
           agent.state = "done";
           agent.stationId = null;
           agent.journeyEnd = ev.t;
         } else {
-          sendToStation(agent, agent.branch[agent.branchIndex], ev.t);
+          sendToStation(agent, stationOfStep(nextStep, ev.stationId).id, ev.t);
         }
         // Free server may take next in queue.
         tryStartService(ev.stationId, ev.t);
+        break;
+      }
+      case "giveUp": {
+        // Ignored unless they are still standing in that queue: being served,
+        // or already gone, means patience was never the thing that decided.
+        if (!ev.stationId || agent.state !== "queued" || agent.stationId !== ev.stationId) break;
+        const st = stations[ev.stationId];
+        const at = st.queue.indexOf(agent.id);
+        if (at < 0) break;
+        st.queue.splice(at, 1);
+        if (agent.enqueueT !== null) {
+          agent.waitAccum += ev.t - agent.enqueueT;
+          st.totalWait += ev.t - agent.enqueueT;
+          agent.enqueueT = null;
+        }
+        refreshQueuePositions(st);
+        leaveEarly(agent);
         break;
       }
       case "startService":
@@ -482,7 +884,10 @@ export function runDiscreteEvent(
   if (!playback.length || playback[playback.length - 1].t < simT) snapshot(simT);
 
   const completedAgents = agents.filter((a) => a.journeyEnd !== null);
-  const unfinished = agents.length - completedAgents.length;
+  // Someone who gave up did not "not finish yet" — they finished by leaving,
+  // and they are reported under `leftEarly`. Counting them twice would tell an
+  // organiser that 39 people are still standing in a queue that is empty.
+  const unfinished = Math.max(0, agents.length - completedAgents.length - leftEarly);
   const journeys = completedAgents.map((a) => (a.journeyEnd! - a.journeyStart));
   const avgJourney =
     journeys.length ? journeys.reduce((s, v) => s + v, 0) / journeys.length : 0;
@@ -494,9 +899,9 @@ export function runDiscreteEvent(
     : simT;
 
   const horizon = Math.max(finishTime, 1);
-  const stationStats: StationStats[] = scenario.stations.map((s) => {
+  const stationStats: StationStats[] = template.stations.map((s) => {
     const st = stations[s.id];
-    const servers = effectiveServers(s);
+    const servers = serversFor(s, staffAlloc);
     return {
       stationId: s.id,
       name: s.name,
@@ -505,8 +910,15 @@ export function runDiscreteEvent(
       avgWaitSeconds: st.served ? st.totalWait / st.served : 0,
       totalWaitSeconds: st.totalWait,
       served: st.served,
-      utilization: Math.min(1, st.busyServerSeconds / (horizon * servers)),
+      // A station nobody staffs is idle, not undefined. `servers` is 0 for a
+      // desk switched off by a staffing variant (同桌 turns the separate
+      // payment desk off), and the bare division made this NaN — which the
+      // 進階 station table printed to the user as 「利用率 NaN%」.
+      utilization: servers > 0 && horizon > 0
+        ? Math.min(1, st.busyServerSeconds / (horizon * servers))
+        : 0,
       busyServerSeconds: st.busyServerSeconds,
+      servers,
     };
   });
 
@@ -522,7 +934,7 @@ export function runDiscreteEvent(
   const maxQueue = Math.max(0, ...stationStats.map((s) => s.maxQueue));
   const maxQueueWhere = stationStats.find((s) => s.maxQueue === maxQueue)?.name ?? null;
   const spatialBottlenecks: SpatialBottleneck[] = [];
-  for (const door of scenario.spatial?.doors ?? []) {
+  for (const door of template.spatial?.doors ?? []) {
     if (!traversedDoors.has(door.id) || door.throughput >= 1) continue;
     spatialBottlenecks.push({
       kind: "door",
@@ -530,11 +942,11 @@ export function runDiscreteEvent(
       name: "門前",
       x: door.x,
       z: door.z,
-      count: door.blocked ? scenario.participantCount : Math.max(1, Math.round(scenario.participantCount * (1 - door.throughput))),
+      count: door.blocked ? joinerCount : Math.max(1, Math.round(joinerCount * (1 - door.throughput))),
     });
   }
-  if (maxCorridorOverflow > 0 && scenario.spatial) {
-    const corridor = scenario.spatial.corridor;
+  if (maxCorridorOverflow > 0 && template.spatial) {
+    const corridor = template.spatial.corridor;
     spatialBottlenecks.push({
       kind: "corridor",
       id: "corridor",
@@ -568,10 +980,76 @@ export function runDiscreteEvent(
   }
   summaryLines.push(`平均全程 ${Math.round(avgJourney)} 秒。`);
 
+  /**
+   * How hard each role actually worked, in words.
+   *
+   * The panel has always read this line and the engine never wrote it, so the
+   * one readout that answers 「兩個主持夠不夠」 was silently empty. A fraction is
+   * not the answer either — 0.9 means nothing to somebody deciding whether to
+   * ask a third person to come — so the phrase is the product and the number
+   * rides along for the 進階 readout.
+   *
+   * Only emitted when the flow declares roles. A classroom has none, so its
+   * result is byte-identical to what it always was.
+   */
+  const staffLoad: StaffLoadLine[] | undefined = template.staff.length
+    ? template.staff.map((role) => {
+      const mine = template.stations.filter((st) => st.staffRoleId === role.id);
+      const names = mine.map((st) => st.name);
+      let busy = 0;
+      let capacity = 0;
+      let shortage = false;
+      for (const st of mine) {
+        const runtime = stations[st.id];
+        const servers = runtime ? runtime.busyUntil.length : 0;
+        if (servers <= 0) shortage = true;
+        busy += runtime?.busyServerSeconds ?? 0;
+        capacity += servers * horizon;
+      }
+      const busyFraction = capacity > 0 ? Math.min(1, busy / capacity) : 0;
+      const where = names.length ? `（${names.join("、")}）` : "";
+      const phrase = !mine.length
+        ? `${role.name} 沒有被指派到任何一關`
+        : shortage
+          ? `${role.name} 分不到人，${names.join("、")} 會卡住，大家排在那裡不會前進`
+          : busyFraction >= 0.85
+            ? `${role.name} 幾乎沒停過${where}——再多一個人會差很多`
+            : busyFraction >= 0.5
+              ? `${role.name} 大約一半的時間在忙${where}`
+              : `${role.name} 大部分時間在等人${where}`;
+      return { roleId: role.id, roleName: role.name, phrase, busyFraction, stationNames: names, shortage };
+    })
+    : undefined;
+
+  // Steps the visitors actually walked, with how often each option came up.
+  // Only emitted when the flow has something a scenario could not express, so
+  // a classroom result is byte-identical to what it always was.
+  const hasForks = template.steps.some((s) => s.branch);
+  const stepStats: StepStats[] | undefined = hasForks
+    ? template.steps.map((step) => {
+      const counts = optionCounts.get(step.id);
+      return {
+        stepId: step.id,
+        name: step.name,
+        entered: counts ? [...counts.values()].reduce((a, b) => a + b, 0) : 0,
+        avgSeconds: step.avgSeconds,
+        optionCounts: counts
+          ? [...counts.entries()].map(([label, count]) => ({ label, count }))
+          : undefined,
+      };
+    })
+    : undefined;
+
   return {
-    scenarioId: scenario.id,
-    seed: scenario.seed,
-    participantCount: scenario.participantCount,
+    scenarioId: template.id,
+    seed: template.seed,
+    participantCount: joinerCount,
+    leftEarly,
+    steps: stepStats,
+    staffLoad,
+    funnel: funnel.passed !== funnel.joined
+      ? { ...funnel, completed: completedAgents.length, leftEarly }
+      : undefined,
     completed: completedAgents.length,
     unfinished,
     avgJourneySeconds: avgJourney,
@@ -617,13 +1095,14 @@ export function runScenarioMedian(
   };
 }
 
-function emptyResult(scenario: EventScenario, msg: string): SimulationResult {
+function emptyTemplateResult(template: InteractionTemplate, msg: string): SimulationResult {
   return {
-    scenarioId: scenario.id,
-    seed: scenario.seed,
-    participantCount: scenario.participantCount,
+    scenarioId: template.id,
+    seed: template.seed,
+    participantCount: template.audience.count,
+    leftEarly: 0,
     completed: 0,
-    unfinished: scenario.participantCount,
+    unfinished: template.audience.count,
     avgJourneySeconds: 0,
     maxJourneySeconds: 0,
     totalWaitSeconds: 0,
@@ -639,6 +1118,7 @@ function emptyResult(scenario: EventScenario, msg: string): SimulationResult {
     playback: [],
   };
 }
+
 
 function formatMin(seconds: number): string {
   // Round to whole seconds FIRST so 46:59.6 reads 47 分 0 秒, never 46 分 60 秒.

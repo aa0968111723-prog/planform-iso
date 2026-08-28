@@ -1,4 +1,4 @@
-import { createDefaultProject, type Project } from "../core/model";
+import { createDefaultProject, planHasContent, type Project } from "../core/model";
 import { migrateProject } from "../core/migrate";
 import { ProjectRepository } from "./projectRepository";
 
@@ -149,11 +149,18 @@ export class Store {
     this.scheduleAutosave();
   }
 
-  /** Replace the whole project. Safety loads keep one undo checkpoint. */
+  /**
+   * Replace the whole project. Safety loads keep one undo checkpoint.
+   *
+   * "Has content" is `planHasContent`, not a count of four arrays. A plan whose
+   * work is a resized room, a measured tile, a confirmed calibration and three
+   * 尺寸線 has empty arrays and is absolutely not empty — and the arrays-only
+   * test cleared the undo stack on it, so 匯入 JSON replaced that plan with
+   * Ctrl+Z already dead. The dialog above it promises 「載入前已保留一個復原
+   * 步驟」; this is the line that makes the promise true.
+   */
   loadProject(project: Project, options: { undoBeforeLoad?: boolean } = {}): void {
-    const hasContent = this.project.objects.length > 0 || this.project.zones.length > 0 ||
-      this.project.groups.length > 0 || this.project.routes.length > 0;
-    if (options.undoBeforeLoad ?? hasContent) {
+    if (options.undoBeforeLoad ?? planHasContent(this.project)) {
       this.undoStack.push(clone(this.project));
       if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
     } else {
@@ -260,6 +267,11 @@ export class Store {
 
   listLayouts(): string[] {
     return Object.keys(readLayouts()).sort();
+  }
+
+  /** Does a saved version of this name already exist? The caller has to ask. */
+  hasNamedLayout(name: string): boolean {
+    return Object.prototype.hasOwnProperty.call(readLayouts(), name);
   }
 
   saveNamedLayout(name: string): boolean {

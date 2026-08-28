@@ -178,6 +178,29 @@ const JOURNEY: StationType[] = [
 ];
 
 function orderedStations(project: Project, scenario: EventScenario | null): { type: StationType; name: string }[] {
+  // A plan with its own step list IS the journey. Without this, a booth plan —
+  // which has no scenario — fell through to the zone-sniffing branch below and
+  // the brief bar read 「入口 → 引導 → 報到」 for an activity whose actual steps
+  // are 歡迎打招呼 → Q1 真心話檢測 → … → 領 OK 蹦小卡. A 夥伴 was briefed on a
+  // check-in desk that does not exist in the plan they were holding.
+  const flow = project.interaction;
+  if (flow?.steps.length) {
+    const stationById = new Map(flow.stations.map((st) => [st.id, st]));
+    const seen = new Set<string>();
+    const stops: { type: StationType; name: string }[] = [];
+    let here: string | null = null;
+    for (const step of flow.steps) {
+      here = step.stationId ?? here;
+      const station = here ? stationById.get(here) : undefined;
+      if (!station || seen.has(station.id)) continue;
+      seen.add(station.id);
+      // Booth stations carry no StationType taxonomy; "custom" is what the
+      // model calls that, and the role focus below simply finds nothing —
+      // which is the honest outcome, not a fabricated 報到桌.
+      stops.push({ type: "custom", name: station.name });
+    }
+    if (stops.length) return stops;
+  }
   if (scenario && scenario.stations.length) {
     const rank = (s: ServiceStation) => {
       const i = JOURNEY.indexOf(s.type);

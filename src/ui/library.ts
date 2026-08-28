@@ -1,6 +1,7 @@
 import type { App } from "../app/App";
 import { CATALOG_CATEGORIES } from "../core/assets";
 import type { AssetCatalogEntry, CatalogCategory } from "../core/catalog";
+import { BOOTH_ZONE_ROLES, BOOTH_ZONE_ROLE_IDS } from "../core/boothCatalog";
 import { planSymbolForEntry, renderPlanThumbDataUrl } from "../core/planSymbol";
 import { ZONE_DEFAULTS, type ZoneType } from "../core/model";
 import { metersToCm } from "../core/units";
@@ -58,10 +59,21 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   }
 
   if (opts.zones) {
+    // A booth plan speaks in 工作人員區 / 排隊區 / 入口, not 報到區 / 收費區.
+    // Its zones drop straight into the middle of the pitch (the tap-to-place
+    // flow is for room-sized layouts), so they get their own panel.
+    const boothZones = app.isBoothPlan()
+      ? BOOTH_ZONE_ROLE_IDS.map((role) =>
+          card(BOOTH_ZONE_ROLES[role].icon, BOOTH_ZONE_ROLES[role].label, "加到攤位中央後拖曳",
+            pick(() => app.addBoothZone(role))))
+      : [];
     panels.push({
       label: "區域",
-      body: el("div", { class: "cardgrid" }, (Object.keys(ZONE_DEFAULTS) as ZoneType[]).map((z) =>
-        card(ZONE_DEFAULTS[z].icon, ZONE_DEFAULTS[z].label, "點畫面放置", pick(() => app.beginZonePlacement(z))))),
+      body: el("div", { class: "cardgrid" }, [
+        ...boothZones,
+        ...(Object.keys(ZONE_DEFAULTS) as ZoneType[]).map((z) =>
+          card(ZONE_DEFAULTS[z].icon, ZONE_DEFAULTS[z].label, "點畫面放置", pick(() => app.beginZonePlacement(z)))),
+      ]),
     });
   }
 
@@ -87,7 +99,10 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     panels.push({
       label: "排列",
       body: el("div", { class: "cardgrid" }, [
-        card("🟪", "地墊陣列", "整組地墊", pick(() => app.createArray("mat"))),
+        // 🧩, matching the catalog entry and the measured teal the mats render
+        // in. A purple swatch next to a green object is the same mistake the
+        // pixel measurement was done to end, in miniature.
+        card("🧩", "地墊陣列", "整組地墊", pick(() => app.createArray("mat"))),
         card("💺", "椅子陣列", "整組椅子", pick(() => app.createArray("chair"))),
       ]),
     });

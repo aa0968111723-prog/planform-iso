@@ -6,6 +6,7 @@
 import {
   BoxGeometry,
   BufferGeometry,
+  ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
@@ -114,10 +115,156 @@ export function buildVisualGroup(
     case "proc:payment-box":
       buildPaymentBox(g, w, d, h);
       break;
+    case "proc:booth-tent":
+      buildTent(g, w, d, h, "#eef1f4");
+      break;
+    case "proc:neighbor-booth":
+      buildTent(g, w, d, h, "#b3452f");
+      break;
+    case "proc:tent-leg":
+      buildTentLeg(g, w, h);
+      break;
+    case "proc:booth-table":
+      buildBoothTable(g, w, d, h);
+      break;
+    case "proc:red-stool":
+      buildStool(g, w, d, h);
+      break;
+    case "proc:red-chair":
+      buildPlasticChair(g, w, d, h);
+      break;
+    case "proc:display-board":
+      buildDisplayBoard(g, w, d, h);
+      break;
+    case "proc:blank-standee":
+      buildStandee(g, w, h);
+      break;
+    case "proc:banner":
+      buildBanner(g, w, d, h);
+      break;
+    case "proc:flyer-tray":
+      buildFlyerTray(g, w, d);
+      break;
+    case "proc:table-prop":
+      buildTableProp(g, w, d, h);
+      break;
+    case "proc:token-disc":
+      buildTokenDisc(g, w, h);
+      break;
     default:
       buildByKind(g, kind, w, d, h, tint, door, detail);
   }
   return g;
+}
+
+// --- outdoor booth ---------------------------------------------------------
+//
+// Low-poly primitives only, ≤ 12 meshes each, no textures. Boards, banners
+// and standees are BLANK: the mesh named `replaceable-surface` is where a
+// club graphic goes later. Nothing here bakes in a name or a logo.
+//
+// Everything that forms the tent's canopy is tagged `userData.roof`, because
+// a top view is a floor plan — leave the roof on and the table and stools
+// underneath it are neither visible nor clickable.
+
+function markRoof(m: Mesh, name: string): Mesh {
+  m.userData.roof = true;
+  m.name = name;
+  return m;
+}
+
+function buildTent(g: Group, w: number, d: number, h: number, canopy: string): void {
+  const roof = new Mesh(new ConeGeometry(Math.hypot(w, d) / 2, 0.45, 4), materialFromPreset("fabric", canopy));
+  roof.rotation.y = Math.PI / 4;
+  roof.position.y = h - 0.12;
+  g.add(markRoof(roof, "canopy"));
+  g.add(markRoof(part(w, 0.1, d, "fabric", 0, h - 0.34, 0, canopy, -6), "canopy-slab"));
+  // Valance: the fabric skirt hanging off each side. Blank on purpose.
+  for (const [sx, sz, vw, vd] of [
+    [0, -d / 2, w, 0.02], [0, d / 2, w, 0.02], [-w / 2, 0, 0.02, d], [w / 2, 0, 0.02, d],
+  ] as const) {
+    g.add(markRoof(part(vw, 0.3, vd, "fabric", sx, h - 0.52, sz, canopy, -3), "valance"));
+  }
+  const legH = Math.max(0.2, h - 0.4);
+  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(cyl(0.03, 0.03, legH, "painted-metal", lx * (w / 2 - 0.05), legH / 2, lz * (d / 2 - 0.05), "#98a1ad"));
+  }
+}
+
+function buildTentLeg(g: Group, w: number, h: number): void {
+  const r = Math.max(0.02, w / 2);
+  g.add(cyl(r, r, h, "painted-metal", 0, h / 2, 0, "#98a1ad"));
+}
+
+function buildBoothTable(g: Group, w: number, d: number, h: number): void {
+  // A folding table under a floor-length cloth: no visible legs, which is what
+  // the photographs show and what makes it read as a stall rather than a desk.
+  const cloth = "#1e3a5f";
+  g.add(part(w, 0.03, d, "fabric", 0, h - 0.015, 0, cloth));
+  g.add(part(w, h - 0.02, 0.02, "fabric", 0, (h - 0.02) / 2, d / 2 - 0.005, cloth, 6));
+  g.add(part(w * 0.98, h - 0.02, d * 0.9, "fabric", 0, (h - 0.02) / 2, 0, "#24476f"));
+}
+
+function buildStool(g: Group, w: number, d: number, h: number): void {
+  const red = "#c0392b";
+  g.add(part(w, 0.035, d, "plastic-matte", 0, h - 0.018, 0, red));
+  const legH = Math.max(0.05, h - 0.035);
+  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(part(0.035, legH, 0.035, "plastic-matte", lx * (w / 2 - 0.04), legH / 2, lz * (d / 2 - 0.04), red, -14));
+  }
+}
+
+function buildPlasticChair(g: Group, w: number, d: number, h: number): void {
+  const red = "#c0392b";
+  const seatH = Math.min(0.44, h * 0.55);
+  g.add(part(w, 0.04, d, "plastic-matte", 0, seatH, 0, red));
+  g.add(part(w, Math.max(0.1, h - seatH), 0.04, "plastic-matte", 0, seatH + (h - seatH) / 2, -d / 2 + 0.03, red, -8));
+  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(part(0.032, seatH, 0.032, "plastic-matte", lx * (w / 2 - 0.04), seatH / 2, lz * (d / 2 - 0.04), red, -14));
+  }
+}
+
+function buildDisplayBoard(g: Group, w: number, d: number, h: number): void {
+  const standH = Math.min(0.35, h * 0.3);
+  const panelH = Math.max(0.1, h - standH);
+  g.add(part(w, panelH, 0.035, "paper", 0, standH + panelH / 2, 0, "#f4f6f8"));
+  const face = part(w * 0.9, panelH * 0.94, 0.01, "paper", 0, standH + panelH / 2, 0.024, "#fdfdfe");
+  face.name = "replaceable-surface";
+  g.add(face);
+  for (const sx of [-1, 1] as const) {
+    g.add(part(0.05, standH, Math.max(d, 0.08), "painted-metal", sx * (w / 2 - 0.08), standH / 2, 0, "#cbd3dc"));
+  }
+}
+
+function buildStandee(g: Group, w: number, h: number): void {
+  // Two blank faces leaning together — an A-frame with nothing printed on it.
+  for (const [sz, name] of [[-0.06, "replaceable-surface"], [0.06, "replaceable-surface-back"]] as const) {
+    const face = part(w, h, 0.03, "paper", 0, h / 2, sz, "#f8fafc");
+    face.name = name;
+    g.add(face);
+  }
+}
+
+function buildBanner(g: Group, w: number, d: number, h: number): void {
+  const face = part(w, h, Math.max(d, 0.02), "fabric", 0, h / 2, 0, "#fbfcfd");
+  face.name = "replaceable-surface";
+  g.add(face);
+}
+
+function buildFlyerTray(g: Group, w: number, d: number): void {
+  g.add(part(w, 0.012, d, "plastic-matte", 0, 0.006, 0, "#e9edf2"));
+  g.add(part(w * 0.8, 0.02, d * 0.72, "paper", 0, 0.022, 0.01, "#fbfcfd"));
+  g.add(part(w * 0.7, 0.02, d * 0.6, "paper", 0.03, 0.042, -0.02, "#f5f7fa"));
+}
+
+function buildTableProp(g: Group, w: number, d: number, h: number): void {
+  g.add(part(w, h * 0.8, d, "light-wood", 0, (h * 0.8) / 2, 0, "#d9b45b"));
+  g.add(part(w * 1.04, h * 0.2, d * 1.04, "light-wood", 0, h * 0.9, 0, "#c9a24d"));
+}
+
+function buildTokenDisc(g: Group, w: number, h: number): void {
+  const r = Math.max(0.01, w / 2);
+  g.add(cyl(r, r, h, "light-wood", 0, h / 2, 0, "#e7d7b8"));
 }
 
 function buildByKind(
@@ -158,19 +305,29 @@ function buildByKind(
   }
 }
 
-function buildChair(g: Group, w: number, d: number, h: number, tint: string, detail: boolean): void {
+function buildChair(g: Group, w: number, d: number, h: number, _tint: string, detail: boolean): void {
   const seatH = Math.min(0.45, h * 0.48);
   const legR = detail ? 0.022 : 0.028;
-  g.add(part(w * 0.92, 0.04, d * 0.88, "fabric", 0, seatH, 0.02, tint));
-  g.add(part(w * 0.92, h - seatH - 0.02, 0.04, "fabric", 0, (h + seatH) / 2, -d / 2 + 0.04, tint, -15));
+  // E310's fixed furniture is a grey plastic writing-tablet chair with a
+  // black steel frame and an under-seat basket, not a freestanding soft chair.
+  g.add(part(w * 0.9, 0.055, d * 0.82, "plastic-matte", 0, seatH, 0.02, "#7f8b91"));
+  g.add(part(w * 0.88, h - seatH - 0.04, 0.045, "plastic-matte", 0, (h + seatH) / 2, -d / 2 + 0.04, "#87949a", -8));
   if (detail) {
     g.add(part(w * 0.88, 0.03, 0.03, "brushed-metal", 0, seatH + 0.02, -d / 2 + 0.05));
   }
   const lx = w / 2 - legR - 0.01;
   const lz = d / 2 - legR - 0.01;
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    g.add(cyl(legR, legR * 0.9, seatH, "painted-metal", sx * lx, seatH / 2, sz * lz));
+    g.add(cyl(legR, legR * 0.9, seatH, "painted-metal", sx * lx, seatH / 2, sz * lz, "#1f2937"));
   }
+  const armX = w * 0.56;
+  g.add(cyl(0.018, 0.018, 0.24, "painted-metal", armX, seatH + 0.12, -d * 0.08, "#1f2937"));
+  const tablet = part(w * 0.7, 0.035, d * 0.58, "plastic-matte", armX - w * 0.18, seatH + 0.25, d * 0.12, "#e4e1d8");
+  tablet.rotation.y = -4 * D2R;
+  g.add(tablet);
+  // Basket silhouette: three slim rails are enough to read at overview zoom.
+  for (const z of [-0.11, 0, 0.11]) g.add(part(w * 0.66, 0.012, 0.012, "painted-metal", 0, seatH * 0.48, z, "#374151"));
+  for (const x of [-0.22, 0, 0.22]) g.add(part(0.012, 0.012, d * 0.55, "painted-metal", x, seatH * 0.48, 0, "#374151"));
 }
 
 function buildDesk(
@@ -183,29 +340,32 @@ function buildDesk(
   detail: boolean,
 ): void {
   const topT = detail ? 0.035 : 0.04;
-  const wood: MaterialPresetId = variant === "payment" ? "dark-wood" : "light-wood";
-  g.add(part(w, topT, d, wood, 0, h - topT / 2, 0, tint));
+  const serviceDesk = variant === "checkin" || variant === "payment";
+  const wood: MaterialPresetId = serviceDesk ? "plastic-matte" : "light-wood";
+  const topColor = serviceDesk ? "#eeeae0" : tint;
+  g.add(part(w, topT, d, wood, 0, h - topT / 2, 0, topColor));
   if (detail) {
-    g.add(part(w * 0.98, 0.01, d * 0.98, wood, 0, h - topT - 0.005, 0, tint, -20));
+    g.add(part(w * 0.98, 0.01, d * 0.98, wood, 0, h - topT - 0.005, 0, topColor, -10));
   }
   const legR = 0.035;
   const lx = w / 2 - legR - 0.03;
   const lz = d / 2 - legR - 0.03;
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    g.add(cyl(legR, legR, h - topT, "painted-metal", sx * lx, (h - topT) / 2, sz * lz));
+    g.add(cyl(legR, legR, h - topT, "painted-metal", sx * lx, (h - topT) / 2, sz * lz, "#252b2d"));
   }
-  if (variant === "checkin" || variant === "payment") {
-    g.add(part(w * 0.96, h - topT - 0.12, 0.025, wood, 0, (h - topT) / 2 + 0.02, d / 2 - 0.02, tint, -12));
-    const boardColor = variant === "payment" ? "#fef3c7" : "#f8fafc";
-    g.add(part(w * 0.45, 0.16, 0.025, "paper", 0, h + 0.12, d / 2 - 0.02, boardColor));
-    g.add(part(w * 0.45, 0.02, 0.03, "painted-metal", 0, h + 0.03, d / 2 - 0.02));
+  if (serviceDesk) {
+    // Loose forms / name tags on the photographed folding table. Avoid a tall
+    // fascia or readable sign that would invent a booth absent from the room.
+    g.add(part(w * 0.28, 0.008, d * 0.3, "paper", -w * 0.18, h + 0.006, 0, "#fafafa"));
+    g.add(part(w * 0.2, 0.012, d * 0.2, "paper", w * 0.18, h + 0.009, -d * 0.12, variant === "payment" ? "#c9a97a" : "#e8edf0"));
   }
 }
 
 function buildStagePlatform(g: Group, w: number, d: number, h: number, detail: boolean): void {
   const top = Math.min(0.06, h * 0.35);
-  g.add(part(w, h - top, d, "dark-wood", 0, (h - top) / 2, 0, "#315b45"));
-  g.add(part(w, top, d, "dark-wood", 0, h - top / 2, 0, "#3f7658"));
+  g.add(part(w, h - top, d, "dark-wood", 0, (h - top) / 2, 0, "#182d26"));
+  g.add(part(w, top, d, "dark-wood", 0, h - top / 2, 0, "#2f6348"));
+  g.add(part(w * 0.99, Math.min(0.13, h * 0.55), 0.035, "rubber", 0, h * 0.36, d / 2 + 0.012, "#111827"));
   if (detail) {
     // A low front fascia makes the raised platform legible in the isometric view.
     g.add(part(w * 0.98, 0.025, 0.025, "painted-metal", 0, h + 0.012, d / 2 + 0.012, "#9cc6a8"));
@@ -221,14 +381,15 @@ function buildLectern(g: Group, w: number, d: number, h: number, detail: boolean
 }
 
 function buildComputer(g: Group, w: number, d: number, h: number, tint: string, detail: boolean): void {
-  const baseH = 0.015;
-  g.add(part(w * 0.45, baseH, d * 0.7, "brushed-metal", 0, baseH / 2, d * 0.12, tint, -20));
-  g.add(cyl(0.02, 0.025, h * 0.4, "brushed-metal", 0, h * 0.22, d * 0.12));
-  const screen = part(w, h * 0.52, detail ? 0.02 : 0.03, "plastic-matte", 0, h * 0.7, 0, tint, 20);
-  screen.rotation.x = -8 * D2R;
+  // Laptop clamshell used on the check-in table in the activity photos.
+  const baseH = detail ? 0.018 : 0.024;
+  g.add(part(w, baseH, d * 0.78, "brushed-metal", 0, baseH / 2, d * 0.08, "#747b80"));
+  g.add(part(w * 0.72, 0.006, d * 0.48, "plastic-matte", 0, baseH + 0.004, d * 0.08, "#2f3639"));
+  const screen = part(w, h * 0.72, detail ? 0.018 : 0.024, "brushed-metal", 0, h * 0.42, -d * 0.3, tint, 8);
+  screen.rotation.x = -14 * D2R;
   g.add(screen);
-  const glass = part(w * 0.92, h * 0.46, 0.008, "screen-glass", 0, h * 0.7, 0.012, "#64748b");
-  glass.rotation.x = -8 * D2R;
+  const glass = part(w * 0.9, h * 0.62, 0.006, "screen-glass", 0, h * 0.42, -d * 0.286, "#334155");
+  glass.rotation.x = -14 * D2R;
   g.add(glass);
 }
 
@@ -267,11 +428,25 @@ function buildSwitch(g: Group, w: number, d: number, h: number): void {
   g.add(part(w * 0.35, h * 0.45, 0.012, "plastic-gloss", 0, h / 2, d / 2 + 0.002, "#94a3b8"));
 }
 
+/**
+ * One EVA 巧拼 piece, as photographed: a soft 2 cm slab whose top face is
+ * inset, so two pieces laid edge to edge show the shaded groove between them
+ * instead of merging into one painted rectangle.
+ *
+ * The interlocking teeth are NOT modelled per piece. A 30-person field is
+ * around 100 pieces; teeth would multiply the mesh count for detail that is
+ * invisible at the zoom anyone plans at. The groove plus the seam overlay in
+ * SceneManager is what makes the field read as interlocking pieces.
+ */
 function buildMat(g: Group, w: number, d: number, h: number, tint: string): void {
-  const th = Math.max(h, 0.025);
-  g.add(part(w, th, d, "mat-soft", 0, th / 2, 0, tint));
-  g.add(part(w * 0.94, 0.006, d * 0.94, "fabric", 0, th + 0.002, 0, tint, 25));
-  g.add(part(w, 0.008, d, "rubber", 0, 0.004, 0, "#4b5563"));
+  const th = Math.max(h, 0.02);
+  // Body: full footprint, so the field stays continuous with no gaps of floor.
+  g.add(part(w, th * 0.72, d, "mat-soft", 0, (th * 0.72) / 2, 0, tint, -14));
+  // Top face, inset by ~8 mm a side: the inset edge IS the seam.
+  const inset = Math.min(0.008, w * 0.02);
+  g.add(part(w - inset * 2, th * 0.34, d - inset * 2, "mat-soft", 0, th * 0.72, 0, tint));
+  // Thin dark underside keeps the slab from floating on a pale floor.
+  g.add(part(w, 0.006, d, "rubber", 0, 0.003, 0, "#3f4a52"));
 }
 
 function buildSignage(g: Group, w: number, d: number, h: number, detail: boolean): void {

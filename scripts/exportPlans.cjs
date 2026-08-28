@@ -33,14 +33,13 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1366, height: 1024 }, acceptDownloads: true });
   const page = await context.newPage();
   await page.addInitScript(() => {
-    localStorage.removeItem("planform-iso:quickstart");
-    localStorage.removeItem("planform-iso:autosave");
-    localStorage.removeItem("planform-iso:autosave-backup");
-    localStorage.removeItem("planform-iso:venues");
-    localStorage.removeItem("planform-iso:layouts");
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("planform-iso:")) localStorage.removeItem(key);
+    }
+    localStorage.setItem("planform-iso:boot", "editor");
   });
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.locator(".quickstart__card button", { hasText: "E310 演講範例（60 人）" }).click();
+  await page.locator(".quickstart__card button", { hasText: "建立 30 人實景場佈" }).click();
   await page.waitForTimeout(500);
   await page.locator(".topbar .chip", { hasText: "分享" }).first().click();
   await page.waitForTimeout(350);

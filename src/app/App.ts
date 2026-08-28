@@ -3,6 +3,8 @@ import {
   ZONE_DEFAULTS,
   type ArrayGroup,
   type ArrivalProfile,
+  type BoothStation,
+  type BoothZoneRole,
   type EventScenario,
   type MeasurementAnnotation,
   type MeasurementType,
@@ -13,12 +15,53 @@ import {
   type SceneObject,
   type ValidationSettings,
   type ViewName,
+  type InteractionAudience,
+  type InteractionStation,
+  type InteractionStep,
+  type InteractionTemplate,
+  type PropDefinition,
   type Zone,
   type ZoneType,
 } from "../core/model";
 import { assetDef } from "../core/assets";
 import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
-import { catalogFromProject, createDefaultScenario, resolveScenarioBindings } from "../core/migrate";
+import { BOOTH_ZONE_ROLES, isBoothProject } from "../core/boothCatalog";
+import {
+  addStep,
+  instantiatePropInteraction,
+  propTemplateSkeleton,
+  removePropInteraction,
+  duplicateStep,
+  moveStep,
+  removeStep,
+  renameStep,
+  setOptionCount,
+  setStationPositions,
+  setStepStation,
+  templateFromScenario,
+  updateStep,
+} from "../core/interactionCompile";
+import { INTERACTION_PRESETS, interactionPreset } from "../core/interactionPresets";
+import {
+  applyTemplate,
+  deleteTemplate,
+  listTemplates,
+  loadTemplate,
+  saveTemplate,
+  type TemplateMeta,
+} from "../state/templateLibrary";
+import { rehydrateAssetVisuals } from "../assets/rehydrate";
+import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import type { PlaybackStationResult } from "../core/eventFlow";
+import { anchorSentences, stationNow } from "../core/rehearsal";
+import type { AnchorSentence, StationNowReadout } from "../core/rehearsal";
+import { absorbSelection, forkDefinition } from "../core/propEdit";
+import {
+  catalogFromProject,
+  createDefaultScenario,
+  resolveScenarioBindings,
+  resolveTemplateBindings,
+} from "../core/migrate";
 import { applySnap, type SnapMode } from "../core/units";
 import {
   findParentTable,
@@ -72,6 +115,7 @@ import {
   buildCheckinPaymentVariants,
   compareScenarioVariants,
   frameAt,
+  runInteraction,
   runDiscreteEvent,
   runScenarioMedian,
   type PlaybackAgent,
@@ -90,7 +134,8 @@ import { QuickAgent } from "../agent/quickAgent";
 import { MockProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
-export type Workflow = "site" | "layout" | "route" | "check" | "export";
+/** `sim` is the outdoor-booth crowd simulation; `check` still lives inside 分享. */
+export type Workflow = "site" | "layout" | "route" | "sim" | "check" | "export";
 
 const TABLE_KINDS: ReadonlySet<string> = new Set(["table", "regTable"]);
 const MEASURE_COLOR = "#facc15";
@@ -124,6 +169,8 @@ export interface Session {
   /** Zone type waiting for a canvas tap ("點畫面放區域"). */
   zonePlace: ZoneType | null;
   simPositions: { id?: number; x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
+  /** §25/§26/§31 — latest rolled result per station while a rehearsal plays. */
+  simStationResults: Record<string, PlaybackStationResult>;
   bottlenecks: Bottleneck[];
   simPlaying: boolean;
   /** DES playback (preferred over route-walk when a scenario exists). */
@@ -152,6 +199,8 @@ export interface PartnerSession {
   timeline: RehearsalEvent[];
   /** Pending AI suggestion, shown as a visual before/after. */
   suggestion: PartnerSuggestion | null;
+  /** §85: the interactive station a volunteer tapped, if any. */
+  stationObjectId: string | null;
   /** True while a rehearsal or suggestion is being computed. */
   busy: boolean;
 }
@@ -223,6 +272,7 @@ export class App {
     matCandidates: [],
     zonePlace: null,
     simPositions: [],
+    simStationResults: {},
     bottlenecks: [],
     simPlaying: false,
     simMode: "off",
@@ -268,6 +318,13 @@ export class App {
   private pointers = new Map<number, { x: number; y: number; type: string }>();
   private validationTimer: number | null = null;
   private simState: SimState | null = null;
+  private rehydratingVisuals = false;
+  /**
+   * The template the last run actually used — positions resolved, plan
+   * geometry attached. Playback reads station coordinates from THIS, not from
+   * the project, so a station moved mid-replay does not teleport its queue.
+   */
+  private lastFlow: InteractionTemplate | null = null;
   private simRaf: number | null = null;
   private simLast = 0;
   private lastPanelSync = 0;
@@ -286,7 +343,7 @@ export class App {
       this.syncScene();
       if (!this.dragging) {
         this.notifyUi();
-        if (this.session.workflow === "check") this.scheduleValidation();
+        if (this.showsValidation()) this.scheduleValidation();
       }
     });
     this.bindPointer(canvas);
@@ -351,14 +408,27 @@ export class App {
       simPositions: this.session.simPositions,
       bottlenecks: this.session.bottlenecks,
       simQueues: this.session.simQueues,
-      simStations: this.activeScenario()?.stations.map((s) => ({
-        id: s.id,
-        name: s.name,
-        x: s.x,
-        z: s.z,
-        queue: this.session.simQueues[s.id] ?? 0,
-      })),
+      simStations: this.overlayStations(),
+      propPlayback: this.propPlaybackView(),
+      // A booth is 7 m across with eight station badges on it — the flow names
+      // on top of that make the plan unreadable exactly when you are watching
+      // the crowd. The ribbons and arrows stay; only the names step aside.
+      hideRouteLabels: this.hasFlow() && this.session.simPlaying,
     });
+  }
+
+  /** Station badges drawn on the canvas: the flow's own stations when it has one. */
+  private overlayStations(): { id: string; name: string; x: number; z: number; queue: number }[] | undefined {
+    const source = this.lastFlow?.stations
+      ?? this.viewState.interaction?.stations
+      ?? this.activeScenario()?.stations;
+    return source?.map((s) => ({
+      id: s.id,
+      name: s.name,
+      x: s.x,
+      z: s.z,
+      queue: this.session.simQueues[s.id] ?? 0,
+    }));
   }
   private render(): void { this.syncScene(); this.notifyUi(); }
 
@@ -376,8 +446,11 @@ export class App {
     if (w !== "site" && this.session.mode === "calibrate") this.cancelCalibration();
     this.session.workflow = w;
     if (w !== "route") { this.session.activeRouteId = null; if (this.session.mode === "route") this.session.mode = "select"; }
-    if (w === "check") this.runValidation();
+    if (w === "check" || w === "export") this.runValidation();
     if (w === "route" && this.session.mode !== "route") this.session.mode = "select";
+    // Leaving 模擬 stops the clock rather than letting people keep walking
+    // behind a panel nobody is looking at.
+    if (w !== "sim" && this.session.simPlaying) this.pauseSimulation(true);
     this.cancelPlacement();
     this.notifyUi();
   }
@@ -529,8 +602,176 @@ export class App {
       if (table) obj.parentId = table.id;
     }
     this.store.mutate((p) => p.objects.push(obj));
+    this.bindPropOnPlace(obj);
     this.setSelection([id]);
     // Stay in placement mode for continuous placing.
+  }
+
+  // --- prop studio ---------------------------------------------------------
+
+  propDefinitions(): PropDefinition[] {
+    return this.state.props ?? [];
+  }
+
+  /** Definitions come with their mirrored entry, or the library cannot place them. */
+  addPropToProject(def: PropDefinition, opts: { place?: boolean } = {}): void {
+    this.store.mutate((p) => {
+      const others = (p.props ?? []).filter((d) => d.id !== def.id);
+      p.props = [...others, def];
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+    });
+    if (opts.place !== false) this.beginPlacementByAssetId(propEntryId(def));
+  }
+
+  /**
+   * Edit a definition. The version bump is not cosmetic: the scene's rebuild
+   * signature includes entry.version, so this is what makes every placed
+   * instance redraw with the new look.
+   */
+  updatePropDefinition(def: PropDefinition): void {
+    const bumped = { ...def, version: def.version + 1 };
+    this.store.mutate((p) => {
+      p.props = (p.props ?? []).map((d) => (d.id === def.id ? bumped : d));
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+    });
+    this.resetFlowRun();
+  }
+
+  /** Delete a definition AND everything standing on it — objects and splices. */
+  deletePropDefinition(defId: string): void {
+    const entryId = `custom:${defId}`;
+    this.store.mutate((p) => {
+      const doomed = p.objects.filter((o) => o.assetId === entryId).map((o) => o.id);
+      p.objects = p.objects.filter((o) => o.assetId !== entryId);
+      if (p.interaction) {
+        for (const id of doomed) {
+          const next = removePropInteraction(p.interaction, id);
+          if (next === null) { delete p.interaction; break; }
+          p.interaction = next;
+        }
+      }
+      p.props = (p.props ?? []).filter((d) => d.id !== defId);
+      if (!p.props.length) delete p.props;
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+    });
+    this.resetFlowRun();
+  }
+
+  /**
+   * §71 「只改這一個」 — fork the definition for one placed instance. The other
+   * copies keep the original; this object gets its own editable branch. Its
+   * station splice is rebuilt against the fork so face edits land there.
+   */
+  forkPropForObject(objectId: string): PropDefinition | null {
+    const obj = this.state.objects.find((o) => o.id === objectId);
+    const def = propForAssetId(this.state.props, obj?.assetId);
+    if (!obj || !def) return null;
+    const fork = forkDefinition(def);
+    this.store.mutate((p) => {
+      p.props = [...(p.props ?? []), fork];
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+      const target = p.objects.find((o) => o.id === objectId);
+      if (target) target.assetId = propEntryId(fork);
+      if (p.interaction) {
+        const cleared = removePropInteraction(p.interaction, objectId);
+        p.interaction = cleared === null ? undefined : cleared;
+        if (!p.interaction) delete p.interaction;
+        if (fork.interaction) {
+          p.interaction = instantiatePropInteraction(p.interaction ?? propTemplateSkeleton(), fork, objectId);
+        }
+      }
+    });
+    this.resetFlowRun();
+    this.toast(`已建立「${fork.name}」——改它不會影響其他複製品`, true);
+    return fork;
+  }
+
+  /**
+   * §93 「從選取的物件建立組合道具」 — the selected placed things become ONE
+   * prop: parts merged at their relative positions, anchors and the first
+   * interactive prop's game carried over, originals (and their splices)
+   * removed, one new object placed at the selection's centre. Moving the
+   * group is now moving one thing, and the anchors ride along by construction.
+   */
+  groupSelectionIntoProp(name = "組合道具"): PropDefinition | null {
+    const ids = this.session.selection;
+    const objects = this.state.objects.filter((o) => ids.has(o.id));
+    if (objects.length < 2) {
+      this.toast("先選兩個以上的物件再組合");
+      return null;
+    }
+    const catalog = this.getCatalog();
+    const absorbed = absorbSelection({
+      objects,
+      props: this.state.props,
+      entryFor: (o) => catalog.resolve(o.assetId, o.kind),
+    }, name);
+    if (!absorbed) return null;
+    const { def, droppedInteractions } = absorbed;
+    const cx = objects.reduce((s, o) => s + o.x, 0) / objects.length;
+    const cz = objects.reduce((s, o) => s + o.z, 0) / objects.length;
+    const newId = uid("obj");
+    this.store.mutate((p) => {
+      if (p.interaction) {
+        for (const o of objects) {
+          const next = removePropInteraction(p.interaction, o.id);
+          if (next === null) { delete p.interaction; break; }
+          p.interaction = next;
+        }
+      }
+      p.objects = p.objects.filter((o) => !ids.has(o.id));
+      p.props = [...(p.props ?? []), def];
+      p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+      p.objects.push({
+        id: newId, kind: "table", x: cx, z: cz, rotationDeg: 0,
+        width: def.dimensions.width, depth: def.dimensions.depth, height: def.dimensions.height,
+        locked: false, hidden: false, surface: "floor", elevation: 0,
+        assetId: propEntryId(def), serviceRole: "none",
+      } as SceneObject);
+    });
+    const placed = this.state.objects.find((o) => o.id === newId);
+    if (placed) this.bindPropOnPlace(placed);
+    this.setSelection([newId]);
+    if (droppedInteractions.length) {
+      this.toast(`「${droppedInteractions.join("、")}」的互動沒有帶進組合——一個組合道具只帶一個遊戲`, false);
+    } else {
+      this.toast(`已組合成「${def.name}」，整組一起移動`, true);
+    }
+    return def;
+  }
+
+  /**
+   * An interactive prop is a station the moment it lands (§53): splice its
+   * fragment into the flow, bound to this object, so 演練一次 works without a
+   * single further step.
+   *
+   * The bootstrap is NOT silent. A classroom plan's quick setup is compiled to
+   * a step list first (bit-identical numbers — templateFromScenario's whole
+   * contract) and the toast says so; a fresh plan gets a skeleton and the
+   * toast says that. A canvas drop that silently changed what the 模擬 tab IS
+   * would be the kind of side effect nobody can trace.
+   */
+  private bindPropOnPlace(obj: SceneObject): void {
+    const def = propForAssetId(this.state.props, obj.assetId);
+    if (!def?.interaction) return;
+    let announced: string | null = null;
+    this.store.mutate((p) => {
+      if (!p.interaction) {
+        const scenario = p.activeScenarioId
+          ? p.scenarios.find((s) => s.id === p.activeScenarioId) ?? p.scenarios[0]
+          : p.scenarios[0];
+        if (scenario) {
+          p.interaction = templateFromScenario(scenario);
+          announced = "已把快速設定展開成步驟列表，加上「" + def.name + "」";
+        } else {
+          p.interaction = propTemplateSkeleton();
+          announced = "已建立互動流程：「" + def.name + "」";
+        }
+      }
+      p.interaction = instantiatePropInteraction(p.interaction, def, obj.id);
+    });
+    this.resetFlowRun();
+    if (announced) this.toast(announced, true);
   }
 
   // --- zones -------------------------------------------------------------
@@ -561,6 +802,9 @@ export class App {
     const preset = venuePresetById(id);
     if (!preset) return false;
     this.store.mutate((p) => applyVenuePreset(p, preset, { withFixtures: true }));
+    // A template brings its own stations, so any playback of the old layout is
+    // stale the moment it lands.
+    this.resetFlowRun();
     this.recenterView();
     this.toast(`已套用「${preset.name}」（可復原）`, true);
     return true;
@@ -661,11 +905,55 @@ export class App {
   }
 
   /**
-   * Land the user in 場佈 with the session settings the plan implies: head
-   * count, arrival window and staffing come from the plan's own scenario so the
-   * mat arranger, the simulation and the AI all read one number.
+   * Take the session's numbers from the plan itself.
+   *
+   * Split out from `adoptProjectSettings` because it has to run on the boot
+   * path too, and the navigation half must NOT: a volunteer who refreshes
+   * mid-setup is deliberately put back where they were (UI.ts), so switching
+   * them to 場佈 and re-framing the camera would undo that.
+   *
+   * Skipping it on boot is how the shipped E310 example used to get quietly
+   * rewritten: after a refresh the session still held the class defaults
+   * (陸續到 / 20 分 / 報到 1 人) while the plan on disk said 快開始才到 / 15 分 /
+   * 報到 2 人, and one press of ▶ 模擬 wrote the defaults over the authored
+   * example — on disk. Measured on the golden: average wait 392 s → 760 s,
+   * peak queue 20 → 34.
    */
-  private adoptProjectSettings(project: Project): void {
+  /**
+   * Load blob-backed visuals (imported GLB models) for the open plan.
+   *
+   * Fire-and-forget with an in-flight guard; a failed blob degrades to the
+   * proxy box that entry already shows. Called wherever a plan arrives —
+   * open, create, resume, JSON import — because the import session was the
+   * only place the cache was ever filled, and every reload turned imported
+   * models into grey boxes while their bytes sat in IndexedDB.
+   */
+  rehydrateVisuals(): void {
+    if (this.rehydratingVisuals) return;
+    this.rehydratingVisuals = true;
+    void rehydrateAssetVisuals(this.state.catalogExtras)
+      .then((refs) => {
+        if (!refs.length) return;
+        this.scene.invalidateVisualRefs(refs);
+        this.syncScene();
+      })
+      .finally(() => { this.rehydratingVisuals = false; });
+  }
+
+  seedSessionFromPlan(project: Project): void {
+    this.rehydrateVisuals();
+    // A rehearsal belongs to the plan it was started on. Carrying the agents,
+    // the queue counts or the statistics into the next project would show
+    // somebody else's crowd standing in this room.
+    this.stopSimLoopOnly();
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simResult = null;
+    this.session.simCompare = null;
+    this.lastFlow = null;
+    this.session.simQueues = {};
+    this.session.bottlenecks = [];
+
     const scenario = project.activeScenarioId
       ? project.scenarios.find((s) => s.id === project.activeScenarioId)
       : project.scenarios[0];
@@ -677,6 +965,13 @@ export class App {
         ...this.session.simQuick,
         participants: scenario.participantCount,
         arrivalWindowSeconds: scenario.arrivalWindowSeconds,
+        // Carried too, or ▶ 模擬 writes the session default back over it. The
+        // shipped E310 example is authored 快開始才到 (front-loaded); without
+        // this line one press of ▶ silently reran it as 陸續到, understating
+        // the average wait by 47% and changing which station it names as the
+        // worst — while the 進階 toggle still read 「陸續到」, so nothing on
+        // screen revealed the substitution.
+        arrivalProfile: scenario.arrivalProfile,
         prepaidRatio: prepaid,
         hasOnsitePayment: scenario.profiles.some((p) => p.id === "pay-on-site" && p.ratio > 0),
         // The example ships a 2-person check-in desk — the quick panel must
@@ -688,10 +983,22 @@ export class App {
       // number the event was created with.
       this.session.participants = scenario.participantCount;
     }
+  }
+
+  /**
+   * Open a plan: adopt its numbers AND land the user in 場佈 looking at it.
+   * Used when the user actively opens or creates a project — never on resume.
+   */
+  private adoptProjectSettings(project: Project): void {
+    this.seedSessionFromPlan(project);
     this.setWorkflow("layout");
     // Two flat slabs in a shallow isometric view read as nothing on a phone —
-    // compact devices open the plan top-down.
-    if (typeof window !== "undefined" && window.matchMedia?.("(max-width: 600px)").matches) {
+    // compact devices open the plan top-down. A booth is the exception: its
+    // subject is a 2.5 m tent, and from directly above that is a white
+    // rectangle, so it keeps the 立體 view its template asked for.
+    if (typeof window !== "undefined"
+      && window.matchMedia?.("(max-width: 600px)").matches
+      && !isBoothProject(project)) {
       this.setView("top");
     }
     this.recenterView();
@@ -773,8 +1080,19 @@ export class App {
       p.zones = p.zones.filter((z) => !ids.has(z.id));
       p.groups = p.groups.filter((g) => !ids.has(g.id));
       p.routes = p.routes.filter((r) => !ids.has(r.id));
+      // A deleted prop takes its splice out with it — restoring the flow's
+      // pre-insertion meaning, never leaving a zombie station queueing people
+      // at a table that no longer exists.
+      if (p.interaction) {
+        for (const id of ids) {
+          const next = removePropInteraction(p.interaction, id);
+          if (next === null) { delete p.interaction; break; }
+          p.interaction = next;
+        }
+      }
     });
     this.session.selection = new Set();
+    this.resetFlowRun();
     this.notifyUi();
   }
 
@@ -789,12 +1107,17 @@ export class App {
   duplicateSelection(): void {
     const ids = this.session.selection;
     const newIds: string[] = [];
+    const copiedObjects: SceneObject[] = [];
     this.store.mutate((p) => {
-      for (const o of [...p.objects]) if (ids.has(o.id)) { const c = { ...o, id: uid("obj"), x: o.x + 0.4, z: o.z + 0.4, locked: false, parentId: undefined }; p.objects.push(c); newIds.push(c.id); }
+      for (const o of [...p.objects]) if (ids.has(o.id)) { const c = { ...o, id: uid("obj"), x: o.x + 0.4, z: o.z + 0.4, locked: false, parentId: undefined }; p.objects.push(c); newIds.push(c.id); copiedObjects.push(c); }
       for (const g of [...p.groups]) if (ids.has(g.id)) { const c = { ...g, id: uid("grp"), anchorX: g.anchorX + 0.4, anchorZ: g.anchorZ + 0.4, locked: false }; p.groups.push(c); newIds.push(c.id); }
       for (const z of [...p.zones]) if (ids.has(z.id)) { const c = { ...z, id: uid("zone"), x: z.x + 0.4, z: z.z + 0.4, locked: false }; p.zones.push(c); newIds.push(c.id); }
     });
     if (newIds.length) this.setSelection(newIds);
+    // A copied interactive prop is a second station (§55): its own splice,
+    // sharing the original's staff role by name. One person over two stations
+    // splits statically — the second stalls and the staff-load line says so.
+    for (const c of copiedObjects) this.bindPropOnPlace(c);
   }
 
   toggleLockSelection(): void {
@@ -972,8 +1295,22 @@ export class App {
 
   updateValidationSettings(patch: Partial<ValidationSettings>): void {
     this.store.mutate((p) => Object.assign(p.validationSettings, patch), { history: false });
-    if (this.session.workflow === "check") this.scheduleValidation();
+    if (this.showsValidation()) this.scheduleValidation();
   }
+  /**
+   * Which workflows show the user a validation verdict.
+   *
+   * 檢查 folded into 分享 as the pre-export checklist, but this guard was left
+   * pointing at the folded-away  workflow — which nothing can select
+   * any more. The result was a 分享前先確認 traffic light that was structurally
+   * green: it read a cached issue list that had never been filled, so parking a
+   * table across the door still reported 「目前沒有阻擋分享的問題」 right next
+   * to the button that sends the plan to twenty volunteers.
+   */
+  private showsValidation(): boolean {
+    return this.session.workflow === "check" || this.session.workflow === "export";
+  }
+
   private scheduleValidation(): void {
     if (typeof window === "undefined") { this.runValidation(); return; }
     if (this.validationTimer !== null) window.clearTimeout(this.validationTimer);
@@ -989,7 +1326,7 @@ export class App {
    */
   enterPartnerMode(role: PartnerRole = "all"): void {
     this.partnerReturnView = this.state.view;
-    this.session.partner = { role, timeline: [], suggestion: null, busy: false };
+    this.session.partner = { role, timeline: [], suggestion: null, busy: false, stationObjectId: null };
     this.session.selection = new Set();
     this.cancelPlacement();
     if (this.session.mode === "measure") this.stopMeasure();
@@ -1036,13 +1373,70 @@ export class App {
     return partnerMarks(this.session.issues);
   }
 
+  /**
+   * §85 — the four 「你站這裡／參加者站這裡／排隊從這裡開始／完成後往這裡走」
+   * sentences for a placed prop, or null when the object is not one.
+   */
+  propAnchorGuide(objectId: string): { name: string; lines: AnchorSentence[] } | null {
+    const obj = this.state.objects.find((o) => o.id === objectId);
+    const def = obj ? propForAssetId(this.state.props, obj.assetId) : undefined;
+    if (!def?.anchors.length) return null;
+    return { name: def.name, lines: anchorSentences(def) };
+  }
+
+  /**
+   * §26 — what the station bound to this object is doing right now. Null when
+   * the object has no station, so the panel simply says nothing rather than
+   * inventing a rehearsal that is not running.
+   */
+  propStationNow(objectId: string): StationNowReadout | null {
+    const stations = this.lastFlow?.stations ?? this.state.interaction?.stations ?? [];
+    const station = stations.find((s) => s.objectId === objectId);
+    if (!station) return null;
+    const result = this.session.simStationResults[station.id];
+    // The step the fork leads into: honest for one server, an approximation
+    // when several people are being served at once (documented in stationNow).
+    let nextStepName: string | null = null;
+    const steps = this.lastFlow?.steps ?? this.state.interaction?.steps ?? [];
+    if (result) {
+      const i = steps.findIndex((s) => s.id === result.stepId);
+      if (i >= 0) {
+        const option = steps[i].branch?.kind === "chance"
+          ? steps[i].branch.options.find((o) => o.id === result.optionId)
+          : undefined;
+        const target = option?.next === undefined ? steps[i + 1]?.id : option.next;
+        nextStepName = steps.find((s) => s.id === target)?.name ?? null;
+      }
+    }
+    const serving = this.session.simPositions.filter(
+      (p) => p.state === "serving" && this.nearStation(p, station),
+    ).length;
+    return stationNow({
+      stationId: station.id,
+      result,
+      nextStepName,
+      now: this.session.simTime,
+      serving,
+      queued: this.session.simQueues[station.id] ?? 0,
+    });
+  }
+
+  /** A served figure stands ON its station; 60 cm is well inside one lane. */
+  private nearStation(p: { x: number; z: number }, station: { x: number; z: number }): boolean {
+    return Math.hypot(p.x - station.x, p.z - station.z) < 0.6;
+  }
+
   partnerStatus(): { tone: "bad" | "warn" | "ok"; text: string } {
     return partnerStatus(this.partnerMarks());
   }
 
   /** Run the rehearsal and turn it into wall-clock sentences. */
   runRehearsal(): RehearsalEvent[] {
-    const result = this.runEventSimulation();
+    // A booth plan used to rehearse a check-in desk here — and worse,
+    // `runEventSimulation` calls `ensureEventScenario`, which WRITES that
+    // invented classroom scenario into the project. One tap on 演練一次 and the
+    // plan permanently carried a 進場流程 it never had.
+    const result = (this.hasFlow() ? this.runFlowSimulation() : null) ?? this.runEventSimulation();
     const timeline = buildRehearsalTimeline(result);
     if (this.session.partner) this.session.partner.timeline = timeline;
     this.notifyUi();
@@ -1350,7 +1744,273 @@ export class App {
     return cmp;
   }
 
+  // --- outdoor booth simulation ------------------------------------------
+
+  /** True when this project carries booth data, i.e. the 模擬 tab applies. */
+  isBoothPlan(): boolean {
+    return isBoothProject(this.state);
+  }
+
+  boothStations(): BoothStation[] {
+    return this.state.booth?.stations ?? [];
+  }
+
+  /** Add a booth zone (工作人員區, 排隊區 …) at the centre of the pitch. */
+  addBoothZone(role: BoothZoneRole): void {
+    const def = BOOTH_ZONE_ROLES[role];
+    const c = this.centerOfClassroom();
+    const zone: Zone = {
+      id: uid("zone"),
+      type: "custom",
+      boothRole: role,
+      name: def.label,
+      x: Math.round(c.x * 100) / 100,
+      z: Math.round((c.z + 1.4) * 100) / 100,
+      width: 2,
+      depth: 1.5,
+      color: def.color,
+      locked: false,
+      hidden: false,
+      icon: def.icon,
+      capacity: 4,
+    };
+    this.store.mutate((p) => { p.zones.push(zone); });
+    this.session.selection = new Set([zone.id]);
+    this.render();
+  }
+
+  // --- interaction flow ----------------------------------------------------
+
+  /** The plan's own step list, or null for a plan that still runs a scenario. */
+  flowTemplate(): InteractionTemplate | null {
+    return this.state.interaction ?? null;
+  }
+
+  hasFlow(): boolean {
+    return !!this.state.interaction;
+  }
+
+  /** Presets offered by 套用範本. */
+  flowPresets(): { id: string; name: string; summary: string }[] {
+    return INTERACTION_PRESETS.map(({ id, name, summary }) => ({ id, name, summary }));
+  }
+
+  /**
+   * Edit the flow.
+   *
+   * Every edit goes through here for one reason: a result computed from the
+   * previous version of the flow must not stay on screen next to the new
+   * version of the settings. That gap — panel says 6 faces, readout is from
+   * when there were 4 — is exactly the "the UI changed but the simulation did
+   * not" failure this whole feature is judged on.
+   */
+  updateFlow(fn: (t: InteractionTemplate) => InteractionTemplate, opts?: { history?: boolean }): void {
+    const current = this.state.interaction;
+    if (!current) return;
+    const next = fn(current);
+    this.store.mutate((p) => { p.interaction = next; }, { history: opts?.history !== false });
+    this.resetFlowRun();
+  }
+
+  applyFlowPreset(id: string): void {
+    const template = interactionPreset(id);
+    if (!template) return;
+    this.store.mutate((p) => { p.interaction = template; });
+    this.resetFlowRun();
+    this.toast(`已套用「${template.name}」`, true);
+  }
+
+  /**
+   * 改成我自己的流程 — compile the plan's scenario into an editable step list.
+   *
+   * `scenarios` is kept, not deleted: this is reversible, an older build still
+   * opens the file, and the first run after converting produces bit-identical
+   * numbers because it is the same compiler the engine has been using all along.
+   */
+  convertScenarioToFlow(): boolean {
+    const scenario = this.activeScenario();
+    if (!scenario) return false;
+    const template = templateFromScenario(scenario);
+    this.store.mutate((p) => { p.interaction = template; });
+    this.resetFlowRun();
+    this.toast("已改成步驟列表，原本的設定還留著", true);
+    return true;
+  }
+
+  /** Back to the quick setup. The step list is dropped, the scenario is intact. */
+  discardFlow(): void {
+    if (!this.state.scenarios.length) return;
+    this.store.mutate((p) => { delete p.interaction; });
+    this.resetFlowRun();
+    this.toast("已回到快速設定", true);
+  }
+
+  // --- step-list editing (thin wrappers over the pure editors) --------------
+
+  addFlowStep(at: number): void { this.updateFlow((t) => addStep(t, at)); }
+  moveFlowStep(id: string, delta: number): void { this.updateFlow((t) => moveStep(t, id, delta)); }
+  duplicateFlowStep(id: string): void { this.updateFlow((t) => duplicateStep(t, id)); }
+  removeFlowStep(id: string): void { this.updateFlow((t) => removeStep(t, id)); }
+  renameFlowStep(id: string, name: string): void { this.updateFlow((t) => renameStep(t, id, name)); }
+  setFlowStepStation(id: string, stationId: string | undefined): void {
+    this.updateFlow((t) => setStepStation(t, id, stationId));
+  }
+  updateFlowStep(id: string, patch: Partial<InteractionStep>): void {
+    this.updateFlow((t) => updateStep(t, id, patch));
+  }
+  setFlowOptionCount(id: string, count: number): void {
+    this.updateFlow((t) => setOptionCount(t, id, count));
+  }
+
+  updateFlowStation(id: string, patch: Partial<InteractionStation>): void {
+    this.updateFlow((t) => {
+      const applied: InteractionTemplate = {
+        ...t,
+        stations: t.stations.map((st) => (st.id === id ? { ...st, ...patch } : st)),
+      };
+      // 「同時幾人」 has to open real service positions — see
+      // `setStationPositions` for why writing one number was not enough.
+      return patch.parallelServers === undefined
+        ? applied
+        : setStationPositions(applied, id, patch.parallelServers);
+    });
+  }
+
+  updateFlowAudience(patch: Partial<InteractionAudience>): void {
+    this.updateFlow((t) => ({ ...t, audience: { ...t.audience, ...patch } }), { history: false });
+  }
+
+  setFlowStaffCount(roleId: string, count: number): void {
+    this.updateFlow((t) => ({
+      ...t,
+      staff: t.staff.map((r) => (r.id === roleId ? { ...r, count: Math.max(0, Math.round(count)) } : r)),
+    }), { history: false });
+  }
+
+  addFlowRole(name: string): void {
+    this.updateFlow((t) => ({
+      ...t,
+      staff: [...t.staff, { id: uid("role"), name: name || `角色 ${t.staff.length + 1}`, count: 1 }],
+    }));
+  }
+
+  removeFlowRole(roleId: string): void {
+    this.updateFlow((t) => ({
+      ...t,
+      staff: t.staff.filter((r) => r.id !== roleId),
+      // A station pointing at a role that no longer exists would open zero
+      // servers and stall silently, so the claim goes with the role.
+      stations: t.stations.map((st) => (st.staffRoleId === roleId ? { ...st, staffRoleId: undefined } : st)),
+    }));
+  }
+
+  /** Which role staffs a station. Passing the role it already has clears it. */
+  setStationRole(stationId: string, roleId: string | undefined): void {
+    this.updateFlow((t) => ({
+      ...t,
+      stations: t.stations.map((st) => (st.id === stationId ? { ...st, staffRoleId: roleId } : st)),
+    }));
+  }
+
+  // --- running it -----------------------------------------------------------
+
+  /** Drop a stale result so the readout never describes a flow that changed. */
+  private resetFlowRun(): void {
+    this.stopSimLoopOnly();
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simResult = null;
+    this.session.simCompare = null;
+    this.session.simPositions = [];
+    this.session.simStationResults = {};
+    this.session.simQueues = {};
+    this.session.bottlenecks = [];
+    this.session.simTime = 0;
+    this.lastFlow = null;
+    this.render();
+  }
+
+  runFlowSimulation(): SimulationResult | null {
+    const template = this.state.interaction;
+    if (!template) return null;
+    const bound = resolveTemplateBindings(this.state, template);
+    // One sample every 600th of the run, between 1 s and 30 s: a two-hour booth
+    // produces about the same number of playback frames as a 15-minute check-in
+    // instead of 7 200 of them.
+    const horizon = Math.max(60, template.audience.windowSeconds);
+    const sampleDt = Math.min(30, Math.max(1, Math.round(horizon / 600)));
+    const result = runInteraction(bound, { sampleDt });
+    this.lastFlow = bound;
+    this.session.simResult = result;
+    this.session.simCompare = null;
+    this.notifyUi();
+    return result;
+  }
+
+  // --- my own templates -----------------------------------------------------
+
+  myFlowTemplates(): TemplateMeta[] {
+    return listTemplates();
+  }
+
+  saveFlowTemplate(name: string): boolean {
+    const template = this.state.interaction;
+    if (!template) return false;
+    const meta = saveTemplate(template, name);
+    this.toast(`已存成範本「${meta.name}」`, true);
+    this.notifyUi();
+    return true;
+  }
+
+  deleteFlowTemplate(id: string): void {
+    deleteTemplate(id);
+    this.notifyUi();
+  }
+
+  /**
+   * Apply a saved template to THIS plan.
+   *
+   * Stations come back by name onto the plan's own positions; anything this
+   * plan has no station for lands in the middle of the room and is named in a
+   * toast, because a station quietly parked at the origin would put every
+   * walking distance in the run somewhere the room is not.
+   */
+  applyMyFlowTemplate(id: string): boolean {
+    const saved = loadTemplate(id);
+    if (!saved) {
+      this.toast("這個範本讀不出來，可能已經損毀");
+      return false;
+    }
+    const centre = this.centerOfClassroom();
+    const existing = this.state.interaction?.stations ?? [];
+    const { template, unplaced } = applyTemplate(saved, { stations: existing, centre });
+    this.store.mutate((p) => { p.interaction = template; });
+    this.resetFlowRun();
+    this.toast(unplaced.length
+      ? `已套用「${template.name}」，${unplaced.join("、")} 放在場地中央，請拖到正確位置`
+      : `已套用「${template.name}」`, true);
+    return true;
+  }
+
+  /** ▶ 演練一次 — the numbers first; the walk-through is the separate ▶ 播放走位. */
+  startFlowPlayback(): void {
+    const result = this.runFlowSimulation();
+    if (!result) return;
+    this.stopSimLoopOnly();
+    this.session.simMode = "event-flow";
+    this.session.simPlaying = false;
+    this.session.simPaused = false;
+    this.session.simTime = result.finishTimeSeconds;
+    this.session.simPositions = [];
+    this.session.simStationResults = {};
+    this.session.bottlenecks = [];
+    this.notifyUi();
+  }
+
   startSimulation(params?: Partial<SimParams>): void {
+    // A plan with its own step list runs THAT — pressing ▶ on a booth plan
+    // must rehearse the booth's steps, not a check-in desk built out of thin air.
+    if (this.hasFlow()) { this.startFlowPlayback(); return; }
     // Prefer DES when we can build a scenario; else fall back to route-walk.
     const scn = this.ensureEventScenario(false);
     if (scn.stations.length >= 2) {
@@ -1370,6 +2030,7 @@ export class App {
     this.session.simPaused = false;
     this.session.simTime = result.finishTimeSeconds;
     this.session.simPositions = [];
+    this.session.simStationResults = {};
     this.session.bottlenecks = [];
     this.notifyUi();
   }
@@ -1385,6 +2046,8 @@ export class App {
 
   private playEventResult(result: SimulationResult): void {
     this.stopSimLoopOnly();
+    this.exitDrift.clear();
+    this.lastAgentStation.clear();
     this.session.simMode = "event-flow";
     this.focusSimulation();
     this.session.simPlaying = true;
@@ -1434,7 +2097,16 @@ export class App {
   }
 
   restartSimulation(): void {
-    if (this.session.simMode === "event-flow") this.startEventPlayback();
+    // Mid-walk-through, 重來 means "play it again from the start" — it used to
+    // stop the crowd, jump the clock to the end and re-run the whole engine,
+    // which is the one thing the button does not say. The frames are already
+    // computed; replay them.
+    if (this.session.simPlaying && this.session.simResult) {
+      this.playEventResult(this.session.simResult);
+      return;
+    }
+    if (this.hasFlow()) this.startFlowPlayback();
+    else if (this.session.simMode === "event-flow") this.startEventPlayback();
     else if (this.session.simMode === "route-walk") this.startRouteWalk();
     else this.startSimulation();
   }
@@ -1445,6 +2117,7 @@ export class App {
     this.session.simPaused = false;
     this.session.simMode = "off";
     this.session.simPositions = [];
+    this.session.simStationResults = {};
     this.session.bottlenecks = [];
     this.session.simQueues = {};
     this.session.simTime = 0;
@@ -1459,6 +2132,38 @@ export class App {
     }
   }
 
+  /** §57: a finished person walks out at strolling pace, not conference-rush. */
+  private static readonly EXIT_DRIFT_SPEED = 1.1;
+
+  /** §57 rendering state: one drift record per finished person, reset per replay. */
+  private exitDrift = new Map<number, { t0: number; x0: number; z0: number; ex: number; ez: number } | null>();
+  private lastAgentStation = new Map<number, string>();
+
+  /** World-space exit anchor of the prop a station is bound to, if any. */
+  private exitPointForStation(stationId: string): { x: number; z: number } | null {
+    const stations = this.lastFlow?.stations ?? this.state.interaction?.stations ?? [];
+    const st = stations.find((s) => s.id === stationId);
+    const obj = st?.objectId ? this.state.objects.find((o) => o.id === st.objectId) : undefined;
+    const def = obj ? propForAssetId(this.state.props, obj.assetId) : undefined;
+    const exit = def?.anchors.find((a) => a.role === "exit");
+    if (!obj || !exit) return null;
+    // Same rotation convention as resolveStationPosition.
+    const rad = (obj.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return { x: obj.x + exit.x * cos + exit.z * sin, z: obj.z - exit.x * sin + exit.z * cos };
+  }
+
+  /** The scene's §25/§31 feed: results keyed by station, plus who is bound where. */
+  private propPlaybackView(): { t: number; results: Record<string, PlaybackStationResult>; stationOfObject: Record<string, string> } | null {
+    const results = this.session.simStationResults;
+    if (!Object.keys(results).length) return null;
+    const stations = this.lastFlow?.stations ?? this.state.interaction?.stations ?? [];
+    const stationOfObject: Record<string, string> = {};
+    for (const st of stations) if (st.objectId) stationOfObject[st.objectId] = st.id;
+    return { t: this.session.simTime, results, stationOfObject };
+  }
+
   private applyDesFrame(t: number, result: SimulationResult): void {
     const frame = frameAt(result, t);
     if (!frame) return;
@@ -1467,15 +2172,39 @@ export class App {
     // playback at 0 s forever (dt per tick < sampleDt).
     this.session.simTime = t;
     this.session.simQueues = frame.queues;
+    this.session.simStationResults = frame.results ?? {};
+    // §57: someone who finishes at a prop with an exit anchor walks toward it
+    // instead of vanishing at the station. Rendering-only — every journey,
+    // wait and finish time comes from the engine untouched; a station without
+    // an exit anchor keeps the old behaviour (done = gone).
+    const drifting: Session["simPositions"] = [];
+    for (const a of frame.agents) {
+      if (a.stationId) this.lastAgentStation.set(a.id, a.stationId);
+      if (a.state !== "done") continue;
+      let d = this.exitDrift.get(a.id);
+      if (d === undefined) {
+        const from = this.lastAgentStation.get(a.id);
+        const exit = from ? this.exitPointForStation(from) : null;
+        d = exit ? { t0: t, x0: a.x, z0: a.z, ex: exit.x, ez: exit.z } : null;
+        this.exitDrift.set(a.id, d);
+      }
+      if (!d) continue;
+      const dist = Math.hypot(d.ex - d.x0, d.ez - d.z0);
+      const p = dist > 0.01 ? ((t - d.t0) * App.EXIT_DRIFT_SPEED) / dist : 1;
+      if (p >= 1) continue;
+      drifting.push({ id: a.id, x: d.x0 + (d.ex - d.x0) * p, z: d.z0 + (d.ez - d.z0) * p, state: "traveling" });
+    }
     this.session.simPositions = frame.agents
       .filter((a) => a.state !== "pending" && a.state !== "done")
       // id travels with the position so the crowd can keep each figure facing
       // the way it is walking between frames.
       .map((a) => ({ id: a.id, x: a.x, z: a.z, state: a.state }));
+    this.session.simPositions.push(...drifting);
     this.session.bottlenecks = result.stations
       .filter((s) => (frame.queues[s.stationId] ?? 0) >= 3)
       .map((s) => {
-        const st = this.activeScenario()?.stations.find((x) => x.id === s.stationId);
+        const st = (this.lastFlow?.stations ?? this.activeScenario()?.stations ?? [])
+          .find((x) => x.id === s.stationId);
         return {
           x: st?.x ?? 0,
           z: st?.z ?? 0,
@@ -1510,6 +2239,7 @@ export class App {
         this.session.simPaused = false;
         this.session.simTime = result.finishTimeSeconds;
         this.session.simPositions = [];
+    this.session.simStationResults = {};
         this.session.bottlenecks = [];
         this.notifyUi();
         return;
@@ -1602,8 +2332,12 @@ export class App {
    */
   focusSimulation(): void {
     const points: { x: number; z: number }[] = [];
+    const booth = this.boothStations().filter((s) => s.enabled !== false);
+    if (booth.length) {
+      for (const st of booth) points.push({ x: st.x, z: st.z });
+    }
     const scn = this.activeScenario();
-    if (this.session.simMode !== "route-walk" && scn) {
+    if (points.length < 2 && this.session.simMode !== "route-walk" && scn) {
       for (const st of scn.stations) points.push({ x: st.x, z: st.z });
     }
     if (points.length < 2) {
@@ -1669,8 +2403,14 @@ export class App {
     if (this.pointers.size >= 2) { this.abortDrag(); this.scene.setControlsEnabled(true); return; }
 
     // Partner Mode is read-only: a volunteer looking at the plan must not be
-    // able to select or drag the furniture. Camera gestures still work.
-    if (this.session.partner) { this.scene.setControlsEnabled(true); return; }
+    // able to select or drag the furniture. Camera gestures still work — but a
+    // TAP on an interactive station is how §85 gets asked, so remember where
+    // the finger went down and decide on the way up.
+    if (this.session.partner) {
+      this.scene.setControlsEnabled(true);
+      this.partnerTapStart = { x: e.clientX, y: e.clientY };
+      return;
+    }
 
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 
@@ -1803,8 +2543,28 @@ export class App {
     }
   }
 
+  /** Where a Partner Mode finger went down, to tell a tap from an orbit. */
+  private partnerTapStart: { x: number; y: number } | null = null;
+
   private onPointerUp(e?: PointerEvent): void {
     if (e) this.pointers.delete(e.pointerId);
+    // §85: tapping an interactive station asks 「我站哪裡？」. Still read-only —
+    // this sets no selection and moves nothing.
+    if (this.session.partner && this.partnerTapStart && e) {
+      const start = this.partnerTapStart;
+      this.partnerTapStart = null;
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD) {
+        const pick = this.scene.pick(e.clientX, e.clientY);
+        const guide = pick?.type === "object" ? this.propAnchorGuide(pick.id) : null;
+        const next = guide ? pick!.id : null;
+        if (this.session.partner.stationObjectId !== next) {
+          this.session.partner.stationObjectId = next;
+          this.notifyUi();
+        }
+      }
+      return;
+    }
+    this.partnerTapStart = null;
     if (this.pointers.size >= 1 && this.drag) return; // still mid multi-touch gesture
     const drag = this.drag;
     this.drag = null;

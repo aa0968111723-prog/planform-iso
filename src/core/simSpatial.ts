@@ -102,6 +102,96 @@ function pointToRouteDistance(point: SpatialPoint, route: Route): number {
   return projectToRoute(point, route).distance;
 }
 
+/**
+ * The wall the classroom and the corridor share, as a z line, or null when the
+ * two rectangles do not sit back to back.
+ *
+ * Only this one wall matters for travel: it is the only one a participant has
+ * to cross to get from the corridor into the room.
+ */
+export function sharedWallZ(
+  classroom: SimulationSpatial["classroom"],
+  corridor: SimulationSpatial["corridor"],
+): number | null {
+  const EPS = 0.05;
+  const pairs = [classroom.z + classroom.width, classroom.z];
+  for (const z of pairs) {
+    if (Math.abs(corridor.z - z) < EPS || Math.abs(corridor.z + corridor.width - z) < EPS) {
+      // The two must actually overlap along x, or they merely touch at a corner.
+      const overlap = Math.min(classroom.x + classroom.length, corridor.x + corridor.length)
+        - Math.max(classroom.x, corridor.x);
+      return overlap > 0.5 ? z : null;
+    }
+  }
+  return null;
+}
+
+/** Does `x` fall inside a doorway opening (with a hand's width of tolerance)? */
+function doorwayAt(x: number, doors: SimulationDoor[], wallZ: number): SimulationDoor | null {
+  for (const door of doors) {
+    if (Math.abs(door.z - wallZ) > 0.6) continue;
+    if (Math.abs(x - door.x) <= door.width / 2 + 0.1) return door;
+  }
+  return null;
+}
+
+/**
+ * Bend a path so it crosses the classroom wall through a doorway.
+ *
+ * Travel used to be a straight segment between two stations, or a snap onto the
+ * nearest *visible* polyline — and neither is a geometry constraint. On the
+ * release's own default project (the 30-person club setup, whose routes ship
+ * hidden) every one of the 30 participants walked through the solid back wall
+ * two metres from the only door. The doorway was therefore unfalsifiable: no
+ * leg ever recorded a door, so the 門前 bottleneck could never fire and no
+ * door-related decision — where to put the check-in desk, whether the doorway
+ * is wide enough — could be tested by a rehearsal.
+ *
+ * This does not pathfind. It answers the one question the venue actually poses:
+ * when a leg crosses the shared wall somewhere solid, send it through the
+ * nearest doorway instead, entering and leaving square to the wall so the
+ * queue in front of the door reads as a queue in front of the door.
+ */
+export function routeThroughDoorways(
+  points: RoutePoint[],
+  spatial: SimulationSpatial | undefined,
+): RoutePoint[] {
+  const doors = spatial?.doors ?? [];
+  if (!spatial || points.length < 2 || doors.length === 0) return points;
+  const wallZ = sharedWallZ(spatial.classroom, spatial.corridor);
+  if (wallZ === null) return points;
+
+  const APPROACH = 0.45; // how far from the wall the door approach points sit
+  const out: RoutePoint[] = [{ ...points[0] }];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    const da = a.z - wallZ, db = b.z - wallZ;
+    const crosses = (da < 0 && db > 0) || (da > 0 && db < 0);
+    if (crosses) {
+      const t = da / (da - db);
+      const crossX = a.x + (b.x - a.x) * t;
+      if (!doorwayAt(crossX, doors, wallZ)) {
+        // Pick the doorway that adds least walking, not simply the closest to
+        // the crossing: a door behind you is a longer trip than one ahead.
+        let best: SimulationDoor | null = null;
+        let bestCost = Infinity;
+        for (const door of doors) {
+          if (Math.abs(door.z - wallZ) > 0.6) continue;
+          const cost = Math.hypot(door.x - a.x, wallZ - a.z) + Math.hypot(b.x - door.x, b.z - wallZ);
+          if (cost < bestCost) { bestCost = cost; best = door; }
+        }
+        if (best) {
+          const sign = da < 0 ? -1 : 1;
+          out.push({ x: best.x, z: wallZ + sign * APPROACH });
+          out.push({ x: best.x, z: wallZ - sign * APPROACH });
+        }
+      }
+    }
+    out.push({ ...b });
+  }
+  return out;
+}
+
 /** Choose a nearby visible polyline and follow its centerline; otherwise use a straight segment. */
 export function buildTravelPath(
   from: SpatialPoint,
@@ -118,9 +208,10 @@ export function buildTravelPath(
     })
     .sort((a, b) => a.score - b.score);
   const chosen = candidates[0];
-  const points = chosen && chosen.score <= Math.max(2, direct * 0.75 + 1.5)
+  const snapped = chosen && chosen.score <= Math.max(2, direct * 0.75 + 1.5)
     ? routeSegment(chosen.route, from, to)
     : [{ ...from }, { ...to }];
+  const points = routeThroughDoorways(snapped, spatial);
   const length = routeLength(points);
   const doorIds = (spatial?.doors ?? [])
     .filter((door) => pointToRouteDistance(door, { ...spatialRoute(points) }) <= 0.8)
@@ -141,6 +232,28 @@ function spatialRoute(points: RoutePoint[]): Route {
   return { id: "__travel__", name: "", color: "", points, visible: true, type: "custom" };
 }
 
+/**
+ * Which room a station stands in.
+ *
+ * Exported because two different answers depended on it and only one of them
+ * asked: the queue is placed inside the station's own room, but the
+ * 「排隊人龍會塞滿走廊」 warning counted the overflow of EVERY station — so a
+ * queue backing up inside the classroom printed a corridor warning and drew a
+ * red marker in the middle of an empty corridor.
+ */
+export function stationRoom(
+  station: { x: number; z: number },
+  spatial: SimulationSpatial | undefined,
+): "corridor" | "classroom" | null {
+  const inRect = (r: { x: number; z: number; length: number; width: number } | undefined) =>
+    !!r
+    && station.x >= r.x - 1e-6 && station.x <= r.x + r.length + 1e-6
+    && station.z >= r.z - 1e-6 && station.z <= r.z + r.width + 1e-6;
+  if (inRect(spatial?.corridor)) return "corridor";
+  if (inRect(spatial?.classroom)) return "classroom";
+  return null;
+}
+
 export function queuePlacement(
   station: ServiceStation,
   queueIndex: number,
@@ -151,17 +264,34 @@ export function queuePlacement(
   // corridor, not across it); capacity is the walkable length on the side the
   // queue extends into, so a corridor station overflows when the line would
   // run past the corridor, not when the corridor is merely narrow.
-  const inRect = (r: { x: number; z: number; length: number; width: number } | undefined) =>
-    !!r &&
-    station.x >= r.x - 1e-6 && station.x <= r.x + r.length + 1e-6 &&
-    station.z >= r.z - 1e-6 && station.z <= r.z + r.width + 1e-6;
-  const room = inRect(spatial?.corridor) ? spatial?.corridor
-    : inRect(spatial?.classroom) ? spatial?.classroom
+  const room = stationRoom(station, spatial) === "corridor" ? spatial?.corridor
+    : stationRoom(station, spatial) === "classroom" ? spatial?.classroom
     : undefined;
   let direction: SpatialPoint = { x: -1, z: 0 };
   let available = Number.POSITIVE_INFINITY;
   let lanes = 1;
-  if (room) {
+  // A prop's queue anchor says which way the line forms. Only when the field
+  // exists — the classroom path never sets it, so the frozen parity runs keep
+  // their room-side heuristic bit for bit.
+  const queueDeg = (station as { queueDirectionDeg?: number }).queueDirectionDeg;
+  // Which way lanes stack sideways. The room-side heuristic has always put
+  // its lanes straight along +z — that exact vector is kept for that path, so
+  // the frozen runs keep their coordinates bit for bit; an anchored direction
+  // stacks its lanes perpendicular to the line instead.
+  let lateralDir: SpatialPoint = { x: 0, z: 1 };
+  if (queueDeg !== undefined && room) {
+    const rad = (queueDeg * Math.PI) / 180;
+    direction = { x: Math.sin(rad), z: Math.cos(rad) };
+    lateralDir = { x: -direction.z, z: direction.x };
+    // Available run: distance from the station to the room edge along the line.
+    const toEdge = (pos: number, dir: number, min: number, max: number) =>
+      dir > 1e-6 ? (max - pos) / dir : dir < -1e-6 ? (min - pos) / dir : Number.POSITIVE_INFINITY;
+    available = Math.max(0.6, Math.min(
+      toEdge(station.x, direction.x, room.x, room.x + room.length),
+      toEdge(station.z, direction.z, room.z, room.z + room.width),
+    ));
+    lanes = Math.max(1, Math.floor((room === spatial?.corridor ? room.width : 3) / 0.6) - 1);
+  } else if (room) {
     if (room === spatial?.corridor) {
       // Corridor: the line forms on the approach side (back toward the
       // corridor start, where people come from). A wider corridor lets the
@@ -177,13 +307,46 @@ export function queuePlacement(
       available = Math.max(leftRoom, rightRoom);
     }
   }
-  const capacity = Number.isFinite(available)
-    ? Math.max(1, lanes * Math.floor(Math.max(0, available - 0.3) / spacing))
+  const perLane = Number.isFinite(available)
+    ? Math.max(1, Math.floor(Math.max(0, available - 0.3) / spacing))
     : Number.POSITIVE_INFINITY;
+  const capacity = Number.isFinite(perLane) ? Math.max(1, lanes * perLane) : Number.POSITIVE_INFINITY;
+
+  // Place people the way the capacity was counted. Capacity said the line may
+  // double up in a wide corridor; placement ran strictly single-file, so a
+  // 30-person queue was drawn seven metres outside the building while the tool
+  // reported it as fitting. Now the line wraps into the same lanes the capacity
+  // was computed from, and once every lane is full it is honestly an overflow.
+  const laneIndex = Number.isFinite(perLane) ? Math.floor(queueIndex / perLane) : 0;
+  const inLane = Number.isFinite(perLane) ? queueIndex % perLane : queueIndex;
+  // Lanes stack across the room, away from its centre line, so the first lane
+  // is the one nearest the wall and the walking lane stays open. Past the last
+  // lane they WRAP rather than inventing more: the overflow is already reported
+  // as a number, and there is no eleventh lane to stand in. Without the wrap
+  // the clamp below would still keep everyone inside — by stacking them ON the
+  // wall line, which reads as a rendering bug rather than as a queue.
+  const lane = lanes > 0 ? laneIndex % lanes : 0;
+  const lateral = lane === 0 ? 0 : (lane % 2 === 1 ? 1 : -1) * Math.ceil(lane / 2) * 0.6;
   const point = {
-    x: station.x + direction.x * spacing * (queueIndex + 1),
-    z: station.z + direction.z * spacing * (queueIndex + 1),
+    x: station.x + direction.x * spacing * (inLane + 1) + lateralDir.x * lateral,
+    z: station.z + direction.z * spacing * (inLane + 1) + lateralDir.z * lateral,
   };
+  // Nobody queues outside the building.
+  //
+  // At the corridor mouth the approach is 0.6 m long, so `perLane` is 1 and
+  // every queuer got their own lane — the line was drawn PERPENDICULAR to the
+  // corridor, marching 3.6 m past the outer wall on one side and into the
+  // 巧拼 seating field on the other. A person judging whether the corridor can
+  // hold the entry queue was looking at a line whose drawn length had nothing
+  // to do with the corridor.
+  //
+  // `capacity` and `overflow` are deliberately computed above from the
+  // UNCLAMPED index, so 「排隊人龍會塞滿走廊（約多出 N 人）」 still reports the
+  // full overflow. This clamps where people are DRAWN, not how many fit.
+  if (room) {
+    point.x = Math.min(room.x + room.length, Math.max(room.x, point.x));
+    point.z = Math.min(room.z + room.width, Math.max(room.z, point.z));
+  }
   return { point, capacity, overflow: queueIndex + 1 > capacity };
 }
 

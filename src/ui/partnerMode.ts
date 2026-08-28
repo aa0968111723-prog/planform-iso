@@ -17,7 +17,7 @@ import { renderConstructionPlan } from "../export/constructionPlan";
 import { pngFilename, sharePng } from "../export/exporters";
 import { button, el } from "./dom";
 
-export type PartnerSheet = "none" | "steps" | "timeline" | "suggest" | "marks";
+export type PartnerSheet = "none" | "steps" | "timeline" | "suggest" | "marks" | "station";
 
 export interface PartnerModeHandles {
   /** Top strip: project name, traffic light, exit. */
@@ -93,6 +93,8 @@ export function buildPartnerMode(
   sheet.querySelector(".partnersheet__handle")?.addEventListener("click", () => closeSheet());
 
   let sheetKind: PartnerSheet = "none";
+  /** Which station the sheet is currently showing, so a new tap re-opens it. */
+  let shownStation: string | null = null;
 
   function openSheet(kind: PartnerSheet): void {
     sheetKind = kind;
@@ -100,6 +102,10 @@ export function buildPartnerMode(
     opts.onLayoutChange();
   }
   function closeSheet(): void {
+    // Clear the tap too: otherwise the next render sees a station still
+    // selected and springs the sheet straight back open.
+    if (app.session.partner) app.session.partner.stationObjectId = null;
+    shownStation = null;
     openSheet("none");
   }
 
@@ -172,6 +178,35 @@ export function buildPartnerMode(
       ]));
     }
     sheetBody.append(list);
+  }
+
+  /**
+   * §85 — a volunteer tapped an interactive station on the plan. Four
+   * sentences: where you stand, where the participant stands, where the queue
+   * starts, where they go when they are done. No coordinates, no vocabulary
+   * a partner has to decode.
+   */
+  function renderStation(): void {
+    const objectId = app.session.partner?.stationObjectId ?? null;
+    const guide = objectId ? app.propAnchorGuide(objectId) : null;
+    sheetTitle.textContent = guide ? `📍 ${guide.name}：大家站哪裡` : "📍 這個位置";
+    sheetBody.innerHTML = "";
+    if (!guide) {
+      sheetBody.append(el("p", { class: "partnerempty", text: "點場地上的互動關卡（骰子、轉盤、抽卡箱…）就會告訴你站位。" }));
+      return;
+    }
+    const list = el("ol", { class: "partnersteps" });
+    for (const line of guide.lines) {
+      list.append(el("li", { class: "partnerstep" }, [
+        el("span", { class: "partnerstep__no", text: line.icon }),
+        el("span", { text: line.text }),
+      ]));
+    }
+    sheetBody.append(list);
+    const now = objectId ? app.propStationNow(objectId) : null;
+    if (now?.result) {
+      sheetBody.append(el("p", { class: "partnerempty", text: `剛剛骰到：${now.result}${now.doing ? `,現在${now.doing}` : ""}` }));
+    }
   }
 
   function renderMarks(): void {
@@ -278,12 +313,21 @@ export function buildPartnerMode(
 
     renderBrief();
 
+    // §85: App records the tapped station; the sheet follows it. Opening is
+    // driven from state rather than from a click handler here, because the tap
+    // happens on the 3D canvas, not on any element this module owns.
+    const tapped = app.session.partner?.stationObjectId ?? null;
+    if (tapped && tapped !== shownStation) sheetKind = "station";
+    else if (!tapped && sheetKind === "station") sheetKind = "none";
+    shownStation = tapped;
+
     sheet.style.display = sheetKind === "none" ? "none" : "flex";
     sheetFoot.style.display = "none";
     if (sheetKind === "steps") renderSteps();
     else if (sheetKind === "marks") renderMarks();
     else if (sheetKind === "timeline") renderTimeline();
     else if (sheetKind === "suggest") renderSuggest();
+    else if (sheetKind === "station") renderStation();
 
     // Keep the action labels short enough to stay on one row on a phone; the
     // rehearsal figure belongs in the timeline, not on the button.

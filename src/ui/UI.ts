@@ -12,8 +12,11 @@ import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
 import { buildCustomAssetFlow } from "./customAssetFlow";
-import { buildVenueCaptureFlow } from "./venueCapture";
-import { refreshSimPanel } from "./simPanel";
+import { buildVenueCaptureFlow, venueCaptureAvailable } from "./venueCapture";
+import { refreshFlowPanel } from "./flowPanel";
+import { showPropStudio } from "./propStudio";
+import type { PropDefinition } from "../core/model";
+import { deleteLibraryProp, listLibraryProps, loadLibraryProp } from "../state/propLibrary";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
@@ -38,13 +41,25 @@ const WORKFLOWS: { id: Workflow; label: string; icon: string }[] = [
   { id: "site", label: "場地", icon: "▦" }, { id: "layout", label: "場佈", icon: "▤" },
   { id: "route", label: "動線", icon: "↝" }, { id: "export", label: "分享", icon: "↗" },
 ];
+/** Outdoor booth plans get a fifth slot: 場地 / 場佈 / 動線 / 模擬 / 分享. */
+const BOOTH_SIM_WORKFLOW: { id: Workflow; label: string; icon: string } = { id: "sim", label: "模擬", icon: "▶" };
 const WORKFLOW_LABELS: Record<Workflow, string> = {
-  site: "場地", layout: "場佈", route: "動線", check: "檢查", export: "分享",
+  site: "場地", layout: "場佈", route: "動線", sim: "模擬", check: "檢查", export: "分享",
 };
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
 
-const PRIMARY_WORKFLOWS = WORKFLOWS;
+/**
+ * A 模擬 tab on a classroom plan would be an empty room: the crowd model for
+ * a classroom already lives inside 動線 (模擬活動). The tab appears only when
+ * the open project actually has a booth to simulate.
+ */
+function primaryWorkflows(app: App): { id: Workflow; label: string; icon: string }[] {
+  if (!app.isBoothPlan()) return WORKFLOWS;
+  const out = [...WORKFLOWS];
+  out.splice(out.length - 1, 0, BOOTH_SIM_WORKFLOW);
+  return out;
+}
 
 /** Which sheet, if any, currently covers part of the canvas on a compact layout. */
 type SheetKind = "none" | "workflow" | "inspector";
@@ -64,6 +79,7 @@ export class UI {
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
+  private navSig: string | null = null;
   private lastMode: Mode | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
@@ -73,6 +89,7 @@ export class UI {
   private home: ProjectHomeHandles;
   private smartBox = el("div", { class: "list" });
   private simPanelRoot = el("div", { class: "sim-panel-host" });
+  private boothPanelRoot = el("div", { class: "sim-panel-host" });
   private participants = 30;
   private sheet: SheetKind = "none";
   private placebarKind: "place" | "route" | "zone" | null = null;
@@ -159,7 +176,7 @@ export class UI {
     });
     root.append(this.home.root);
 
-    this.buildNav();
+    this.syncNav();
     this.placebar.append(buildPlacementToolbar(app));
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
@@ -341,7 +358,7 @@ export class UI {
     const views = el("div", { class: "group", "data-group": "views" },
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
     const flows = el("div", { class: "group group--flows", "data-group": "flows" },
-      PRIMARY_WORKFLOWS.map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
+      primaryWorkflows(this.app).map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
     const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
     for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
     snapSel.value = this.app.session.snap;
@@ -464,8 +481,19 @@ export class UI {
 
   // --- bottom navigation --------------------------------------------------
 
+  /** Rebuild the bottom nav only when its slot list actually changed. */
+  private syncNav(): void {
+    const sig = primaryWorkflows(this.app).map((w) => w.id).join(",");
+    if (sig === this.navSig) return;
+    this.navSig = sig;
+    this.nav.innerHTML = "";
+    this.buildNav();
+    // Adding or removing the 模擬 slot also changes the desktop 流程 chips.
+    if (!this.compact) this.buildTopbar();
+  }
+
   private buildNav(): void {
-    this.nav.append(...PRIMARY_WORKFLOWS.map((it) =>
+    this.nav.append(...primaryWorkflows(this.app).map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.id }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
@@ -588,10 +616,14 @@ export class UI {
     else if (wf === "layout") this.left.append(
       this.smartLayoutSection(),
       buildLibrary(this.app, { categories: ["furniture", "equipment", "floor", "service", "custom"], zones: true, arrays: true, onPick }),
+      this.propSection(),
       buildCustomAssetFlow(this.app),
     );
     else if (wf === "route") this.left.append(this.routeSection());
-    else if (wf === "check") this.left.append(this.validationSection());
+    else if (wf === "sim") {
+      refreshFlowPanel(this.boothPanelRoot, this.app);
+      this.left.append(this.boothPanelRoot);
+    } else if (wf === "check") this.left.append(this.validationSection());
     else if (wf === "export") this.left.append(this.exportSection());
   }
 
@@ -705,7 +737,8 @@ export class UI {
       num("原點 Z (m)", t.originZ, 0.05, (v) => this.app.updateTile({ originZ: v })),
       num("旋轉 (°)", t.rotationDeg, 1, (v) => this.app.updateTile({ rotationDeg: v })),
     ]));
-    body.push(buildVenueCaptureFlow(this.app));
+    // Offered only when a real vision provider exists — see ui/venueCapture.ts.
+    if (venueCaptureAvailable()) body.push(buildVenueCaptureFlow(this.app));
     return section("進階設定", body, false);
   }
 
@@ -874,6 +907,84 @@ export class UI {
     }
   }
 
+  /** 互動道具 — the Prop Studio launcher, the project's props, the device library. */
+  private propSection(): HTMLElement {
+    const rows: HTMLElement[] = [
+      el("p", { class: "hint", text: "自己做骰子、轉盤、抽卡箱——放進場地就能彩排。" }),
+      el("div", { class: "row wrap" }, [
+        button("＋ 新增道具", () => this.openPropStudio(), "btn btn--primary"),
+        button("從選取的物件建立組合道具", () => {
+          const name = window.prompt("組合道具的名字", "骰子遊戲站");
+          if (name === null) return;
+          this.app.groupSelectionIntoProp(name.trim() || "組合道具");
+        }, "btn btn--ghost"),
+      ]),
+    ];
+
+    const defs = this.app.propDefinitions();
+    for (const def of defs) {
+      const instances = this.app.store.getState().objects
+        .filter((o) => o.assetId === `custom:${def.id}`).length;
+      rows.push(el("div", { class: "list__row" }, [
+        el("span", { class: "list__grow", text: `${def.icon ?? "▦"} ${def.name}${instances ? `（場上 ${instances}）` : ""}` }),
+        button("放置", () => this.app.beginPlacementByAssetId(`custom:${def.id}`), "chip chip--sm"),
+        button("編輯", () => this.openPropStudio(def, instances), "chip chip--sm"),
+        button("刪除", () => {
+          if (!window.confirm(`刪除「${def.name}」？場上的 ${instances} 份和它的互動也會一起移除。`)) return;
+          this.app.deletePropDefinition(def.id);
+        }, "chip chip--sm"),
+      ]));
+      if (instances > 1) {
+        rows.push(el("div", { class: "row wrap" }, [
+          el("span", { class: "hint", text: "選取場上其中一份之後：" }),
+          button("只改這一個", () => {
+            const selected = [...this.app.session.selection][0];
+            const obj = this.app.store.getState().objects.find((o) => o.id === selected && o.assetId === `custom:${def.id}`);
+            if (!obj) { this.showToast("先在場上選取要獨立修改的那一份", false); return; }
+            const fork = this.app.forkPropForObject(obj.id);
+            if (fork) this.openPropStudio(fork, 1);
+          }, "chip chip--sm"),
+        ]));
+      }
+    }
+
+    const mine = listLibraryProps();
+    if (mine.length) {
+      rows.push(el("div", { class: "subhead", text: "我的道具（這台裝置）" }));
+      for (const meta of mine) {
+        const inProject = defs.find((d) => d.id === meta.id);
+        const newer = inProject && meta.version > inProject.version;
+        rows.push(el("div", { class: "list__row" }, [
+          el("span", { class: "list__grow", text: `${meta.icon ?? "▦"} ${meta.name}${meta.interactive ? " ·互動" : ""}` }),
+          button(newer ? "更新到新版" : "加入專案", () => {
+            const def = loadLibraryProp(meta.id);
+            if (!def) { this.showToast("這個道具讀不出來，可能已損毀", false); return; }
+            if (newer && !window.confirm(`專案裡的「${meta.name}」是舊版。更新後場上的每一份都會換新，確定？`)) return;
+            this.app.addPropToProject(def, { place: !inProject });
+            if (newer) this.showToast(`已更新「${meta.name}」到新版`);
+          }, "chip chip--sm"),
+          button("刪除", () => {
+            if (!window.confirm(`從我的道具刪除「${meta.name}」？（不影響已加入專案的）`)) return;
+            deleteLibraryProp(meta.id);
+            this.update();
+          }, "chip chip--sm"),
+        ]));
+      }
+    }
+
+    return section("互動道具", rows, defs.length > 0);
+  }
+
+  private openPropStudio(edit?: PropDefinition, instanceCount = 0): void {
+    if (this.root.querySelector(".propstudio")) return;
+    const overlay = showPropStudio(this.app, {
+      edit,
+      instanceCount,
+      onClose: () => this.update(),
+    });
+    this.root.append(overlay);
+  }
+
   private routeSection(): HTMLElement {
     const s = this.app.store.getState();
     const list = el("div", { class: "list" });
@@ -891,7 +1002,7 @@ export class UI {
     const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
       button(`${p.icon} ${p.label.replace("動線", "")}`, () => { this.app.newRoutePreset(p.type as RouteType); if (this.compact) this.setSheet("none"); }, "chip chip--sm")));
 
-    refreshSimPanel(this.simPanelRoot, this.app);
+    refreshFlowPanel(this.simPanelRoot, this.app);
 
     return section("動線", [
       el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。" }),
@@ -958,7 +1069,17 @@ export class UI {
         importInput.value = "";
         return;
       }
-      try { this.app.store.loadProject(await importProjectJson(f) as never); this.showToast("已匯入專案"); } catch { this.showToast("匯入失敗：檔案格式不正確"); }
+      try {
+        // Pass the answer the dialog was based on. Without it the store fell
+        // back to its own arrays-only test and cleared the undo stack — for a
+        // plan whose work is a resized room and a calibration, that is the
+        // whole plan gone with the promised 復原 step never taken.
+        this.app.store.loadProject(await importProjectJson(f) as never, { undoBeforeLoad: hasContent });
+        // The imported file may reference GLB blobs already in this browser's
+        // IndexedDB (e.g. re-importing your own backup) — reload their visuals.
+        this.app.rehydrateVisuals();
+        this.showToast("已匯入專案");
+      } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
     });
     const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" }) as HTMLInputElement;
@@ -1010,6 +1131,9 @@ export class UI {
         planChoice("地墊 / 座位圖", "mats", "地墊座位圖"),
         planChoice("工作分區圖", "zones", "工作分區圖"),
         planChoice("物資清單圖", "inventory", "物資清單", { orientation: "portrait" }),
+        ...(this.app.hasFlow()
+          ? [planChoice("互動流程圖", "flow", "互動流程", { orientation: "portrait" })]
+          : []),
         planChoice("夥伴觀看圖", "partner", "夥伴觀看圖", { simplify: true, dims: false }),
       ]),
       el("div", { class: "subhead", text: "各組任務圖（只顯示該組需要的）" }),
@@ -1066,10 +1190,21 @@ export class UI {
       el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
       textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
-      el("div", { class: "subhead", text: "這個專案的版本（方案 A／方案 B／最後版）" }),
+      // Not 「這個專案的版本」: the store keeps ONE global list, so these are
+      // every plan's saved versions and 載入 will happily swap in another
+      // event's arrangement. Namespacing the key is a migration; saying what
+      // it does today is a string.
+      el("div", { class: "subhead", text: "已存的排法（所有專案共用一份清單）" }),
       el("div", { class: "row" }, [layoutName, button("儲存", () => {
-        const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
-        if (saved) { refreshList(); this.showToast("已儲存平面圖"); }
+        const name = layoutName.value.trim() || state().name;
+        // The field defaults to the project's own name, so pressing 儲存 twice
+        // silently replaced 方案 A — and the save takes no undo checkpoint, so
+        // the earlier arrangement was unrecoverable. 刪除, ten lines below,
+        // has always asked.
+        if (this.app.store.hasNamedLayout(name)
+          && !window.confirm(`已經有「${name}」了，要用現在的排法蓋掉它嗎？舊的排法無法復原。`)) return;
+        const saved = this.app.store.saveNamedLayout(name);
+        if (saved) { refreshList(); this.showToast(`已儲存「${name}」`); }
       })]),
       el("div", { class: "row" }, [layoutList,
         button("載入", () => {
@@ -1145,7 +1280,7 @@ export class UI {
       const desktopTitle = this.topbar.querySelector(".topbar__title");
       if (desktopTitle) desktopTitle.textContent = s.name || "平面場 ISO";
       setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-      setPressed(this.topbar, "flows", (b) => PRIMARY_WORKFLOWS[b].id === sess.workflow);
+      setPressed(this.topbar, "flows", (b) => primaryWorkflows(this.app)[b]?.id === sess.workflow);
       setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
       if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     }
@@ -1153,6 +1288,7 @@ export class UI {
     const viewBtn = this.topbar.querySelector(".topbar__view");
     if (viewBtn) viewBtn.textContent = viewLabel;
 
+    this.syncNav();
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
       b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow && this.sheet === "workflow")));
 
@@ -1167,7 +1303,9 @@ export class UI {
 
     // Smart layout + simulation live boxes.
     this.updateSmartBox();
-    if (sess.workflow === "route") refreshSimPanel(this.simPanelRoot, this.app);
+    // 模擬 is refreshed by rebuildLeft, which knows not to blow away a field
+    // the user is typing in — an extra refresh here would eat the caret.
+    if (sess.workflow === "route") refreshFlowPanel(this.simPanelRoot, this.app);
 
     // Partner Mode shell (replaces the editor chrome entirely).
     this.updatePartnerMode();

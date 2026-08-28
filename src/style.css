@@ -202,7 +202,7 @@ html, body {
 .chip--primary { border-color: var(--accent); background: rgba(56, 189, 248, 0.22); color: var(--accent-text); font-weight: 600; }
 .btn:hover, .chip:hover { background: var(--surface-hover); }
 .btn:active, .chip:active { transform: translateY(1px); }
-.chip[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent); }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent-text); }
 
 /* --- panels: shared skin ------------------------------------------------ */
 .left, .right {
@@ -283,9 +283,12 @@ html, body {
 .hint { margin: 0; font-size: 11px; color: var(--text-dim); line-height: 1.5; }
 .color { width: 40px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
 
+/* Themed, not hard-coded dark: this shipped as `rgba(2,6,23,.55)`, so the
+   readout — the block that carries every simulation number — rendered as a
+   near-black slab inside a white panel in the default light theme. */
 .readout {
   font-size: 12px; line-height: 1.7; padding: 8px 10px;
-  border-radius: 8px; background: rgba(2, 6, 23, 0.55); border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface-1); border: 1px solid var(--border);
 }
 .readout--warn { border-color: var(--danger); color: var(--bad-text); }
 
@@ -298,7 +301,7 @@ html, body {
   appearance: none; cursor: pointer; text-align: left;
   display: flex; align-items: center; gap: 8px;
   padding: 9px; border-radius: 10px;
-  border: 1px solid var(--border); background: rgba(30, 41, 59, 0.6); color: var(--text);
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
   transition: background 0.15s, border-color 0.15s, transform 0.05s;
 }
 .card:hover { background: var(--surface-hover); border-color: var(--accent); }
@@ -364,7 +367,7 @@ html, body {
 .nudgepad { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px; }
 .nudgepad .row { justify-content: center; }
 .nudgepad .chip { min-width: 44px; text-align: center; }
-.nudgestep[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent); }
+.nudgestep[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.2); color: var(--accent-text); }
 
 /* --- bottom nav --------------------------------------------------------- */
 .bottomnav { display: none; }
@@ -492,10 +495,10 @@ html, body {
   display: flex; flex-direction: column; gap: 2px;
   min-height: var(--tap); padding: 10px 12px;
   border: 1px solid var(--border); border-radius: 10px;
-  background: rgba(30, 41, 59, 0.6); color: var(--text); font: inherit;
+  background: var(--surface-2); color: var(--text); font: inherit;
 }
 .menuitem:hover { background: var(--surface-hover); }
-.menuitem--active { border-color: var(--accent); background: rgba(56, 189, 248, 0.18); color: var(--accent); }
+.menuitem--active { border-color: var(--accent); background: rgba(56, 189, 248, 0.18); color: var(--accent-text); }
 .menuitem--danger { border-color: var(--danger); color: var(--bad-text); }
 .menuitem__label { font-size: 13px; font-weight: 600; }
 .menuitem__sub { font-size: 11px; color: var(--text-dim); }
@@ -614,7 +617,7 @@ html, body {
 .partnerstep {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; font-size: 15px; line-height: 1.5;
-  border: 1px solid var(--border); border-radius: 12px; background: rgba(30, 41, 59, 0.45);
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1);
 }
 .partnerstep__no {
   flex: 0 0 auto; width: 26px; height: 26px; border-radius: 999px;
@@ -662,7 +665,7 @@ html, body {
   display: grid; grid-template-columns: minmax(0, 1.2fr) 1fr 18px 1fr;
   align-items: center; gap: 6px;
   padding: 8px 10px; font-size: 13px;
-  border: 1px solid var(--border); border-radius: 10px; background: rgba(2, 6, 23, 0.45);
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1);
 }
 .comparerow__label { color: var(--text-dim); }
 .comparerow__arrow { text-align: center; color: var(--text-dim); }
@@ -703,11 +706,24 @@ html, body {
   background: var(--scrim-strong); backdrop-filter: blur(3px); padding: 16px;
 }
 .quickstart__card {
-  width: 460px; max-width: 94vw; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;
-  background: var(--panel-solid); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 20px 60px var(--shadow-strong);
+  width: 500px; max-width: 94vw; padding: 24px; display: flex; flex-direction: column; gap: 12px;
+  background: var(--panel-solid); border: 1px solid rgba(15, 118, 110, .18); border-radius: 22px;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, .24);
 }
-.quickstart__title { font-size: 18px; font-weight: 700; }
+.quickstart__title { font-size: 22px; font-weight: 760; letter-spacing: -.02em; }
 .quickstart__steps { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; }
+.quickstart__recommended {
+  display: flex; flex-direction: column; gap: 7px; padding: 16px;
+  border: 1px solid rgba(13, 148, 136, .28); border-radius: 16px;
+  background: linear-gradient(145deg, #ecfdf5, #f0fdfa 62%, #f8fafc);
+  box-shadow: inset 0 1px rgba(255,255,255,.8);
+}
+.quickstart__recommended strong { font-size: 17px; color: #134e4a; }
+.quickstart__eyebrow {
+  align-self: flex-start; padding: 4px 8px; border-radius: 999px;
+  background: #ccfbf1; color: #0f766e; font-size: 11px; font-weight: 800; letter-spacing: .08em;
+}
+.quickstart__recommended .btn--big { margin-bottom: 0; text-align: center; }
 
 /* --- sim panel ---------------------------------------------------------- */
 .sim-panel-host { display: flex; flex-direction: column; gap: 8px; }
@@ -993,3 +1009,15 @@ html, body {
 
 /* The way back to 我的專案 is a real control on every size, not a menu item. */
 .topbar__home { flex: 0 0 auto; font-weight: 700; }
+
+/* --- prop studio --------------------------------------------------------- */
+.propstudio__card { max-width: 720px; max-height: 92vh; overflow-y: auto; }
+.propstudio__preview { align-items: flex-start; gap: 12px; }
+.propstudio__preview canvas {
+  border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface-2); flex: 0 0 auto;
+}
+.propstudio__color {
+  width: 34px; height: 34px; padding: 0; border: 1px solid var(--border);
+  border-radius: 8px; background: none; cursor: pointer;
+}
