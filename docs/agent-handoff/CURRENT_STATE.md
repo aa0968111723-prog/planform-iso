@@ -1,5 +1,63 @@
 # CURRENT_STATE（Claude Lead checkpoint）
 
+更新：2026-08-28
+
+## 最新一輪：通用互動流程系統（PR #19，未 merge）
+
+**環境**：使用者的 Windows 機器，`D:\planform-iso`。本機檔案讀得到
+（`D:\柏能資料\02_Club_淡大禪學社\`），Playwright 跑得動，dev server 跑得動。
+`grok` CLI 1.0.5 可執行；`claude` CLI 可執行但未登入，**沒有冒充它的輸出**。
+
+### 這一輪做完的事
+
+`docs/INTERACTION_FLOW_PLAN.md` 的 8 個 Step 全部完成：
+
+| Step | 內容 |
+|---|---|
+| 1 | parity fixture 先進版（`test/fixtures/e310-des.json`，六組跑法） |
+| 2 | `model.ts` 的互動型別 |
+| 3 | `interactionCompile.ts` 編譯器（純函式） |
+| 4 | `runInteraction` 引擎；`runDiscreteEvent` 變四行包裝，**fixture 零改動** |
+| 5 | `templateFromBooth` / `migrateInteraction` / `interactionPresets.ts`（心情 OK 蹦） |
+| 6 | `flowPanel.ts` 一個面板取代兩個；**刪掉 `boothFlow.ts` / `boothSimPanel.ts` / `simPanel.ts`** |
+| 7 | 場刊「互動流程」一頁 ＋ `state/templateLibrary.ts` |
+| 8 | 教室的「改成我自己的流程」＋ AI adapter 走互動流程 |
+
+### 現在的 gate 狀態
+
+| Gate | 結果 |
+|---|---|
+| lint / typecheck / build | PASS |
+| `npm run test` | 481 tests / 47 files PASS |
+| Playwright（全部，含 production project） | 114 PASS / 0 FAIL |
+| parity fixture | 零改動通過 |
+| 變異測試 | 新行為 26 個變異全部被擋下 |
+
+### 接手的人要知道的三件事
+
+1. **`boothFlow.ts` 不存在了。** 攤位的資料（站台型別、dwell、skip rate、
+   preset）搬到 `core/boothCatalog.ts`，語意逐字不變。`project.booth` 區塊
+   仍會寫進檔案、仍會被舊版 build 讀，但**新程式碼不再讀它跑模擬**——
+   `project.interaction` 一旦存在就永遠勝出。
+2. **parity fixture 是這個重構的憲法。** `test/eventFlowParity.test.ts` 一旦
+   變紅，就是教室的數字動了。**改 fixture 之前先確定你知道為什麼**，並在
+   commit message 寫清楚；「測試失敗」不是理由。
+3. **心情 OK 蹦的內容有出處，時間沒有。** 流程／題目／選項／16 句金句取自
+   社團自己的企劃書（`淡大擺攤區`，2026-02-14）；每一步的秒數與人流是估計值，
+   寫在 template 的 `note` 裡，面板與場刊都會印出來。**不要把它們當成量過的。**
+
+### 還沒做的
+
+- 真手機 GPU／觸控 smoke（需要實機）
+- production URL 與 PWA 驗證（需要部署環境）
+- Claude CLI 獨立審稿（本機未登入）
+- 稽核剩下的 P2 / P3（清單在 scratchpad `audit.json`，非阻擋項）
+
+---
+
+# 以下為 2026-08-21 的紀錄（多專案系統那一輪），保留備查
+
+# CURRENT_STATE（Claude Lead checkpoint）
 更新：2026-08-21 12:1x
 
 ## 0. ⚠ 環境 — 接手者必讀
