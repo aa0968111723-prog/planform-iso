@@ -22,7 +22,7 @@ import { venuePresetById } from "../src/core/venues";
 import { instantiatePropInteraction, propTemplateSkeleton } from "../src/core/interactionCompile";
 import { propPreset } from "../src/core/propPresets";
 import { planSymbolForEntry } from "../src/core/planSymbol";
-import { entryFromProp } from "../src/core/propCatalog";
+import { entryFromProp, propFaceOptions } from "../src/core/propCatalog";
 import {
   anchorPhrase,
   anchorSentences,
@@ -171,6 +171,71 @@ describe("per-frame station results", () => {
         expect(record.stepId).toContain(stationId.replace("prop_", ""));
       }
     }
+  });
+});
+
+describe("the face lookup names its own step", () => {
+  /**
+   * The bug this pins shipped in Step 4 and survived every unit test until a
+   * placed prop was looked at in a browser: insertion puts an ask-step
+   * (「要不要玩◯◯」, a two-option chance) at the SAME station and BEFORE the
+   * dice step, and the lookup used to take "the first chance step at this
+   * station". Every placed dice therefore painted 玩／路過 on its six faces.
+   *
+   * The tests missed it because a definition tested on its own has no
+   * ask-step in front of it — so the fixture here is the spliced flow, not
+   * the definition.
+   */
+  it("returns the six faces, not the ask-step's 玩／路過", () => {
+    const def = propPreset("prop_dice")!;
+    const flow = instantiatePropInteraction(propTemplateSkeleton(), def, "obj1");
+    // The trap really is present in the fixture, or this test proves nothing.
+    const askFirst = flow.steps.find(
+      (st) => st.stationId === "prop_obj1" && st.branch?.kind === "chance",
+    );
+    expect(askFirst?.id, "the ask-step comes first at this station").toBe("ask_prop_obj1");
+    expect((askFirst!.branch as { options: unknown[] }).options).toHaveLength(2);
+
+    const faces = propFaceOptions({ interaction: flow }, "obj1", def);
+    expect(faces).toHaveLength(6);
+    expect(faces!.map((o) => o.label)).toEqual(
+      ["第 1 面", "第 2 面", "第 3 面", "第 4 面", "第 5 面", "第 6 面"],
+    );
+  });
+
+  it("the engine's rolled optionId is findable among them — the 3D face can be picked", () => {
+    const def = propPreset("prop_dice")!;
+    const flow = instantiatePropInteraction(propTemplateSkeleton(), def, "obj1");
+    const result = runInteraction(flow, { sampleDt: 5 });
+    const rolled = new Set(
+      result.playback.flatMap((f) => Object.values(f.results ?? {})).map((r) => r.optionId),
+    );
+    expect(rolled.size, "the dice rolled").toBeGreaterThan(0);
+    const faces = propFaceOptions({ interaction: flow }, "obj1", def)!;
+    const ids = new Set(faces.map((o) => o.id));
+    for (const id of rolled) {
+      expect(ids.has(id), `rolled option ${id} must exist among the rendered faces`).toBe(true);
+    }
+  });
+
+  it("two placed copies each read their OWN faces", () => {
+    const def = propPreset("prop_dice")!;
+    let flow = instantiatePropInteraction(propTemplateSkeleton(), def, "objA");
+    flow = instantiatePropInteraction(flow, def, "objB");
+    const a = propFaceOptions({ interaction: flow }, "objA", def)!;
+    const b = propFaceOptions({ interaction: flow }, "objB", def)!;
+    expect(a).toHaveLength(6);
+    expect(b).toHaveLength(6);
+    // Editing A's first face must not change B's.
+    a[0].label = "A 改過";
+    expect(b[0].label).not.toBe("A 改過");
+  });
+
+  it("falls back to the definition's seed when the flow was stripped", () => {
+    const def = propPreset("prop_dice")!;
+    expect(propFaceOptions({ interaction: undefined }, "obj1", def)).toHaveLength(6);
+    // A prop with no game has no faces to offer.
+    expect(propFaceOptions({ interaction: undefined }, "obj1", propPreset("prop_table")!)).toBeUndefined();
   });
 });
 

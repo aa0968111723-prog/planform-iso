@@ -16,6 +16,7 @@
  * broken. That is the booth catalog's compatibility trick, reused verbatim.
  */
 
+import { propStepId } from "./interactionCompile";
 import type { AssetCatalogEntry } from "./catalog";
 import type { InteractionOption, Project, PropDefinition, ProjectCatalogExtra } from "./model";
 
@@ -90,11 +91,19 @@ export function syncPropEntries(
 /**
  * The face options a placed prop renders — the ONE record per face.
  *
- * The live copy is the bound station's chance step in `project.interaction`
+ * The live copy is the fragment's own chance step in `project.interaction`
  * (the panel edits that); before instantiation, or for a plan whose flow was
  * stripped by an older build, the definition's seed fragment stands in. Both
  * paths return the same shape, so the 3D face can never disagree with the
  * question behind it.
+ *
+ * The step is found by its DETERMINISTIC id, not by scanning the station for
+ * "the first chance step". That scan was wrong and shipped wrong: insertion
+ * puts an ask-step (「要不要玩◯◯」, two options) at the same station and
+ * BEFORE the dice step, so every placed dice was painting 玩／路過 on its six
+ * faces instead of the six faces. Found by looking at a real placed prop in
+ * the browser; the unit test missed it because a definition tested on its own
+ * has no ask-step in front of it.
  */
 export function propFaceOptions(
   project: Pick<Project, "interaction">,
@@ -102,17 +111,13 @@ export function propFaceOptions(
   def: PropDefinition | undefined,
 ): InteractionOption[] | undefined {
   const flow = project.interaction;
-  const station = flow?.stations.find((s) => s.objectId === objectId);
-  if (station) {
-    for (const step of flow!.steps) {
-      if (step.stationId !== station.id || step.branch?.kind !== "chance") continue;
-      return step.branch.options;
-    }
+  const seedStep = def?.interaction?.steps.find((s) => s.branch?.kind === "chance");
+  if (flow && seedStep) {
+    const liveId = propStepId(objectId, seedStep.id);
+    const live = flow.steps.find((s) => s.id === liveId);
+    if (live?.branch?.kind === "chance") return live.branch.options;
   }
-  for (const step of def?.interaction?.steps ?? []) {
-    if (step.branch?.kind === "chance") return step.branch.options;
-  }
-  return undefined;
+  return seedStep?.branch?.kind === "chance" ? seedStep.branch.options : undefined;
 }
 
 /** Find the definition a placed object points at, if any. */

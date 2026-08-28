@@ -271,6 +271,18 @@ function propAskId(objectId: string): string {
   return `ask_prop_${objectId}`;
 }
 
+/**
+ * The live id a definition's step gets once spliced onto `objectId`.
+ *
+ * Exported because the face lookup has to name the fragment's OWN chance step:
+ * scanning the station for "the first chance step" finds the ask-step
+ * (「要不要玩」) that insertion put in front of it, which is also at this
+ * station and also a chance branch.
+ */
+export function propStepId(objectId: string, defStepId: string): string {
+  return `p_${objectId}_${defStepId}`;
+}
+
 /** Rewire every terminal (step nulls, option nulls, last-row fall-through). */
 function rewireTerminals(steps: InteractionStep[], target: string): InteractionStep[] {
   const out = steps.map((step) => ({

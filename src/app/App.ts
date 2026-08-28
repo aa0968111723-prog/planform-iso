@@ -53,6 +53,8 @@ import {
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
 import type { PlaybackStationResult } from "../core/eventFlow";
+import { anchorSentences, stationNow } from "../core/rehearsal";
+import type { AnchorSentence, StationNowReadout } from "../core/rehearsal";
 import { absorbSelection, forkDefinition } from "../core/propEdit";
 import {
   catalogFromProject,
@@ -197,6 +199,8 @@ export interface PartnerSession {
   timeline: RehearsalEvent[];
   /** Pending AI suggestion, shown as a visual before/after. */
   suggestion: PartnerSuggestion | null;
+  /** §85: the interactive station a volunteer tapped, if any. */
+  stationObjectId: string | null;
   /** True while a rehearsal or suggestion is being computed. */
   busy: boolean;
 }
@@ -1322,7 +1326,7 @@ export class App {
    */
   enterPartnerMode(role: PartnerRole = "all"): void {
     this.partnerReturnView = this.state.view;
-    this.session.partner = { role, timeline: [], suggestion: null, busy: false };
+    this.session.partner = { role, timeline: [], suggestion: null, busy: false, stationObjectId: null };
     this.session.selection = new Set();
     this.cancelPlacement();
     if (this.session.mode === "measure") this.stopMeasure();
@@ -1367,6 +1371,59 @@ export class App {
 
   partnerMarks(): PartnerMark[] {
     return partnerMarks(this.session.issues);
+  }
+
+  /**
+   * §85 — the four 「你站這裡／參加者站這裡／排隊從這裡開始／完成後往這裡走」
+   * sentences for a placed prop, or null when the object is not one.
+   */
+  propAnchorGuide(objectId: string): { name: string; lines: AnchorSentence[] } | null {
+    const obj = this.state.objects.find((o) => o.id === objectId);
+    const def = obj ? propForAssetId(this.state.props, obj.assetId) : undefined;
+    if (!def?.anchors.length) return null;
+    return { name: def.name, lines: anchorSentences(def) };
+  }
+
+  /**
+   * §26 — what the station bound to this object is doing right now. Null when
+   * the object has no station, so the panel simply says nothing rather than
+   * inventing a rehearsal that is not running.
+   */
+  propStationNow(objectId: string): StationNowReadout | null {
+    const stations = this.lastFlow?.stations ?? this.state.interaction?.stations ?? [];
+    const station = stations.find((s) => s.objectId === objectId);
+    if (!station) return null;
+    const result = this.session.simStationResults[station.id];
+    // The step the fork leads into: honest for one server, an approximation
+    // when several people are being served at once (documented in stationNow).
+    let nextStepName: string | null = null;
+    const steps = this.lastFlow?.steps ?? this.state.interaction?.steps ?? [];
+    if (result) {
+      const i = steps.findIndex((s) => s.id === result.stepId);
+      if (i >= 0) {
+        const option = steps[i].branch?.kind === "chance"
+          ? steps[i].branch.options.find((o) => o.id === result.optionId)
+          : undefined;
+        const target = option?.next === undefined ? steps[i + 1]?.id : option.next;
+        nextStepName = steps.find((s) => s.id === target)?.name ?? null;
+      }
+    }
+    const serving = this.session.simPositions.filter(
+      (p) => p.state === "serving" && this.nearStation(p, station),
+    ).length;
+    return stationNow({
+      stationId: station.id,
+      result,
+      nextStepName,
+      now: this.session.simTime,
+      serving,
+      queued: this.session.simQueues[station.id] ?? 0,
+    });
+  }
+
+  /** A served figure stands ON its station; 60 cm is well inside one lane. */
+  private nearStation(p: { x: number; z: number }, station: { x: number; z: number }): boolean {
+    return Math.hypot(p.x - station.x, p.z - station.z) < 0.6;
   }
 
   partnerStatus(): { tone: "bad" | "warn" | "ok"; text: string } {
@@ -2346,8 +2403,14 @@ export class App {
     if (this.pointers.size >= 2) { this.abortDrag(); this.scene.setControlsEnabled(true); return; }
 
     // Partner Mode is read-only: a volunteer looking at the plan must not be
-    // able to select or drag the furniture. Camera gestures still work.
-    if (this.session.partner) { this.scene.setControlsEnabled(true); return; }
+    // able to select or drag the furniture. Camera gestures still work — but a
+    // TAP on an interactive station is how §85 gets asked, so remember where
+    // the finger went down and decide on the way up.
+    if (this.session.partner) {
+      this.scene.setControlsEnabled(true);
+      this.partnerTapStart = { x: e.clientX, y: e.clientY };
+      return;
+    }
 
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 
@@ -2480,8 +2543,28 @@ export class App {
     }
   }
 
+  /** Where a Partner Mode finger went down, to tell a tap from an orbit. */
+  private partnerTapStart: { x: number; y: number } | null = null;
+
   private onPointerUp(e?: PointerEvent): void {
     if (e) this.pointers.delete(e.pointerId);
+    // §85: tapping an interactive station asks 「我站哪裡？」. Still read-only —
+    // this sets no selection and moves nothing.
+    if (this.session.partner && this.partnerTapStart && e) {
+      const start = this.partnerTapStart;
+      this.partnerTapStart = null;
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD) {
+        const pick = this.scene.pick(e.clientX, e.clientY);
+        const guide = pick?.type === "object" ? this.propAnchorGuide(pick.id) : null;
+        const next = guide ? pick!.id : null;
+        if (this.session.partner.stationObjectId !== next) {
+          this.session.partner.stationObjectId = next;
+          this.notifyUi();
+        }
+      }
+      return;
+    }
+    this.partnerTapStart = null;
     if (this.pointers.size >= 1 && this.drag) return; // still mid multi-touch gesture
     const drag = this.drag;
     this.drag = null;

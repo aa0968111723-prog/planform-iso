@@ -79,6 +79,21 @@ function faceOptions(def: PropDefinition): InteractionOption[] {
   return step?.branch?.kind === "chance" ? step.branch.options : [];
 }
 
+/**
+ * The stations whose result a display part can show: placed props that
+ * actually have a bound station. Ids are the deterministic `prop_<objectId>`,
+ * so the link survives a save/reload and the old-build re-bind pass.
+ */
+function resultSources(app: App): { stationId: string; label: string }[] {
+  const project = app.store.getState();
+  const out: { stationId: string; label: string }[] = [];
+  for (const station of project.interaction?.stations ?? []) {
+    if (!station.objectId) continue;
+    out.push({ stationId: station.id, label: station.name });
+  }
+  return out;
+}
+
 export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
   const overlay = el("div", { class: "quickstart propstudio" });
   const card = el("div", { class: "quickstart__card propstudio__card" });
@@ -263,6 +278,17 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
             part.offset = relatePartOffset(draft.parts[i - 1], part.size, rel);
             touch();
           }, "chip chip--sm")) : []),
+      ]));
+      // §32 「這個結果要顯示在哪個道具上？」 — one select, no node editor.
+      // Only DISPLAY connections in this version: 「按鈕啟動轉盤」 (a CONTROL
+      // connection) is deliberately absent and is listed in the PR body.
+      partRows.push(el("div", { class: "row wrap" }, [
+        el("span", { class: "hint", text: "彩排時顯示" }),
+        selectField("", [
+          { value: "", label: "不顯示結果" },
+          { value: "self", label: "這個道具自己的結果" },
+          ...resultSources(app).map((src) => ({ value: src.stationId, label: `${src.label} 的結果` })),
+        ], part.showsResultOf ?? "", (v) => { part.showsResultOf = v || undefined; touch(); }),
       ]));
     });
     partRows.push(button("＋ 加零件", () => {
