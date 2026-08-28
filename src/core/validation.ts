@@ -8,10 +8,12 @@
 import { assetDef } from "./assets";
 import { BOOTH_OVERLAP_EXEMPT, boothCatalogEntry } from "./boothCatalog";
 import { isBoothProject } from "./boothCatalog";
+import { propForAssetId } from "./propCatalog";
 import {
   DEFAULT_VALIDATION_SETTINGS,
   type ObjectKind,
   type Project,
+  type PropDefinition,
   type SceneObject,
   type ValidationSettings,
 } from "./model";
@@ -105,6 +107,11 @@ export function validateProject(project: Project, settings?: ValidationSettings)
   // pair — one problem should produce one line, not two.
   const booth = isBoothProject(project);
   const boothOverlapPairs = new Set<string>();
+  // Prop checks apply to ANY plan with definitions — a dice station in a
+  // classroom is as capable of putting its player in a wall as one in a booth.
+  for (const raw of propValidationIssues(project)) {
+    issues.push({ ...raw, id: `iss_${n++}` });
+  }
   if (booth) {
     for (const raw of boothValidationIssues(project, cfg, boothOverlapPairs)) {
       push(raw.severity, raw.code, raw.shortTitle, raw.message, raw.targetId, raw.focus, raw.suggestedAction);
@@ -492,4 +499,78 @@ function mid(a: { x?: number; z?: number; cx?: number; cz?: number }, b: { x?: n
 
 function midB(a: Bounds, b: Bounds): { x: number; z: number } {
   return { x: ((a.minX + a.maxX) / 2 + (b.minX + b.maxX) / 2) / 2, z: ((a.minZ + a.maxZ) / 2 + (b.minZ + b.maxZ) / 2) / 2 };
+}
+
+/**
+ * Prop-specific checks (§63) — the rehearsal only means something when the
+ * places it puts people can physically hold them.
+ *
+ * Modest by design: the anchors are advisory geometry, so these are warnings
+ * that point at a spot, never errors that block a share.
+ */
+export function propValidationIssues(project: Project): Omit<Issue, "id">[] {
+  const defs = project.props;
+  if (!defs?.length) return [];
+  const out: Omit<Issue, "id">[] = [];
+  const rooms = [project.classroom, project.corridor];
+  const inside = (x: number, z: number) =>
+    rooms.some((r) => x >= r.x - 1e-6 && x <= r.x + r.length + 1e-6 && z >= r.z - 1e-6 && z <= r.z + r.width + 1e-6);
+
+  interface PlacedProp { obj: Project["objects"][number]; def: PropDefinition }
+  const placed: PlacedProp[] = [];
+  for (const obj of project.objects) {
+    if (obj.hidden) continue;
+    const def = propForAssetId(defs, obj.assetId);
+    if (def) placed.push({ obj, def });
+  }
+
+  for (const { obj, def } of placed) {
+    const rad = (obj.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const world = (ax: number, az: number) => ({
+      x: obj.x + ax * cos + az * sin,
+      z: obj.z - ax * sin + az * cos,
+    });
+    for (const anchor of def.anchors) {
+      if (anchor.role !== "player" && anchor.role !== "staff") continue;
+      const pos = world(anchor.x, anchor.z);
+      if (!inside(pos.x, pos.z)) {
+        out.push({
+          severity: "warning",
+          code: "prop-anchor-outside",
+          shortTitle: "站位在場地外",
+          message: `「${def.name}」的${anchor.role === "player" ? "參加者" : "工作人員"}站位落在場地外——把道具往內移或轉個方向`,
+          targetId: obj.id,
+          focus: pos,
+          suggestedAction: "把道具往場地內移動或旋轉",
+        });
+      }
+    }
+  }
+
+  // §18 — two interactive stations too close: their operating circles overlap.
+  for (let i = 0; i < placed.length; i++) {
+    for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i];
+      const b = placed[j];
+      if (!a.def.interaction || !b.def.interaction) continue;
+      const ra = a.def.interactionZone ?? 1;
+      const rb = b.def.interactionZone ?? 1;
+      const dist = Math.hypot(a.obj.x - b.obj.x, a.obj.z - b.obj.z);
+      if (dist < ra + rb) {
+        out.push({
+          severity: "warning",
+          code: "prop-zone-overlap",
+          shortTitle: "互動站太近",
+          message: `「${a.def.name}」和「${b.def.name}」的互動範圍重疊，高峰時容易互相干擾`,
+          targetId: b.obj.id,
+          focus: { x: (a.obj.x + b.obj.x) / 2, z: (a.obj.z + b.obj.z) / 2 },
+          suggestedAction: "把兩個互動站拉開一點",
+        });
+      }
+    }
+  }
+
+  return out;
 }

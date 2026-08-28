@@ -21,6 +21,7 @@ import {
 } from "./boothCatalog";
 import type {
   AudienceSegment,
+  PropDefinition,
   BoothConfig,
   BoothStation,
   EventScenario,
@@ -243,6 +244,258 @@ export function templateFromBooth(booth: BoothConfig, name = "攤位人流"): In
     seed: BOOTH_DEFAULT_SEED,
     settings: { speedMetersPerSecond: BOOTH_WALK_SPEED },
   };
+}
+
+// --- prop instantiation -----------------------------------------------------
+//
+// The wiring contract, in code. `next: undefined` means "the next row", so a
+// fragment appended without rules is either unreachable (every existing flow
+// ends in an explicit null) or compulsory (a booth chain falls through into
+// it). The contract:
+//   - the fragment arrives SEALED: its last step ends in an explicit null and
+//     every internal jump is an explicit id (the presets are tested for this);
+//   - insertion rewires the CURRENT terminals (explicit nulls on steps and
+//     chance options, plus the last row's fall-through) to an ask-step whose
+//     skip walks past the fragment — booth-style sequential visiting with a
+//     per-prop skip rate;
+//   - removal rewires everything pointing INTO the fragment back to what the
+//     ask's skip pointed at, restoring the pre-insertion meaning — never a
+//     bare row delete.
+
+/** The deterministic station id — also what re-binds after an old-build save. */
+export function propStationId(objectId: string): string {
+  return `prop_${objectId}`;
+}
+
+function propAskId(objectId: string): string {
+  return `ask_prop_${objectId}`;
+}
+
+/** Rewire every terminal (step nulls, option nulls, last-row fall-through). */
+function rewireTerminals(steps: InteractionStep[], target: string): InteractionStep[] {
+  const out = steps.map((step) => ({
+    ...step,
+    ...(step.next === null ? { next: target } : {}),
+    ...(step.branch?.kind === "chance"
+      ? {
+        branch: {
+          ...step.branch,
+          options: step.branch.options.map((o) => (o.next === null ? { ...o, next: target } : o)),
+        },
+      }
+      : {}),
+  }));
+  const last = out[out.length - 1];
+  if (last && last.next === undefined) {
+    out[out.length - 1] = { ...last, next: target };
+  }
+  return out;
+}
+
+/** A minimal template for a plan whose first flow IS a prop (bootstrap). */
+export function propTemplateSkeleton(name = "攤位流程"): InteractionTemplate {
+  return {
+    id: uid("flow"),
+    name,
+    steps: [],
+    startStepId: "",
+    stations: [],
+    staff: [],
+    audience: {
+      // Estimates, same honesty rule as every preset: replace with a stopwatch.
+      count: 60,
+      windowSeconds: 3600,
+      profile: "uniform",
+      stopRate: 1,
+      joinRate: 1,
+      patienceSeconds: 0,
+    },
+    segments: [],
+    seed: 20260302,
+    settings: { speedMetersPerSecond: 1.15 },
+  };
+}
+
+/**
+ * Splice a prop's interaction into the template, bound to a placed object.
+ *
+ * Copies of one definition each get their own splice (their own ask, steps
+ * and station) — a visitor walks past each station and decides at each, which
+ * is what a booth with two dice tables is actually like. Their stations may
+ * share one staff role by name; `allocateStaff` splits that role's people
+ * STATICALLY, so one person over two stations leaves the second at zero
+ * servers, stalled and named by the staff-load line. That satisfies §55's
+ * literal requirement (one person cannot serve two at once); it is not
+ * round-robin service, and no readout pretends otherwise.
+ */
+export function instantiatePropInteraction(
+  template: InteractionTemplate,
+  def: PropDefinition,
+  objectId: string,
+): InteractionTemplate {
+  const seed = def.interaction;
+  if (!seed || !seed.steps.length) return template;
+  const stationId = propStationId(objectId);
+  if (template.stations.some((s) => s.id === stationId)) return template;
+
+  const prefix = `p_${objectId}_`;
+  const idMap = new Map(seed.steps.map((st) => [st.id, `${prefix}${st.id}`]));
+  const remap = (id: string | null | undefined): string | null | undefined =>
+    typeof id === "string" ? idMap.get(id) ?? null : id;
+
+  const fragment: InteractionStep[] = seed.steps.map((st, i) => ({
+    ...st,
+    id: idMap.get(st.id)!,
+    stationId,
+    next: i === seed.steps.length - 1 ? null : remap(st.next),
+    ...(st.branch?.kind === "chance"
+      ? {
+        branch: {
+          ...st.branch,
+          options: st.branch.options.map((o) => ({ ...o, next: remap(o.next) })),
+        },
+      }
+      : {}),
+  }));
+  // The seal lives in the mapping above: the last step's next is forced to
+  // null regardless of what the seed said. A fragment that leaks into rows it
+  // does not own is exactly the bug the contract exists to prevent.
+
+  // Staff role: reuse by name so copies share one crew.
+  let staff = template.staff;
+  let staffRoleId: string | undefined;
+  if (seed.staffRole) {
+    const existing = staff.find((r) => r.name === seed.staffRole!.name);
+    if (existing) {
+      staffRoleId = existing.id;
+    } else {
+      staffRoleId = uid("role");
+      staff = [...staff, { id: staffRoleId, name: seed.staffRole.name, count: seed.staffRole.count }];
+    }
+  }
+
+  const playerAnchor = def.anchors.find((a) => a.role === "player");
+  const queueAnchor = def.anchors.find((a) => a.role === "queue");
+  const station: InteractionStation = {
+    id: stationId,
+    name: def.name,
+    type: "custom",
+    x: 0,
+    z: 0,
+    staffCount: seed.staffRole?.count ?? 1,
+    parallelServers: seed.station.parallelServers,
+    meanServiceSeconds: seed.station.meanServiceSeconds,
+    queueCapacity: seed.station.queueCapacity,
+    ...(seed.station.selfService ? { selfService: true } : {}),
+    ...(staffRoleId ? { staffRoleId } : {}),
+    objectId,
+    ...(playerAnchor ? { anchorOffset: { x: playerAnchor.x, z: playerAnchor.z } } : {}),
+    ...(queueAnchor?.facingDeg !== undefined ? { queueDirectionDeg: queueAnchor.facingDeg } : {}),
+  };
+
+  const skipRate = Math.min(1, Math.max(0, seed.skipRate ?? 0));
+  const firstFragmentId = fragment[0].id;
+  const entrySteps: InteractionStep[] = [];
+  let entryId = firstFragmentId;
+  if (skipRate > 0) {
+    entryId = propAskId(objectId);
+    entrySteps.push({
+      id: entryId,
+      name: `要不要玩「${def.name}」`,
+      stationId,
+      // A decision, not a visit: zero seconds queues for nothing.
+      avgSeconds: 0,
+      branch: {
+        kind: "chance",
+        options: [
+          { id: "join", label: def.name, weight: 1 - skipRate, next: firstFragmentId },
+          { id: "skip", label: "路過", weight: skipRate, next: null },
+        ],
+      },
+    });
+  }
+
+  const rewired = template.steps.length ? rewireTerminals(template.steps, entryId) : [];
+  const steps = [...rewired, ...entrySteps, ...fragment];
+  const startStepId = template.steps.length ? template.startStepId : entryId;
+  const segments = template.segments.length
+    ? template.segments
+    : [{ id: "all", name: "訪客", share: 1, startStepId: entryId }];
+
+  return {
+    ...template,
+    steps,
+    startStepId: startStepId || entryId,
+    stations: [...template.stations, station],
+    staff,
+    segments,
+  };
+}
+
+/**
+ * Undo one prop's splice, restoring the pre-insertion meaning.
+ *
+ * Returns null when nothing remains — the caller drops `project.interaction`
+ * entirely, putting a classroom plan back on its quick-setup path.
+ */
+export function removePropInteraction(
+  template: InteractionTemplate,
+  objectId: string,
+): InteractionTemplate | null {
+  const stationId = propStationId(objectId);
+  const askId = propAskId(objectId);
+  const prefix = `p_${objectId}_`;
+  const fragmentIds = new Set(
+    template.steps.filter((s) => s.id === askId || s.id.startsWith(prefix)).map((s) => s.id),
+  );
+  if (!fragmentIds.size && !template.stations.some((s) => s.id === stationId)) return template;
+
+  // What the visit continues to after the fragment: the ask's skip target, or
+  // (no ask) whatever the sealed final step now points at.
+  const ask = template.steps.find((s) => s.id === askId);
+  const skipOption = ask?.branch?.kind === "chance"
+    ? ask.branch.options.find((o) => o.id === "skip")
+    : undefined;
+  const fragmentSteps = template.steps.filter((s) => s.id.startsWith(prefix));
+  const continuation: string | null =
+    (skipOption ? skipOption.next : fragmentSteps[fragmentSteps.length - 1]?.next) ?? null;
+
+  const redirect = (id: string | null | undefined): string | null | undefined =>
+    typeof id === "string" && fragmentIds.has(id) ? continuation : id;
+
+  const steps = template.steps
+    .filter((s) => !fragmentIds.has(s.id))
+    .map((step) => ({
+      ...step,
+      ...(step.next !== undefined ? { next: redirect(step.next) } : {}),
+      ...(step.branch?.kind === "chance"
+        ? {
+          branch: {
+            ...step.branch,
+            options: step.branch.options.map((o) =>
+              o.next !== undefined ? { ...o, next: redirect(o.next) } : o),
+          },
+        }
+        : {}),
+    }));
+
+  if (!steps.length) return null;
+
+  const stations = template.stations.filter((s) => s.id !== stationId);
+  const removed = template.stations.find((s) => s.id === stationId);
+  // A role nobody staffs any more goes too — a dangling staffRoleId opens
+  // zero servers and stalls silently.
+  const staff = removed?.staffRoleId
+    && !stations.some((s) => s.staffRoleId === removed.staffRoleId)
+    ? template.staff.filter((r) => r.id !== removed.staffRoleId)
+    : template.staff;
+
+  const stepIds = new Set(steps.map((s) => s.id));
+  const startStepId = stepIds.has(template.startStepId) ? template.startStepId : steps[0].id;
+  const segments = template.segments.map((seg) =>
+    stepIds.has(seg.startStepId) ? seg : { ...seg, startStepId: steps[0].id });
+
+  return { ...template, steps, startStepId, stations, staff, segments };
 }
 
 // --- reading a template ----------------------------------------------------

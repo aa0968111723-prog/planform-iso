@@ -27,6 +27,9 @@ import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
 import { BOOTH_ZONE_ROLES, isBoothProject } from "../core/boothCatalog";
 import {
   addStep,
+  instantiatePropInteraction,
+  propTemplateSkeleton,
+  removePropInteraction,
   duplicateStep,
   moveStep,
   removeStep,
@@ -47,6 +50,7 @@ import {
   type TemplateMeta,
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
+import { propForAssetId } from "../core/propCatalog";
 import {
   catalogFromProject,
   createDefaultScenario,
@@ -587,8 +591,43 @@ export class App {
       if (table) obj.parentId = table.id;
     }
     this.store.mutate((p) => p.objects.push(obj));
+    this.bindPropOnPlace(obj);
     this.setSelection([id]);
     // Stay in placement mode for continuous placing.
+  }
+
+  /**
+   * An interactive prop is a station the moment it lands (§53): splice its
+   * fragment into the flow, bound to this object, so 演練一次 works without a
+   * single further step.
+   *
+   * The bootstrap is NOT silent. A classroom plan's quick setup is compiled to
+   * a step list first (bit-identical numbers — templateFromScenario's whole
+   * contract) and the toast says so; a fresh plan gets a skeleton and the
+   * toast says that. A canvas drop that silently changed what the 模擬 tab IS
+   * would be the kind of side effect nobody can trace.
+   */
+  private bindPropOnPlace(obj: SceneObject): void {
+    const def = propForAssetId(this.state.props, obj.assetId);
+    if (!def?.interaction) return;
+    let announced: string | null = null;
+    this.store.mutate((p) => {
+      if (!p.interaction) {
+        const scenario = p.activeScenarioId
+          ? p.scenarios.find((s) => s.id === p.activeScenarioId) ?? p.scenarios[0]
+          : p.scenarios[0];
+        if (scenario) {
+          p.interaction = templateFromScenario(scenario);
+          announced = "已把快速設定展開成步驟列表，加上「" + def.name + "」";
+        } else {
+          p.interaction = propTemplateSkeleton();
+          announced = "已建立互動流程：「" + def.name + "」";
+        }
+      }
+      p.interaction = instantiatePropInteraction(p.interaction, def, obj.id);
+    });
+    this.resetFlowRun();
+    if (announced) this.toast(announced, true);
   }
 
   // --- zones -------------------------------------------------------------
@@ -897,8 +936,19 @@ export class App {
       p.zones = p.zones.filter((z) => !ids.has(z.id));
       p.groups = p.groups.filter((g) => !ids.has(g.id));
       p.routes = p.routes.filter((r) => !ids.has(r.id));
+      // A deleted prop takes its splice out with it — restoring the flow's
+      // pre-insertion meaning, never leaving a zombie station queueing people
+      // at a table that no longer exists.
+      if (p.interaction) {
+        for (const id of ids) {
+          const next = removePropInteraction(p.interaction, id);
+          if (next === null) { delete p.interaction; break; }
+          p.interaction = next;
+        }
+      }
     });
     this.session.selection = new Set();
+    this.resetFlowRun();
     this.notifyUi();
   }
 
@@ -913,12 +963,17 @@ export class App {
   duplicateSelection(): void {
     const ids = this.session.selection;
     const newIds: string[] = [];
+    const copiedObjects: SceneObject[] = [];
     this.store.mutate((p) => {
-      for (const o of [...p.objects]) if (ids.has(o.id)) { const c = { ...o, id: uid("obj"), x: o.x + 0.4, z: o.z + 0.4, locked: false, parentId: undefined }; p.objects.push(c); newIds.push(c.id); }
+      for (const o of [...p.objects]) if (ids.has(o.id)) { const c = { ...o, id: uid("obj"), x: o.x + 0.4, z: o.z + 0.4, locked: false, parentId: undefined }; p.objects.push(c); newIds.push(c.id); copiedObjects.push(c); }
       for (const g of [...p.groups]) if (ids.has(g.id)) { const c = { ...g, id: uid("grp"), anchorX: g.anchorX + 0.4, anchorZ: g.anchorZ + 0.4, locked: false }; p.groups.push(c); newIds.push(c.id); }
       for (const z of [...p.zones]) if (ids.has(z.id)) { const c = { ...z, id: uid("zone"), x: z.x + 0.4, z: z.z + 0.4, locked: false }; p.zones.push(c); newIds.push(c.id); }
     });
     if (newIds.length) this.setSelection(newIds);
+    // A copied interactive prop is a second station (§55): its own splice,
+    // sharing the original's staff role by name. One person over two stations
+    // splits statically — the second stalls and the staff-load line says so.
+    for (const c of copiedObjects) this.bindPropOnPlace(c);
   }
 
   toggleLockSelection(): void {

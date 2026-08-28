@@ -270,7 +270,28 @@ export function queuePlacement(
   let direction: SpatialPoint = { x: -1, z: 0 };
   let available = Number.POSITIVE_INFINITY;
   let lanes = 1;
-  if (room) {
+  // A prop's queue anchor says which way the line forms. Only when the field
+  // exists — the classroom path never sets it, so the frozen parity runs keep
+  // their room-side heuristic bit for bit.
+  const queueDeg = (station as { queueDirectionDeg?: number }).queueDirectionDeg;
+  // Which way lanes stack sideways. The room-side heuristic has always put
+  // its lanes straight along +z — that exact vector is kept for that path, so
+  // the frozen runs keep their coordinates bit for bit; an anchored direction
+  // stacks its lanes perpendicular to the line instead.
+  let lateralDir: SpatialPoint = { x: 0, z: 1 };
+  if (queueDeg !== undefined && room) {
+    const rad = (queueDeg * Math.PI) / 180;
+    direction = { x: Math.sin(rad), z: Math.cos(rad) };
+    lateralDir = { x: -direction.z, z: direction.x };
+    // Available run: distance from the station to the room edge along the line.
+    const toEdge = (pos: number, dir: number, min: number, max: number) =>
+      dir > 1e-6 ? (max - pos) / dir : dir < -1e-6 ? (min - pos) / dir : Number.POSITIVE_INFINITY;
+    available = Math.max(0.6, Math.min(
+      toEdge(station.x, direction.x, room.x, room.x + room.length),
+      toEdge(station.z, direction.z, room.z, room.z + room.width),
+    ));
+    lanes = Math.max(1, Math.floor((room === spatial?.corridor ? room.width : 3) / 0.6) - 1);
+  } else if (room) {
     if (room === spatial?.corridor) {
       // Corridor: the line forms on the approach side (back toward the
       // corridor start, where people come from). A wider corridor lets the
@@ -307,8 +328,8 @@ export function queuePlacement(
   const lane = lanes > 0 ? laneIndex % lanes : 0;
   const lateral = lane === 0 ? 0 : (lane % 2 === 1 ? 1 : -1) * Math.ceil(lane / 2) * 0.6;
   const point = {
-    x: station.x + direction.x * spacing * (inLane + 1),
-    z: station.z + lateral,
+    x: station.x + direction.x * spacing * (inLane + 1) + lateralDir.x * lateral,
+    z: station.z + direction.z * spacing * (inLane + 1) + lateralDir.z * lateral,
   };
   // Nobody queues outside the building.
   //

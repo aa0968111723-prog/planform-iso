@@ -713,7 +713,24 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
 /** Resolve spatial bindings against the current project without mutating either input. */
 export function resolveStationPosition(project: Project, station: ServiceStation): { x: number; z: number } {
   const object = station.objectId && project.objects.find((item) => item.id === station.objectId && !item.hidden);
-  if (object) return { x: object.x, z: object.z };
+  if (object) {
+    // A prop's player anchor: the station stands where PEOPLE stand, not at
+    // the object's centre, and it turns with the object. Strictly gated on
+    // the field being present — absent returns the byte-identical centre
+    // every pre-prop plan has always used, which is what keeps the frozen
+    // classroom runs frozen.
+    const offset = (station as InteractionStation).anchorOffset;
+    if (offset) {
+      const rad = (object.rotationDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      return {
+        x: object.x + offset.x * cos + offset.z * sin,
+        z: object.z - offset.x * sin + offset.z * cos,
+      };
+    }
+    return { x: object.x, z: object.z };
+  }
   const zone = station.zoneId && project.zones.find((item) => item.id === station.zoneId && !item.hidden);
   if (zone) return { x: zone.x, z: zone.z };
   return { x: station.x, z: station.z };
