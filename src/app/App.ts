@@ -491,6 +491,10 @@ export class App {
     const c = this.centerOfClassroom();
     this.updateGhostAt(c.x, c.z);
     this.notifyUi();
+    // Placement mode is otherwise silent: the ghost appears in the middle of
+    // the room and nothing says the next tap puts it down. 「怎麼放到攤位」 was
+    // a blind tester's second blocker.
+    this.toast(`點畫面選位置放下「${entry.name}」`);
   }
 
   /**

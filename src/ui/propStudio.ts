@@ -325,7 +325,10 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
           type: "color", class: "propstudio__color", value: part.color ?? "#8fb4c9",
           onchange: (e: Event) => { part.color = (e.target as HTMLInputElement).value; touch(); },
         } as never),
-        textField("文字", part.text ?? "", (v) => { part.text = v || undefined; touch(); }),
+        // Not just 「文字」: a tester could not tell whether a dice face's
+        // question went here or in the face table below, and the two do very
+        // different things. This one is paint.
+        textField("印在這塊上的字", part.text ?? "", (v) => { part.text = v || undefined; touch(); }),
         ...(overlaps.has(part.id) ? [el("span", { class: "hint", text: "⚠ 和別的零件穿插" })] : []),
         ...(draft.parts.length > 1
           ? [button("刪", () => { draft.parts.splice(i, 1); touch(); }, "chip chip--sm")]
@@ -455,6 +458,7 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
       const step = faceStep(draft);
       if (step?.branch?.kind === "chance") {
         interactionRows.push(el("div", { class: "subhead", text: `「${step.name}」會抽到什麼` }));
+        interactionRows.push(el("p", { class: "hint", text: "每一面的題目寫在這裡（不是零件的「印在這塊上的字」）。" }));
         interactionRows.push(el("div", { class: "row wrap" }, [
           el("span", { class: "readout__label", text: "面數：" }),
           ...[2, 4, 6, 8, 10, 12].map((n) => button(String(n), () => { setFaceCount(n); touch(); },
