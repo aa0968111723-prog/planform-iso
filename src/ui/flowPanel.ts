@@ -395,6 +395,17 @@ function patchOption(
 }
 
 /**
+ * A cell header short enough to sit in front of a text box.
+ *
+ * The club's own option wording is a sentence — 「人際／感情（心好累）」 — and
+ * repeating it in front of all sixteen boxes buries the answers. Their paper
+ * matrix used the first word of each, so this does too.
+ */
+function shortLabel(label: string): string {
+  return label.split("（")[0].split("／")[0].trim() || label;
+}
+
+/**
  * The outcome table, drawn as a table — which is how the club drew it on paper.
  * Rows are the first remembered question's options, columns the second's.
  */
@@ -417,14 +428,14 @@ function matchRows(app: App, t: InteractionTemplate, step: InteractionStep): HTM
     branch.rules.find((r) => r.when.length === when.length && r.when.every((w, i) => w === when[i]));
 
   for (const rowOption of down.options) {
-    const cells: HTMLElement[] = [el("span", { class: "readout__label", text: rowOption.label })];
+    const cells: HTMLElement[] = [el("span", { class: "readout__label", text: shortLabel(rowOption.label) })];
     const columns = across?.options.length ? across.options : [null];
     for (const colOption of columns) {
       const when = colOption
         ? [rowOption.value ?? rowOption.id, colOption.value ?? colOption.id]
         : [rowOption.value ?? rowOption.id];
       const rule = cellFor(when);
-      cells.push(textField(colOption?.label ?? "結果", rule?.label ?? "",
+      cells.push(textField(colOption ? shortLabel(colOption.label) : "結果", rule?.label ?? "",
         (v) => app.updateFlow((tt) => setMatchCell(tt, step.id, when, v))));
     }
     rows.push(el("div", { class: "list__row" }, cells));

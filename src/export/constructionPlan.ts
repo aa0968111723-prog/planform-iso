@@ -466,7 +466,13 @@ function renderFlowSheet(project: Project, opt: PlanOptions): string {
       ctx.font = font("400 15px");
     }
     const indent = line.kind === "option" ? 18 : line.kind === "detail" ? 14 : 0;
-    ctx.fillText(fitText(ctx, line.text, columnWidth - indent), x + indent, y);
+    // Wrapped, not clipped: the quote on the card IS the content of this sheet.
+    const wrapped = wrapText(ctx, line.text, columnWidth - indent);
+    for (let w = 0; w < wrapped.length; w++) {
+      // Continuation lines hang under the first character, not under the dot.
+      ctx.fillText(wrapped[w], x + indent + (w > 0 ? 12 : 0), y);
+      if (w < wrapped.length - 1) y += 22;
+    }
     y += line.kind === "head" ? 30 : 26;
   }
 
@@ -1167,6 +1173,44 @@ function arrowHead(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: nu
   ctx.lineTo(mx + Math.cos(ang + 2.5) * 8, my + Math.sin(ang + 2.5) * 8);
   ctx.lineTo(mx + Math.cos(ang - 2.5) * 8, my + Math.sin(ang - 2.5) * 8);
   ctx.closePath(); ctx.fill();
+}
+
+/**
+ * Break a line to fit a column instead of cutting it off.
+ *
+ * A truncated 「不用每個人都喜歡你，那樣太…」 is worse than useless on a
+ * briefing sheet: the volunteer has to guess the rest of the sentence they are
+ * supposed to hand somebody. Chinese has no spaces, so this measures character
+ * by character and breaks where it must, preferring a space when Latin text
+ * offers one.
+ */
+function wrapText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number, maxLines = 4): string[] {
+  if (ctx.measureText(value).width <= maxWidth) return [value];
+  const lines: string[] = [];
+  let line = "";
+  for (const ch of value) {
+    const next = line + ch;
+    if (ctx.measureText(next).width > maxWidth && line) {
+      // Prefer breaking at the last space so a Latin word survives intact.
+      const space = line.lastIndexOf(" ");
+      if (space > 0 && line.length - space < 12) {
+        lines.push(line.slice(0, space));
+        line = `${line.slice(space + 1)}${ch}`;
+      } else {
+        lines.push(line);
+        line = ch;
+      }
+      if (lines.length === maxLines - 1 && ctx.measureText(value).width > maxWidth * maxLines) {
+        // Runaway text still gets an ellipsis rather than eating the page.
+        lines.push(fitText(ctx, value.slice(lines.join("").length), maxWidth));
+        return lines;
+      }
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }
 
 function fitText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number): string {
