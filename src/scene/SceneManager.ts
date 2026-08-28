@@ -42,6 +42,7 @@ import { DEFAULT_THEME, EXPORT_PALETTE, MAT_COLORS, scenePalette, type ScenePale
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
+import { stackedLabelY, type PlacedLabel } from "./labelLayout";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
 
 const D2R = Math.PI / 180;
@@ -828,7 +829,7 @@ export class SceneManager {
     this.zoneGroup.visible = this.layersState.zones;
     const partner = this.partner;
     const seen = new Set<string>();
-    const placedLabels: { x: number; z: number; width: number; depth: number; y: number }[] = [];
+    const placedLabels: PlacedLabel[] = [];
     for (const zone of project.zones) {
       seen.add(zone.id);
       // Partner labels are drawn at a higher texture resolution, so the mode
@@ -850,14 +851,9 @@ export class SceneManager {
       fillMat.color.set(zone.color);
       edgeMat.color.set(zone.color);
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
-      let labelY = partner ? 0.8 : 0.5;
-      while (placedLabels.some((other) =>
-        Math.abs(zone.x - other.x) < (zone.width + other.width) / 2 &&
-        Math.abs(zone.z - other.z) < (zone.depth + other.depth) / 2 &&
-        Math.abs(labelY - other.y) < 0.5
-      )) labelY += 0.55;
+      const labelY = stackedLabelY(zone, placedLabels, partner ? 0.8 : 0.5);
       entry.label.sprite.position.y = labelY;
-      placedLabels.push({ x: zone.x, z: zone.z, width: zone.width, depth: zone.depth, y: labelY });
+      placedLabels.push({ x: zone.x, z: zone.z, y: labelY });
       if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the
         // rest stay as faint context so the room still makes sense.
