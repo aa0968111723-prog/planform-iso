@@ -1,12 +1,22 @@
 /**
  * Agent provider abstraction.
  *
- * The shipping provider is the local deterministic phrase → intent planner —
- * no network, no credential, same result every time. A cloud LLM provider can
- * implement AgentProvider later; the tool layer, preview and commit gates stay
- * identical either way.
+ * The shipping provider is the local deterministic parser — no network, no
+ * credential, same result every time. A cloud LLM provider can implement
+ * AgentProvider later; the tool layer, preview and commit gates stay identical
+ * either way, and a cloud provider never receives the plan document.
+ *
+ * Two providers live here:
+ *
+ * - `LocalPlannerProvider` (the default) runs the structured parser in
+ *   `intent.ts` and hands the orchestrator a `parsed` reading. It emits no tool
+ *   calls itself, because planning needs the project and a provider does not
+ *   get the project.
+ * - `MockProvider` is the older keyword mapper, kept as an explicit test
+ *   fallback and for the fixed phrases the existing suite pins.
  */
 
+import { parseRequest } from "./intent";
 import type { AgentIntent, AgentRequest, AgentResponse, AgentToolCall } from "./types";
 
 export interface AgentProvider {
@@ -150,6 +160,11 @@ export class MockProvider implements AgentProvider {
     // Filter unknown tool names that Mock accidentally emitted
     const allowed = new Set([
       "createCustomAssetProxy",
+      // §35 recipes were emitted above and then dropped here, so 「幫我做一個
+      // 六面骰子」 produced an intent, a message and no prop. The tool was in
+      // the executor and in the allowlist; it was only missing from this
+      // filter, which is why nothing failed loudly.
+      "createPropFromRecipe",
       "placeAsset",
       "validateLayout",
       "getValidationIssues",
@@ -179,6 +194,31 @@ export class MockProvider implements AgentProvider {
   }
 }
 
+/**
+ * The shipping provider. It reads the sentence into a structured request and
+ * stops there; `QuickAgent` plans the tool calls against the draft.
+ */
+export class LocalPlannerProvider implements AgentProvider {
+  readonly id = "local-planner";
+
+  async complete(request: AgentRequest): Promise<AgentResponse> {
+    const parsed = parseRequest(request.text);
+    const intents: AgentIntent[] = parsed.intents.map((i) =>
+      i.type === "unknown" ? { type: "unknown", raw: request.text } : { type: "unknown", raw: i.type },
+    );
+    return {
+      intents,
+      // Empty on purpose: the orchestrator plans from `parsed`, which is the
+      // only stage that can see where the entrance and the desks actually are.
+      toolCalls: [],
+      parsed,
+      assumptions: parsed.assumptions,
+      message: "",
+      provider: this.id,
+    };
+  }
+}
+
 export function createDefaultProvider(): AgentProvider {
-  return new MockProvider();
+  return new LocalPlannerProvider();
 }

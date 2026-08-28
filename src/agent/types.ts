@@ -140,6 +140,21 @@ export interface AgentResponse {
   toolCalls: AgentToolCall[];
   message: string;
   provider: string;
+  /**
+   * A structured reading of the sentence, when the provider produced one.
+   *
+   * The orchestrator turns this into tool calls by planning against the DRAFT.
+   * Planning is deliberately not the provider's job: resolving 「報到桌」 and
+   * 「入口右側」 needs the whole plan, and a cloud provider must never be handed
+   * the whole plan just to parse a sentence. A provider that already knows its
+   * tool calls simply leaves this undefined.
+   *
+   * Typed as `unknown` so `types.ts` stays free of a dependency on the parser;
+   * `quickAgent.ts` narrows it.
+   */
+  parsed?: unknown;
+  /** What the provider had to assume, surfaced to the user rather than hidden. */
+  assumptions?: string[];
 }
 
 export interface AgentDiffSummary {
