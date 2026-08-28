@@ -221,6 +221,24 @@ function button(): PropDefinition {
   };
 }
 
+/** 🪧 題目板 — a board on a small stand that sits on a table. */
+function questionBoard(): PropDefinition {
+  return {
+    id: "prop_questionboard",
+    name: "題目板",
+    category: "互動",
+    dimensions: { width: 0.7, depth: 0.18, height: 0.58 },
+    parts: [
+      { id: "foot", shape: "box", size: { width: 0.36, depth: 0.16, height: 0.04 }, offset: { x: 0, y: 0, z: 0 }, color: "#475569", finish: "painted-metal" },
+      { id: "board", shape: "plane", size: { width: 0.7, depth: 0.02, height: 0.5 }, offset: { x: 0, y: 0.04, z: 0 }, color: "#f8fafc", text: "題目板", showsResultOf: "self" },
+    ],
+    anchors: [],
+    icon: "🪧",
+    version: 1,
+    source: "preset:questionboard",
+  };
+}
+
 /** 🖥 互動螢幕 — stand plus a glass panel that can show another prop's result. */
 function screen(): PropDefinition {
   return {
@@ -570,7 +588,7 @@ function spinnerStation(): PropDefinition {
 }
 
 export const PROP_PRESETS: PropDefinition[] = [
-  dice(), spinner(), standee(), box(), table(), button(), screen(),
+  dice(), spinner(), standee(), box(), table(), button(), questionBoard(), screen(),
   cardBox(), photoFrame(), pickup(), mat(),
   diceStation(), blessingBox(), quizStation(), spinnerStation(),
 ];

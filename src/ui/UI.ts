@@ -928,7 +928,7 @@ export class UI {
           });
           input.click();
         }, "btn btn--ghost"),
-        button("從選取的物件建立組合道具", () => {
+        button("群組成一個道具（先框選幾個物件）", () => {
           const name = window.prompt("組合道具的名字", "骰子遊戲站");
           if (name === null) return;
           this.app.groupSelectionIntoProp(name.trim() || "組合道具");

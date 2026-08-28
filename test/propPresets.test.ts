@@ -47,8 +47,8 @@ const meshCount = (g: ReturnType<typeof buildPropGroup>): number => {
 };
 
 describe("all presets", () => {
-  it("ship the ten props and four golden assemblies, not fifty", () => {
-    expect(PROP_PRESETS.length).toBe(15);
+  it("ship a dozen props and four golden assemblies, not fifty", () => {
+    expect(PROP_PRESETS.length).toBe(16);
     const names = PROP_PRESETS.map((d) => d.name);
     // Names carry what is INSIDE the assembly, because a poetic name told a
     // reviewer nothing: given 「請建立一個大型骰子遊戲站」 they picked the bare

@@ -424,6 +424,7 @@ export class App {
       simQueues: this.session.simQueues,
       simStations: this.overlayStations(),
       propPlayback: this.propPlaybackView(),
+      propAnchors: this.selectedPropAnchors(),
       // A booth is 7 m across with eight station badges on it — the flow names
       // on top of that make the plan unreadable exactly when you are watching
       // the crowd. The ribbons and arrows stay; only the names step aside.
@@ -1544,6 +1545,35 @@ export class App {
       serving,
       queued: this.session.simQueues[station.id] ?? 0,
     });
+  }
+
+  /**
+   * §58/§59/§93 — the selected prop's four standing positions in world space.
+   *
+   * Only for a selection of one, and only for a prop: drawing every prop's
+   * anchors at once would bury the plan, and §26's 不要所有人頭上一直顯示 is
+   * the same instinct. This is what makes 「移動整組，站位跟著走」 verifiable
+   * by looking — the written sentences are prop-relative and read the same
+   * before and after a move.
+   */
+  private selectedPropAnchors(): { role: string; label: string; x: number; z: number }[] | undefined {
+    if (this.session.selection.size !== 1) return undefined;
+    const id = [...this.session.selection][0];
+    const obj = this.state.objects.find((o) => o.id === id);
+    const def = obj ? propForAssetId(this.state.props, obj.assetId) : undefined;
+    if (!obj || !def?.anchors.length || obj.hidden) return undefined;
+    const rad = (obj.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const LABEL: Record<string, string> = {
+      staff: "工作人員", player: "參加者", queue: "排隊起點", exit: "完成出口",
+    };
+    return def.anchors.map((a) => ({
+      role: a.role,
+      label: LABEL[a.role] ?? a.role,
+      x: obj.x + a.x * cos + a.z * sin,
+      z: obj.z - a.x * sin + a.z * cos,
+    }));
   }
 
   /** A served figure stands ON its station; 60 cm is well inside one lane. */
