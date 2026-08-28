@@ -333,7 +333,15 @@ function migrateInteractionStation(raw: Partial<InteractionStation>): Interactio
   return {
     id: raw.id,
     name: typeof raw.name === "string" && raw.name ? raw.name : "站台",
-    type: "custom",
+    // NOT hard-coded "custom". `templateFromScenario` copies a classroom
+    // station verbatim, type included, and `zoneParallelServers` expands a
+    // zone-bound station's servers only for shoe/backpack/seating. Writing
+    // "custom" here erased that on the first save, so an E310 plan converted
+    // to a step list silently dropped 鞋子/背包 from 4 servers to 1 on reload —
+    // invisible, because zoneId survived so the station still moved with its
+    // zone. The scenario whitelist (`migrateStation`) always preserved type;
+    // this one is now symmetric with it.
+    type: typeof raw.type === "string" && raw.type ? (raw.type as InteractionStation["type"]) : "custom",
     x: Number.isFinite(raw.x) ? Number(raw.x) : 0,
     z: Number.isFinite(raw.z) ? Number(raw.z) : 0,
     staffCount: Math.max(0, Math.round(raw.staffCount ?? 1)),
@@ -715,7 +723,18 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
 
 /** Resolve spatial bindings against the current project without mutating either input. */
 export function resolveStationPosition(project: Project, station: ServiceStation): { x: number; z: number } {
-  const object = station.objectId && project.objects.find((item) => item.id === station.objectId && !item.hidden);
+  const visible = station.objectId
+    && project.objects.find((item) => item.id === station.objectId && !item.hidden);
+  // A prop station has no authored coordinates to fall back on — it is created
+  // at 0,0 and defined entirely by its object. A pre-prop station's x/z hold
+  // the scenario's own numbers, so falling through for those is correct and
+  // stays byte-identical. For a prop, falling through put every visitor in the
+  // corner of the room the moment someone pressed 隱藏, so a hidden prop still
+  // resolves against its object: hiding is a view toggle, not a demolition.
+  const object = visible
+    || (station.objectId && (station as InteractionStation).anchorOffset
+      ? project.objects.find((item) => item.id === station.objectId)
+      : undefined);
   if (object) {
     // A prop's player anchor: the station stands where PEOPLE stand, not at
     // the object's centre, and it turns with the object. Strictly gated on

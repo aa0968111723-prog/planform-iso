@@ -28,13 +28,16 @@ import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
 import { BOOTH_ZONE_ROLES, isBoothProject } from "../core/boothCatalog";
 import {
   addStep,
+  duplicateStep,
   instantiatePropInteraction,
+  liveSeedFromInstance,
+  moveStep,
+  propStationId,
   propTemplateSkeleton,
   removePropInteraction,
-  duplicateStep,
-  moveStep,
   removeStep,
   renameStep,
+  reseedPropInteraction,
   setOptionCount,
   setStationPositions,
   setStepStation,
@@ -624,17 +627,57 @@ export class App {
   }
 
   /**
-   * Edit a definition. The version bump is not cosmetic: the scene's rebuild
-   * signature includes entry.version, so this is what makes every placed
-   * instance redraw with the new look.
+   * Edit a definition, and make the edit reach everything already standing on
+   * it.
+   *
+   * The version bump is not cosmetic: the scene's rebuild signature includes
+   * entry.version, which is what redraws placed instances with the new LOOK.
+   * The interaction needs its own pass, because a placed prop's station and
+   * steps were copied out of the seed at placement time and nothing refreshed
+   * them — so every face rename, every service time, every skip rate typed
+   * into the Studio was a silent no-op on the props actually on the floor,
+   * while the toast reported success. Three cases, and the middle one is the
+   * common one:
+   *
+   *   - the definition gained an interaction  -> splice it into every instance
+   *   - it still has one                      -> reseed content, keep wiring
+   *   - it lost one (移除互動)                 -> unwind every splice, or the
+   *                                              station keeps serving people
+   *                                              at a prop that has no game
    */
   updatePropDefinition(def: PropDefinition): void {
     const bumped = { ...def, version: def.version + 1 };
+    const entryId = propEntryId(def);
+    let touched = 0;
     this.store.mutate((p) => {
       p.props = (p.props ?? []).map((d) => (d.id === def.id ? bumped : d));
       p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+
+      const placed = p.objects.filter((o) => o.assetId === entryId);
+      for (const obj of placed) {
+        const bound = p.interaction?.stations.some((s) => s.id === propStationId(obj.id));
+        if (bumped.interaction && bound && p.interaction) {
+          p.interaction = reseedPropInteraction(p.interaction, bumped, obj.id);
+          touched += 1;
+        } else if (bumped.interaction && !bound) {
+          p.interaction = instantiatePropInteraction(
+            p.interaction ?? propTemplateSkeleton(), bumped, obj.id, { x: obj.x, z: obj.z },
+          );
+          touched += 1;
+        } else if (!bumped.interaction && bound && p.interaction) {
+          const next = removePropInteraction(p.interaction, obj.id);
+          if (next === null) delete p.interaction;
+          else p.interaction = next;
+          touched += 1;
+        }
+      }
     });
     this.resetFlowRun();
+    if (touched) {
+      this.toast(bumped.interaction
+        ? `已更新「${bumped.name}」，場上的 ${touched} 份都跟著改了`
+        : `已移除「${bumped.name}」的互動，場上的 ${touched} 份不再是關卡`, true);
+    }
   }
 
   /** Delete a definition AND everything standing on it — objects and splices. */
@@ -666,7 +709,12 @@ export class App {
     const obj = this.state.objects.find((o) => o.id === objectId);
     const def = propForAssetId(this.state.props, obj?.assetId);
     if (!obj || !def) return null;
-    const fork = forkDefinition(def);
+    // Fork what is RUNNING, not the frozen seed. An organiser who renamed all
+    // six faces in the flow panel used to lose every one of them here, because
+    // forkDefinition deep-copied the definition and the live splice was then
+    // rebuilt from preset defaults.
+    const live = liveSeedFromInstance(this.state.interaction, def, objectId);
+    const fork = forkDefinition(live ? { ...def, interaction: live } : def);
     this.store.mutate((p) => {
       p.props = [...(p.props ?? []), fork];
       p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
@@ -677,7 +725,9 @@ export class App {
         p.interaction = cleared === null ? undefined : cleared;
         if (!p.interaction) delete p.interaction;
         if (fork.interaction) {
-          p.interaction = instantiatePropInteraction(p.interaction ?? propTemplateSkeleton(), fork, objectId);
+          p.interaction = instantiatePropInteraction(
+            p.interaction ?? propTemplateSkeleton(), fork, objectId, { x: obj.x, z: obj.z },
+          );
         }
       }
     });
@@ -768,7 +818,7 @@ export class App {
           announced = "已建立互動流程：「" + def.name + "」";
         }
       }
-      p.interaction = instantiatePropInteraction(p.interaction, def, obj.id);
+      p.interaction = instantiatePropInteraction(p.interaction, def, obj.id, { x: obj.x, z: obj.z });
     });
     this.resetFlowRun();
     if (announced) this.toast(announced, true);
