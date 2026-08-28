@@ -124,6 +124,18 @@ export interface LayoutScheme {
   score: SchemeScore;
   /** Knowledge-base entry ids the rationale draws on. */
   knowledgeRefs: string[];
+  /**
+   * Whether this scheme satisfies the brief's HARD requirements.
+   *
+   * An objective like 「收費另外分流」 is not a preference to be weighed — it is
+   * an instruction. Treating it as a weight let a combined-desk scheme outscore
+   * a split one and get applied to someone who had just said, in words, that
+   * they wanted the desks separated. Scoring chooses among schemes that satisfy
+   * the brief; it does not get to overrule it.
+   */
+  eligible: boolean;
+  /** Why it is out of the running. Present exactly when `eligible` is false. */
+  ineligibleReason?: string;
 }
 
 export interface PlannerResult {
@@ -739,8 +751,12 @@ function scoreScheme(
   const waitingScore = sim ? Math.max(0, 1 - sim.avgWaitSeconds / 300) : 0.5;
   const validationScore = Math.max(0, 1 - counts.error * 0.25 - counts.warning * 0.05);
   const circulationScore = Math.min(1, aisle / Math.max(0.9, b.minAisleWidth * 1.4));
-  // A scheme that needs more desks than there are staff cannot actually run.
-  const staffingScore = deskCount === 0 ? 0.5 : Math.min(1, b.staffCount / deskCount);
+  // Two things, not one. "Can it be run at all" saturates as soon as there are
+  // enough people; without the second term 「人力少一點好管理」 could not tell a
+  // one-desk scheme from a two-desk one, because both scored a flat 1.0.
+  const staffable = deskCount === 0 ? 0.5 : Math.min(1, b.staffCount / deskCount);
+  const simplicity = deskCount <= 1 ? 1 : deskCount === 2 ? 0.85 : 0.7;
+  const staffingScore = staffable * simplicity;
 
   const breakdown: SchemeScoreBreakdown = {
     capacity: capacityScore,
@@ -773,6 +789,18 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
     return { brief: b, schemes: [], recommendedId: null, recommendation: "場地尺寸不足，無法排版。", notes };
   }
 
+  /**
+   * Hard requirements read off the objectives. A scheme that fails one is still
+   * shown in the comparison — the user asked for three options and deserves to
+   * see what the third looks like — but it cannot be recommended or applied.
+   */
+  const eligibilityOf = (parts: SchemeParts): { eligible: boolean; reason?: string } => {
+    if (b.objectives.includes("separate-checkin-payment") && parts.serviceModel === "combined") {
+      return { eligible: false, reason: "你指定要報到與收費分流，這個方案是共用一張桌子。" };
+    }
+    return { eligible: true };
+  };
+
   const schemes: LayoutScheme[] = [];
   for (const { id: schemeId, name, build } of BUILDERS) {
     const parts = build(b);
@@ -788,7 +816,9 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
     const aisle = schemeId === "scheme-c" ? Math.max(b.minAisleWidth, 1.2) : b.minAisleWidth;
     const deskCount = parts.objects.filter((o) => o.serviceRole === "checkin" || o.serviceRole === "payment").length;
 
+    const eligibility = eligibilityOf(parts);
     const risks = [...parts.risks];
+    if (!eligibility.eligible && eligibility.reason) risks.push(eligibility.reason);
     if (capacity < b.participants) {
       risks.push(`估算只能坐 ${capacity} 人，少於 ${b.participants} 人。`);
     }
@@ -811,10 +841,19 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
       validation: { errors: counts.error, warnings: counts.warning, issues },
       score: scoreScheme(b, capacity, sim, counts, deskCount, aisle),
       knowledgeRefs: parts.knowledgeRefs,
+      ...eligibility,
+      ...(eligibility.reason ? { ineligibleReason: eligibility.reason } : {}),
     });
   }
 
-  const best = schemes.reduce<LayoutScheme | null>((acc, s) => (!acc || s.score.total > acc.score.total ? s : acc), null);
+  const eligible = schemes.filter((s) => s.eligible);
+  // If nothing satisfies the brief, recommending the least-bad option silently
+  // would be worse than saying so; fall back but keep the note.
+  const pool = eligible.length ? eligible : schemes;
+  if (!eligible.length && schemes.length) {
+    notes.push("沒有方案完全符合你指定的條件，以下是最接近的。");
+  }
+  const best = pool.reduce<LayoutScheme | null>((acc, s) => (!acc || s.score.total > acc.score.total ? s : acc), null);
   const recommendation = best
     ? `推薦「${best.name}」（${best.score.total} 分）：` +
       [
@@ -827,14 +866,28 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
   return { brief: b, schemes, recommendedId: best?.id ?? null, recommendation, notes };
 }
 
-/** Rebuild one scheme's parts so a caller can apply it to a draft. */
+/** The id a caller passes to apply whichever scheme scored best. */
+export const RECOMMENDED_SCHEME = "recommended";
+
+/**
+ * Rebuild one scheme's parts so a caller can apply it to a draft.
+ *
+ * `RECOMMENDED_SCHEME` resolves to the highest-scoring scheme for this brief.
+ * That sentinel exists because the planner used to choose with its own
+ * objective→scheme heuristic while the engine recommended by measured score —
+ * so the user could be shown 「推薦 C」 and handed B. One decision, one place.
+ */
 export function buildScheme(project: Project, schemeId: string, input: Partial<LayoutBrief> = {}): {
   scheme: LayoutScheme;
   apply: (draft: Project) => void;
 } | null {
   const result = generateLayoutSchemes(project, input);
-  const scheme = result.schemes.find((s) => s.id === schemeId);
+  const wanted = schemeId === RECOMMENDED_SCHEME ? result.recommendedId : schemeId;
+  const scheme = result.schemes.find((s) => s.id === wanted);
   if (!scheme) return null;
+  // An explicitly named scheme that breaks the brief is still buildable — the
+  // user may have chosen it from the comparison after reading why it is out.
+  // The reason travels with it so the UI can keep saying so.
   return {
     scheme,
     apply(draft: Project) {
@@ -860,6 +913,9 @@ export interface SchemeComparisonRow {
   warnings: number;
   score: number;
   busiest: string | null;
+  /** False when the scheme breaks a requirement the brief stated in words. */
+  eligible: boolean;
+  ineligibleReason: string | null;
 }
 
 export function compareSchemes(result: PlannerResult): SchemeComparisonRow[] {
@@ -873,5 +929,7 @@ export function compareSchemes(result: PlannerResult): SchemeComparisonRow[] {
     warnings: s.validation.warnings,
     score: s.score.total,
     busiest: s.simulation?.busiest?.name ?? null,
+    eligible: s.eligible,
+    ineligibleReason: s.ineligibleReason ?? null,
   }));
 }

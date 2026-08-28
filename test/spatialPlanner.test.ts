@@ -4,6 +4,7 @@ import {
   compareSchemes,
   generateLayoutSchemes,
   projectWithScheme,
+  RECOMMENDED_SCHEME,
 } from "../src/core/spatialPlanner";
 import { validateProject, issueCounts } from "../src/core/validation";
 import { createDefaultProject, type Project, type SceneObject } from "../src/core/model";
@@ -141,6 +142,56 @@ describe("scheme measurement is honest", () => {
   });
 });
 
+describe("an explicit requirement is a constraint, not a weight", () => {
+  it("a combined-desk scheme is ineligible when 分流 was asked for", () => {
+    const r = generateLayoutSchemes(bigRoom(), {
+      participants: 60, staffCount: 4, objectives: ["separate-checkin-payment"],
+    });
+    const a = r.schemes.find((s) => s.id === "scheme-a")!;
+    expect(a.eligible).toBe(false);
+    expect(a.ineligibleReason).toContain("分流");
+    // It is still shown — the user asked for three options — and the reason is
+    // on its risk list, not hidden.
+    expect(a.risks.join(" ")).toContain("分流");
+  });
+
+  it("never recommends a scheme that breaks a stated requirement, even if it scores highest", () => {
+    // This is the case that made the tool contradict itself: A outscored B and
+    // C, so the engine recommended a shared desk to someone who had just said
+    // 「收費另外分流」 in words.
+    const r = generateLayoutSchemes(bigRoom(), {
+      participants: 60, staffCount: 4, objectives: ["separate-checkin-payment"],
+    });
+    const a = r.schemes.find((s) => s.id === "scheme-a")!;
+    const recommended = r.schemes.find((s) => s.id === r.recommendedId)!;
+    expect(recommended.eligible).toBe(true);
+    expect(a.score.total).toBeGreaterThan(0);
+    expect(r.recommendedId).not.toBe("scheme-a");
+  });
+
+  it("the applied layout really has two service desks", () => {
+    const built = buildScheme(bigRoom(), RECOMMENDED_SCHEME, {
+      participants: 60, staffCount: 4, objectives: ["separate-checkin-payment"],
+    })!;
+    expect(built.scheme.objects.filter((o) => o.serviceRole === "checkin").length).toBe(1);
+    expect(built.scheme.objects.filter((o) => o.serviceRole === "payment").length).toBe(1);
+  });
+
+  it("every scheme stays eligible when nothing structural was asked for", () => {
+    const r = generateLayoutSchemes(bigRoom(), { participants: 60, staffCount: 4 });
+    expect(r.schemes.every((s) => s.eligible)).toBe(true);
+  });
+
+  it("the comparison table carries eligibility so the UI can show it", () => {
+    const rows = compareSchemes(generateLayoutSchemes(bigRoom(), {
+      participants: 60, staffCount: 4, objectives: ["separate-checkin-payment"],
+    }));
+    const a = rows.find((x) => x.id === "scheme-a")!;
+    expect(a.eligible).toBe(false);
+    expect(a.ineligibleReason).toBeTruthy();
+  });
+});
+
 describe("scoring", () => {
   it("weights follow the stated objectives", () => {
     const room = bigRoom();
@@ -174,6 +225,22 @@ describe("scoring", () => {
       expect(s.score.total).toBeGreaterThanOrEqual(0);
       expect(s.score.total).toBeLessThanOrEqual(100);
     }
+  });
+
+  it("lets 「好管理」 actually pick the simpler scheme", () => {
+    // Both A (one desk) and B (two desks) are staffable with four people, so a
+    // pure staff/desk ratio saturated at 1.0 for both and the objective could
+    // not discriminate. Operational simplicity is the second half of "easy to
+    // staff", and without it the engine recommended a two-desk layout to
+    // someone who asked for fewer moving parts.
+    const room = bigRoom();
+    const easy = generateLayoutSchemes(room, {
+      participants: 60, staffCount: 4, objectives: ["easy-to-staff"],
+    });
+    expect(easy.recommendedId).toBe("scheme-a");
+    const a = easy.schemes.find((s) => s.id === "scheme-a")!;
+    const b = easy.schemes.find((s) => s.id === "scheme-b")!;
+    expect(a.score.breakdown.staffing).toBeGreaterThan(b.score.breakdown.staffing);
   });
 
   it("penalises a scheme that needs more desks than there are staff", () => {
@@ -214,6 +281,22 @@ describe("applying a scheme", () => {
 
   it("returns null for an unknown scheme id", () => {
     expect(buildScheme(bigRoom(), "scheme-z")).toBeNull();
+  });
+
+  it("RECOMMENDED_SCHEME resolves to the same scheme the engine recommends", () => {
+    // One decision, one place. The planner used to choose with its own
+    // objective→scheme table while the engine recommended by measured score,
+    // so the user could read 「推薦 C（92.9 分）」 and be handed B.
+    const room = bigRoom();
+    for (const objectives of [
+      ["separate-checkin-payment"], ["reduce-crowding"], ["easy-to-staff"], ["maximise-capacity"], [],
+    ] as const) {
+      const brief = { participants: 60, staffCount: 4, objectives: [...objectives] };
+      const result = generateLayoutSchemes(room, brief);
+      const built = buildScheme(room, RECOMMENDED_SCHEME, brief)!;
+      expect(built.scheme.id, `目標 ${objectives.join("/") || "（無）"} 下推薦與套用不一致`)
+        .toBe(result.recommendedId);
+    }
   });
 });
 

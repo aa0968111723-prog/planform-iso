@@ -82,11 +82,20 @@ describe("a v1 file survives the agent", () => {
     const store = new Store(migrateProject(v1Blob()));
     const agent = new QuickAgent(store, new LocalPlannerProvider());
     await agent.run({ text: "幫我排一個 30 人的茶會" });
-    const before = store.getState().objects.length;
     agent.commit();
-    expect(store.getState().objects.length).not.toBe(before);
+
+    const after = store.getState();
+    // Object COUNT is a bad proxy for "something happened": the old desk is
+    // replaced by the scheme's desk, so a v1 file with one door and one desk
+    // still has two objects afterwards. Seats are the real evidence.
+    expect(after.groups.length).toBeGreaterThan(0);
+    expect(after.zones.length).toBeGreaterThan(0);
+    expect(after.objects.some((o) => o.id === "old-table")).toBe(false);
+    expect(after.objects.some((o) => o.kind === "door")).toBe(true);
+
     store.undo();
     expect(store.getState().objects.map((o) => o.id).sort()).toEqual(["old-door", "old-table"]);
+    expect(store.getState().groups.length).toBe(0);
   });
 
   it("does not add optional blocks a v1 file never had unless a tool needed them", () => {

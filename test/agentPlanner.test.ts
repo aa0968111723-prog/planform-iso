@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseRequest } from "../src/agent/intent";
 import { planFromRequest } from "../src/agent/planner";
+import { RECOMMENDED_SCHEME } from "../src/core/spatialPlanner";
 import { LocalPlannerProvider, MockProvider } from "../src/agent/provider";
 import { QuickAgent } from "../src/agent/quickAgent";
 import { Store } from "../src/state/store";
@@ -42,9 +43,26 @@ describe("the six target sentences", () => {
     expect(brief.eventType).toBe("tea-gathering");
     expect(brief.doorClearance).toBeCloseTo(1.2, 6);
     expect(brief.objectives).toContain("separate-checkin-payment");
-    // 分流 was asked for, so the applied scheme must be the split one.
+    // The step applies whatever scored best for these objectives — one
+    // decision, made by the measured score, not by a second heuristic that can
+    // disagree with the recommendation the user is reading.
     const applied = p.steps.find((s) => s.call.tool === "applySmartLayout")!.call.args!;
-    expect(applied.candidateId).toBe("scheme-b");
+    expect(applied.candidateId).toBe(RECOMMENDED_SCHEME);
+    expect(applied.objectives).toContain("separate-checkin-payment");
+  });
+
+  it("1b — and what it applies really does split check-in from payment", async () => {
+    // The assertion that matters is the outcome, not the scheme id: 分流 was
+    // asked for, so the committed draft must end up with two service desks.
+    const store = new Store(staffedRoom());
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    const r = await agent.run({
+      text: "幫我排一個 60 人的禪學社茶會，入口先報到，收費另外分流，門口保留 1.2 公尺",
+    });
+    expect(r.toolResults.filter((x) => !x.ok)).toEqual([]);
+    const draft = agent.getDraftProject()!;
+    expect(draft.objects.filter((o) => o.serviceRole === "checkin").length).toBe(1);
+    expect(draft.objects.filter((o) => o.serviceRole === "payment").length).toBe(1);
   });
 
   it("2 — proposes alternatives without applying one, and says it cannot resize the venue", () => {

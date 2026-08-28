@@ -20,7 +20,7 @@
 
 import type { Project, SceneObject, ZoneType } from "../core/model";
 import { areaBounds } from "../core/placement";
-import type { EventType, LayoutObjective } from "../core/spatialPlanner";
+import { RECOMMENDED_SCHEME, type EventType } from "../core/spatialPlanner";
 import type { ObjectReference, ParsedRequest, SpatialRelation } from "./intent";
 import type { AgentToolCall } from "./types";
 
@@ -138,13 +138,6 @@ function resolveObject(project: Project, ref: ObjectReference): SceneObject | nu
   return null;
 }
 
-function pickScheme(objectives: LayoutObjective[]): string {
-  if (objectives.includes("separate-checkin-payment")) return "scheme-b";
-  if (objectives.includes("increase-interaction") || objectives.includes("reduce-crowding")) return "scheme-c";
-  if (objectives.includes("easy-to-staff") || objectives.includes("maximise-capacity")) return "scheme-a";
-  return "scheme-b";
-}
-
 export function planFromRequest(parsed: ParsedRequest, project: Project): PlanResult {
   const steps: PlannedStep[] = [];
   const unresolved: string[] = [];
@@ -203,12 +196,16 @@ export function planFromRequest(parsed: ParsedRequest, project: Project): PlanRe
   }
 
   if (types.has("design-layout") && !types.has("propose-alternatives")) {
-    // A direct 「幫我排」 applies the scheme that matches the stated goals; a
-    // 「提出三種方案」 stops at the comparison and lets the user choose.
-    const scheme = pickScheme(objectives);
+    // A direct 「幫我排」 applies the scheme that SCORED best for the stated
+    // goals; 「提出三種方案」 stops at the comparison and lets the user choose.
+    //
+    // The planner used to pick with its own objective→scheme table while the
+    // engine recommended by measured score. The two disagreed — the user was
+    // shown 「推薦 C（92.9 分）」 and handed B — which is the kind of
+    // contradiction that makes every other number look untrustworthy too.
     add(
-      { tool: "applySmartLayout", args: { candidateId: scheme, ...briefArgs } },
-      `依你說的目標套用方案 ${scheme.replace("scheme-", "").toUpperCase()}。`,
+      { tool: "applySmartLayout", args: { candidateId: RECOMMENDED_SCHEME, ...briefArgs } },
+      "套用分數最高的方案（分數已依你說的目標加權）。",
     );
     add({ tool: "validateLayout", args: {} }, "套用後重跑檢查。");
   }
