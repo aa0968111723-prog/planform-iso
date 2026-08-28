@@ -104,7 +104,11 @@ describe("V-01..V-05 E310 stays honest about being uncalibrated", () => {
     expect(e310!.corridor!.z).toBeCloseTo(e310!.classroom.width, 6);
   });
 
-  it("puts the door on the back wall so it opens onto the corridor", () => {
+  // The mapping's 門 row is about OTHER activity rooms (left wall). E310's own
+  // evidence is different and is what the preset follows: both side walls are
+  // windows, so the door can only be front or back, and the back one opens onto
+  // the corridor — `docs/e310/E310_GOLDEN_SCENARIO.md` §3–4.
+  it("puts the door on the back wall, per E310_GOLDEN_SCENARIO §3–4, not the mapping's 左側牆 row", () => {
     const door = e310!.fixtures.find((f) => f.kind === "door");
     expect(door).toBeDefined();
     expect(door!.edge).toBe("s");

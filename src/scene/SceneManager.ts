@@ -756,6 +756,11 @@ export class SceneManager {
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.receiveShadow = true;
+        // Same rule an individually placed object gets: everything casts a
+        // contact shadow except mats, which lie flat on the floor. Sixteen
+        // array chairs used to float shadowless beside one placed chair that
+        // sat on the ground.
+        mesh.castShadow = g.sourceKind !== "mat";
         const overlay = this.buildArrayOverlay(g, members);
         this.arrayGroupRoot.add(mesh);
         this.arrayGroupRoot.add(overlay);
@@ -781,6 +786,13 @@ export class SceneManager {
     const overlay = new Group();
     if (!isFieldMatGroup(g) || !members.length) return overlay;
 
+    // Trace the joints, do not float over them. This was a hard-coded 0.12
+    // against a mat whose top is `itemHeight * 0.89` (0.036 m for a 4 cm mat),
+    // so the seam grid hovered 8.6 cm up and read as an overlay drawn on the
+    // field instead of the seams between interlocking 巧拼 — displaced
+    // diagonally by about a seventh of a tile at the default iso camera.
+    // Derived, not a constant: the top scales with the mat's own thickness.
+    const seamY = g.itemHeight * 0.89 + 0.004;
     const positions: number[] = [];
     for (const member of members) {
       const r = member.rotationDeg * D2R;
@@ -791,7 +803,7 @@ export class SceneManager {
       ].map(([x, z]) => ({ x: member.x + x * cos - z * sin, z: member.z + x * sin + z * cos }));
       for (let i = 0; i < corners.length; i++) {
         const a = corners[i], b = corners[(i + 1) % corners.length];
-        positions.push(a.x, 0.12, a.z, b.x, 0.12, b.z);
+        positions.push(a.x, seamY, a.z, b.x, seamY, b.z);
       }
     }
     const geo = new BufferGeometry();
@@ -915,6 +927,15 @@ export class SceneManager {
         addBox(0.12, 0.065, 0.25, 0.09, 0.045, z, tone, 0.12);
       }
     } else if (zone.type === "backpack") {
+      // KNOWN, DEFERRED: the field research says the bags go ON the parked
+      // 課桌椅, and these are drawn on the floor beside them — in the 30-person
+      // example the middle one is speared through a chair.
+      //
+      // Lifting them to seat height was tried, rendered and rejected: they then
+      // passed through the chairs instead of resting on them, because this
+      // function knows the ZONE rectangle and not where the carriers actually
+      // stand. Doing it properly means feeding the carrier positions in, which
+      // is more than a constant and not a release-freeze change.
       for (let i = -1; i <= 1; i++) {
         const z = i * Math.min(0.72, zone.depth / 3.4);
         addBox(0.34, 0.42, 0.2, 0, 0.23, z, i === 0 ? "#b85b42" : "#3f6670");

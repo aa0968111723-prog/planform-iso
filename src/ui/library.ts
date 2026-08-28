@@ -99,7 +99,10 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     panels.push({
       label: "排列",
       body: el("div", { class: "cardgrid" }, [
-        card("🟪", "地墊陣列", "整組地墊", pick(() => app.createArray("mat"))),
+        // 🧩, matching the catalog entry and the measured teal the mats render
+        // in. A purple swatch next to a green object is the same mistake the
+        // pixel measurement was done to end, in miniature.
+        card("🧩", "地墊陣列", "整組地墊", pick(() => app.createArray("mat"))),
         card("💺", "椅子陣列", "整組椅子", pick(() => app.createArray("chair"))),
       ]),
     });
