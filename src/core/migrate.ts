@@ -541,7 +541,9 @@ function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | n
     dimensions: {
       width: Math.max(0.05, raw.dimensions?.width ?? 0.6),
       depth: Math.max(0.05, raw.dimensions?.depth ?? 0.6),
-      height: Math.max(0.05, raw.dimensions?.height ?? 0.6),
+      // A mat is legitimately 4 cm tall. The floor protects against zero and
+      // negative, not against thin things.
+      height: Math.max(0.01, raw.dimensions?.height ?? 0.6),
     },
     parts,
     anchors,
