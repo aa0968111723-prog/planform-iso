@@ -335,6 +335,16 @@ function migrateInteractionStation(raw: Partial<InteractionStation>): Interactio
     ...(Number.isFinite(raw.balkQueueLength)
       ? { balkQueueLength: Math.max(1, Math.round(Number(raw.balkQueueLength))) }
       : {}),
+    // The bindings. This whitelist used to strip them, which froze every
+    // object-bound station at the coordinates it was SAVED at: convert the
+    // E310 scenario to a step list, save, reload — and moving the check-in
+    // desk no longer moved its station, silently, forever. The plan showed the
+    // desk in its new place while the simulation kept queueing people at the
+    // old one. `resolveTemplateBindings` re-reads these before every run,
+    // which is the entire mechanism by which "move the desk" changes the answer.
+    ...(typeof raw.objectId === "string" ? { objectId: raw.objectId } : {}),
+    ...(typeof raw.zoneId === "string" ? { zoneId: raw.zoneId } : {}),
+    ...(Number.isFinite(raw.serviceVariance) ? { serviceVariance: Number(raw.serviceVariance) } : {}),
   };
 }
 

@@ -638,7 +638,10 @@ export class SceneManager {
       seen.add(o.id);
       const catalogEntry = this.catalog.resolve(o.assetId, o.kind);
       const quality = "standard";
-      const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
+      // entry.version is part of the identity: editing a custom definition
+      // bumps it, and without it here the scene kept drawing the old visual
+      // after every edit.
+      const sig = `${o.assetId ?? o.kind}|${catalogEntry.visualRef}|v${catalogEntry.version}|${o.width}|${o.depth}|${o.height}|${o.hinge}|${o.openInward}|${o.openDeg}|${quality}`;
       let entry = this.objectNodes.get(o.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.objectGroup.remove(entry.group); disposeObject(entry.group); entry.label?.dispose(); }
@@ -1351,6 +1354,25 @@ export class SceneManager {
   }
 
   /** Recenter + zoom the camera so the whole plan fills the visible canvas. */
+  /**
+   * A stored visual finished loading after the fact (GLB rehydration): the
+   * objects adopted with the proxy box while the bytes were still in
+   * IndexedDB must be rebuilt. Their signatures did not change — the cache
+   * behind `resolveVisualGroup` did — so these nodes are dropped by hand and
+   * the next sync builds them from the now-cached model.
+   */
+  invalidateVisualRefs(refs: readonly string[]): void {
+    if (!refs.length) return;
+    const marks = refs.map((ref) => `|${ref}|`);
+    for (const [id, entry] of [...this.objectNodes]) {
+      if (!marks.some((m) => entry.sig.includes(m))) continue;
+      this.objectGroup.remove(entry.group);
+      disposeObject(entry.group);
+      entry.label?.dispose();
+      this.objectNodes.delete(id);
+    }
+  }
+
   recenterView(project: Project): void {
     this.userAdjustedCamera = false;
     this.fitBounds(planBounds(project));

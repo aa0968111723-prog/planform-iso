@@ -46,6 +46,7 @@ import {
   saveTemplate,
   type TemplateMeta,
 } from "../state/templateLibrary";
+import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import {
   catalogFromProject,
   createDefaultScenario,
@@ -303,6 +304,7 @@ export class App {
   private pointers = new Map<number, { x: number; y: number; type: string }>();
   private validationTimer: number | null = null;
   private simState: SimState | null = null;
+  private rehydratingVisuals = false;
   /**
    * The template the last run actually used — positions resolved, plan
    * geometry attached. Playback reads station coordinates from THIS, not from
@@ -734,7 +736,29 @@ export class App {
    * example — on disk. Measured on the golden: average wait 392 s → 760 s,
    * peak queue 20 → 34.
    */
+  /**
+   * Load blob-backed visuals (imported GLB models) for the open plan.
+   *
+   * Fire-and-forget with an in-flight guard; a failed blob degrades to the
+   * proxy box that entry already shows. Called wherever a plan arrives —
+   * open, create, resume, JSON import — because the import session was the
+   * only place the cache was ever filled, and every reload turned imported
+   * models into grey boxes while their bytes sat in IndexedDB.
+   */
+  rehydrateVisuals(): void {
+    if (this.rehydratingVisuals) return;
+    this.rehydratingVisuals = true;
+    void rehydrateAssetVisuals(this.state.catalogExtras)
+      .then((refs) => {
+        if (!refs.length) return;
+        this.scene.invalidateVisualRefs(refs);
+        this.syncScene();
+      })
+      .finally(() => { this.rehydratingVisuals = false; });
+  }
+
   seedSessionFromPlan(project: Project): void {
+    this.rehydrateVisuals();
     // A rehearsal belongs to the plan it was started on. Carrying the agents,
     // the queue counts or the statistics into the next project would show
     // somebody else's crowd standing in this room.

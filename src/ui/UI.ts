@@ -993,6 +993,9 @@ export class UI {
         // plan whose work is a resized room and a calibration, that is the
         // whole plan gone with the promised 復原 step never taken.
         this.app.store.loadProject(await importProjectJson(f) as never, { undoBeforeLoad: hasContent });
+        // The imported file may reference GLB blobs already in this browser's
+        // IndexedDB (e.g. re-importing your own backup) — reload their visuals.
+        this.app.rehydrateVisuals();
         this.showToast("已匯入專案");
       } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
