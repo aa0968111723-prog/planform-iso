@@ -56,6 +56,11 @@ interface ProjectIndex {
   entries: ProjectMeta[];
 }
 
+/** A rename, plus whether it reached BOTH the card index and the plan body. */
+export interface RenamedProject extends ProjectMeta {
+  fullyApplied: boolean;
+}
+
 export interface CreateProjectInput {
   name: string;
   project: Project;
@@ -297,7 +302,13 @@ export const ProjectRepository = {
     return true;
   },
 
-  renameProject(id: string, name: string, now = Date.now()): ProjectMeta | null {
+  /**
+   * Rename touches two places: the card index and the plan's own name, which
+   * is what the 場刊圖 prints. On a full or blocked store one can land and the
+   * other not, so the result says whether BOTH did — a card showing a name the
+   * export does not print is a quiet lie the caller has to be able to catch.
+   */
+  renameProject(id: string, name: string, now = Date.now()): RenamedProject | null {
     const trimmed = name.trim();
     if (!trimmed) return null;
     const index = readIndex();
@@ -305,14 +316,14 @@ export const ProjectRepository = {
     if (!entry) return null;
     entry.name = trimmed;
     entry.updatedAt = now;
-    writeIndex(index);
-    // Keep the body's own name in step so exports and 場刊 titles match.
+    const indexOk = writeIndex(index);
     const opened = ProjectRepository.openProject(id);
+    let bodyOk = true;
     if (opened.ok) {
       opened.project.name = trimmed;
-      writeBody(id, opened.project);
+      bodyOk = writeBody(id, opened.project);
     }
-    return { ...entry };
+    return { ...entry, fullyApplied: indexOk && bodyOk };
   },
 
   setEventDate(id: string, eventDate: string | undefined, now = Date.now()): ProjectMeta | null {

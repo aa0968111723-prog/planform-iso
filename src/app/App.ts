@@ -719,11 +719,21 @@ export class App {
   }
 
   /**
-   * Land the user in 場佈 with the session settings the plan implies: head
-   * count, arrival window and staffing come from the plan's own scenario so the
-   * mat arranger, the simulation and the AI all read one number.
+   * Take the session's numbers from the plan itself.
+   *
+   * Split out from `adoptProjectSettings` because it has to run on the boot
+   * path too, and the navigation half must NOT: a volunteer who refreshes
+   * mid-setup is deliberately put back where they were (UI.ts), so switching
+   * them to 場佈 and re-framing the camera would undo that.
+   *
+   * Skipping it on boot is how the shipped E310 example used to get quietly
+   * rewritten: after a refresh the session still held the class defaults
+   * (陸續到 / 20 分 / 報到 1 人) while the plan on disk said 快開始才到 / 15 分 /
+   * 報到 2 人, and one press of ▶ 模擬 wrote the defaults over the authored
+   * example — on disk. Measured on the golden: average wait 392 s → 760 s,
+   * peak queue 20 → 34.
    */
-  private adoptProjectSettings(project: Project): void {
+  seedSessionFromPlan(project: Project): void {
     // A rehearsal belongs to the plan it was started on. Carrying the agents,
     // the queue counts or the statistics into the next project would show
     // somebody else's crowd standing in this room.
@@ -765,6 +775,14 @@ export class App {
       // number the event was created with.
       this.session.participants = scenario.participantCount;
     }
+  }
+
+  /**
+   * Open a plan: adopt its numbers AND land the user in 場佈 looking at it.
+   * Used when the user actively opens or creates a project — never on resume.
+   */
+  private adoptProjectSettings(project: Project): void {
+    this.seedSessionFromPlan(project);
     this.setWorkflow("layout");
     // Two flat slabs in a shallow isometric view read as nothing on a phone —
     // compact devices open the plan top-down. A booth is the exception: its

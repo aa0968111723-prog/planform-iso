@@ -27,6 +27,11 @@ if (opened?.ok && activeId) store.bindProject(activeId);
 else ProjectRepository.setActiveProjectId(null);
 
 const app = new App(canvas, store);
+// A resumed plan must arrive with its own numbers. Opening and creating both
+// seed the session; resuming skipped it, so a refresh silently swapped the
+// plan's authored arrival rhythm, window and staffing for the class defaults —
+// and the next ▶ 模擬 wrote those defaults back to disk.
+if (opened?.ok) app.seedSessionFromPlan(store.getState());
 const ui = new UI(app, root);
 
 if (opened && !opened.ok) {

@@ -111,10 +111,20 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
         el("span", { text: `已刪除「${meta.name}」` }),
         button("復原", () => {
           const ok = ProjectRepository.restoreProject(pending.snapshot);
-          if (ok) cb.onRestored?.(meta.id);
+          if (!ok) {
+            // `deleteProject` already removed the body from storage, so this
+            // pending snapshot is the ONLY remaining copy of the plan. Forget
+            // it here — as this used to — and a failed undo destroys the
+            // project for good, behind one apologetic toast. So the bar stays
+            // up: free some space, press 復原 again.
+            refresh();
+            toast(`「${meta.name}」還沒復原成功——儲存空間可能已滿，清掉一些再按一次「復原」`, false);
+            return;
+          }
+          cb.onRestored?.(meta.id);
           forget(meta.id);
           refresh();
-          toast(ok ? `已復原「${meta.name}」` : "無法復原這份專案", ok);
+          toast(`已復原「${meta.name}」`);
         }, "chip chip--accent"),
       ]);
     });
@@ -128,11 +138,25 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
       return;
     }
     refresh();
-    toast(`已改名為「${updated.name}」`);
+    // A rename touches two places — the card index and the plan's own name.
+    // On a full store one can land and the other not, and the card would then
+    // show the new name over a 場刊圖 that still prints the old one.
+    toast(updated.fullyApplied
+      ? `已改名為「${updated.name}」`
+      : `卡片改名了，但存檔沒寫成功——儲存空間可能已滿，匯出前請再確認一次名稱`, updated.fullyApplied);
   };
 
   const doDuplicate = (meta: ProjectMeta): void => {
-    const copy = ProjectRepository.duplicateProject(meta.id);
+    // `createProject` throws by contract when the body write fails, and this
+    // is the club's most-used button. Uncaught, the click handler aborts
+    // before both `refresh()` and `toast()`: no card, no message, nothing.
+    let copy: ProjectMeta | null;
+    try {
+      copy = ProjectRepository.duplicateProject(meta.id);
+    } catch {
+      toast("儲存空間已滿，請先刪掉一些專案或匯出備份", false);
+      return;
+    }
     if (!copy) {
       toast("這份專案讀不出來，無法複製", false);
       return;
