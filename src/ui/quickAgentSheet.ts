@@ -31,14 +31,80 @@ export interface QuickAgentHooks {
   sharePartnerImage?: () => void;
 }
 
+/**
+ * UI names for the tools a card can mention.
+ *
+ * A card only ever shows a tool name when something FAILED, which is exactly
+ * when the user least wants to read `checkAccessibilityWarnings`. The map
+ * covers every tool the local planner can emit; anything else falls through to
+ * its own name rather than being hidden.
+ */
 const TOOL_LABEL: Record<string, string> = {
+  // read
+  getProjectSummary: "讀取場佈摘要",
+  getVenueGeometry: "讀取場地尺寸",
+  getZones: "讀取區域",
+  getRoutes: "讀取動線",
+  listAssets: "讀取素材庫",
+  getValidationIssues: "讀取檢查結果",
+  getSimulationSummary: "讀取模擬結果",
+  getViewportState: "讀取目前視角",
+  getMeasurements: "讀取量測",
+  getActiveScenario: "讀取活動流程",
+  // objects
   placeAsset: "放置物品",
+  createAssetFromCatalog: "放置物品",
+  createCustomAssetProxy: "建立素材",
+  createPropFromRecipe: "建立互動道具",
+  importAsset: "匯入素材",
+  updateAssetMetadata: "修改素材資料",
+  moveAsset: "移動物品",
+  rotateAsset: "旋轉物品",
+  resizeAsset: "調整尺寸",
+  duplicateAsset: "複製物品",
+  removeAsset: "刪除物品",
+  // arrays
+  createArray: "排列陣列",
+  updateArray: "修改陣列",
+  removeArray: "刪除陣列",
+  distributeObjects: "等距排開",
+  alignObjects: "對齊物品",
+  // zones / routes / stations
   createZone: "建立區域",
+  updateZone: "修改區域",
+  removeZone: "刪除區域",
   createRoute: "建立動線",
+  updateRoute: "修改動線",
+  removeRoute: "刪除動線",
+  connectRouteToZones: "連接動線與區域",
+  createServiceStation: "建立服務站",
+  updateServiceStation: "修改服務站",
+  removeServiceStation: "刪除服務站",
+  // spatial
+  generateLayoutCandidates: "產生場佈方案",
+  applySmartLayout: "套用場佈方案",
+  scoreLayoutCandidate: "評分方案",
   validateLayout: "檢查場佈",
+  measureGap: "量距離",
+  checkDoorClearance: "檢查門前淨空",
+  checkAccessibilityWarnings: "無障礙提醒",
+  checkSightlines: "檢查視線",
+  calculateCapacity: "估算容納人數",
   simulateScenario: "模擬活動",
   compareScenarios: "比較方案",
-  createCustomAssetProxy: "建立素材",
+  explainBottleneck: "找出最塞的地方",
+  // project / view
+  saveProject: "存檔",
+  createLayoutVersion: "存成版本",
+  restoreLayoutVersion: "讀回版本",
+  exportPlanImage: "匯出場佈圖",
+  exportPartnerView: "匯出夥伴圖",
+  exportMaterialList: "產生物資清單",
+  focusObject: "對焦物品",
+  focusZone: "對焦區域",
+  setView: "切換視角",
+  setLayerVisibility: "切換圖層",
+  fitScene: "縮放到全場",
 };
 
 export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): QuickAgentSheetHandles {
