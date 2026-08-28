@@ -9,11 +9,20 @@
 
 import type {
   EventScenario,
+  InteractionStation,
+  InteractionStep,
+  InteractionTemplate,
   ParticipantProfile,
   ParticipantProfileId,
   RoutePoint,
   ServiceStation,
 } from "./model";
+import {
+  audienceJoiners,
+  normalizeTemplate,
+  stepAfter,
+  templateFromScenario,
+} from "./interactionCompile";
 import { buildTravelPath, pointAtPolyline, queuePlacement, routeLength } from "./simSpatial";
 
 // --- PRNG -----------------------------------------------------------------
@@ -167,8 +176,18 @@ interface SimEvent {
 interface AgentRuntime {
   id: number;
   profileId: ParticipantProfileId;
-  branch: string[];
-  branchIndex: number;
+  /**
+   * Where this visitor is in the flow.
+   *
+   * This used to be `branch: string[]` plus an index — a fixed list of station
+   * ids decided on arrival. A flow that forks cannot be a list decided in
+   * advance, so the visitor now carries the step they are on and the next one
+   * is resolved when they finish. For a classroom, which never forks, walking
+   * the steps visits exactly the same stations in exactly the same order.
+   */
+  stepId: string | null;
+  /** Answers recorded by `chance` steps, for a later `match` to look up. */
+  memory: Record<string, string>;
   arrivalT: number;
   journeyStart: number;
   journeyEnd: number | null;
@@ -245,6 +264,83 @@ function arrivalTimes(
   return times;
 }
 
+/**
+ * How long one step takes for one visitor.
+ *
+ * Deliberately the same arithmetic as `serviceDuration` below, reading the
+ * step's own mean and variance instead of a station's. Same Box-Muller draw,
+ * same two rng() calls, same 0.3×–2.5× truncation — which is what makes a
+ * compiled classroom scenario produce bit-identical numbers.
+ */
+function sampleDuration(step: InteractionStep, extraSeconds: number, rng: () => number): number {
+  const mean = Math.max(1, step.avgSeconds + extraSeconds);
+  const variance = step.serviceVariance ?? mean * 0.2;
+  const u1 = Math.max(1e-9, rng());
+  const u2 = rng();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  const raw = mean + z * Math.sqrt(Math.max(0, variance));
+  return Math.min(mean * 2.5, Math.max(mean * 0.3, raw));
+}
+
+/**
+ * How many service positions a station opens.
+ *
+ * `selfService` is its own answer rather than "zero staff", because zero staff
+ * means zero servers and a queue that never drains — a visitor flipping their
+ * own card would wait there forever.
+ */
+function serversFor(st: InteractionStation): number {
+  if (st.selfService) return Math.max(1, st.parallelServers);
+  return effectiveServers(st);
+}
+
+interface BranchOutcome {
+  extraSeconds: number;
+  /** undefined = follow the step's own next; otherwise this wins. */
+  jump: string | null | undefined;
+  optionLabel?: string;
+}
+
+/**
+ * Resolve a step's fork for one visitor.
+ *
+ * A `chance` costs exactly one rng() draw, and only when there is a real choice
+ * — a single-option fork is not a choice, and spending a draw on it would shift
+ * every later number for no reason. A `match` costs none at all: it is a
+ * lookup, and which quote you get does not change how long you stand there.
+ */
+function resolveBranch(step: InteractionStep, agent: AgentRuntime, rng: () => number): BranchOutcome {
+  const branch = step.branch;
+  if (!branch) return { extraSeconds: 0, jump: undefined };
+
+  if (branch.kind === "chance") {
+    const options = branch.options.filter((o) => o.weight > 0);
+    if (!options.length) return { extraSeconds: 0, jump: undefined };
+    let picked = options[0];
+    if (options.length > 1) {
+      const total = options.reduce((sum, o) => sum + o.weight, 0);
+      let roll = rng() * total;
+      for (const option of options) {
+        roll -= option.weight;
+        if (roll <= 0) { picked = option; break; }
+        picked = option;
+      }
+    }
+    if (branch.record) agent.memory[branch.record] = picked.value ?? picked.id;
+    return { extraSeconds: picked.extraSeconds ?? 0, jump: picked.next, optionLabel: picked.label };
+  }
+
+  const key = branch.on.map((k) => agent.memory[k] ?? "");
+  for (const rule of branch.rules) {
+    const hit = rule.when.every((want, i) => want === "*" || want === key[i]);
+    if (hit) return { extraSeconds: rule.extraSeconds ?? 0, jump: rule.next, optionLabel: rule.label };
+  }
+  const other = branch.otherwise;
+  return other
+    ? { extraSeconds: other.extraSeconds ?? 0, jump: other.next, optionLabel: other.label }
+    : { extraSeconds: 0, jump: undefined };
+}
+
 function serviceDuration(st: ServiceStation, profileId: ParticipantProfileId, rng: () => number): number {
   const mean = Math.max(1, st.profileServiceSeconds?.[profileId] ?? st.meanServiceSeconds);
   const variance = st.serviceVariance ?? mean * 0.2;
@@ -280,35 +376,54 @@ export interface RunOptions {
   maxHorizonSeconds?: number;
 }
 
+/**
+ * The classroom scenario is now one shape of an interaction flow, not its own
+ * code path.
+ *
+ * The wrapper stays rather than changing every caller: `EventScenario` is what
+ * sits in saved projects and what `e310.test.ts` asserts structurally. The
+ * model lands first; the storage format retires later, when somebody
+ * deliberately re-approves the golden numbers.
+ */
 export function runDiscreteEvent(
   scenario: EventScenario,
   opts: RunOptions = {},
 ): SimulationResult {
-  const rng = createRng(scenario.seed >>> 0 || 1);
-  const profiles = normalizeProfiles(scenario.profiles);
-  if (!scenario.stations.length || !profiles.length) {
-    return emptyResult(scenario, "沒有站點或參與者設定。");
+  return runInteraction(templateFromScenario(scenario), opts);
+}
+
+export function runInteraction(
+  template: InteractionTemplate,
+  opts: RunOptions = {},
+): SimulationResult {
+  const rng = createRng(template.seed >>> 0 || 1);
+  const n = normalizeTemplate(template);
+  // Segments reuse ParticipantProfile's allocator verbatim, so whole people are
+  // still handed out by largest remainder in exactly the same order.
+  const profiles = normalizeProfiles(
+    template.segments.map((s) => ({ id: s.id, ratio: s.share, branch: [] as string[] })),
+  );
+  const startStepOf = new Map(template.segments.map((s) => [s.id, s.startStepId]));
+  if (!template.stations.length || !profiles.length || !template.steps.length) {
+    return emptyTemplateResult(template, "沒有站點或參與者設定。");
   }
-  const stationMap = new Map(scenario.stations.map((s) => [s.id, s]));
-  for (const p of profiles) {
-    for (const sid of p.branch) {
-      if (!stationMap.has(sid)) {
-        return emptyResult(scenario, `站點 ${sid} 不存在於流程中。`);
-      }
+  for (const segment of template.segments) {
+    if (!n.stepById.has(segment.startStepId)) {
+      return emptyTemplateResult(template, `步驟 ${segment.startStepId} 不存在於流程中。`);
     }
   }
 
   const sampleDt = opts.sampleDt ?? 1;
   const maxHorizon =
-    opts.maxHorizonSeconds ?? scenario.arrivalWindowSeconds + 7200;
+    opts.maxHorizonSeconds ?? template.audience.windowSeconds + 7200;
 
   const stations: Record<string, StationRuntime> = {};
-  for (const s of scenario.stations) {
-    const n = effectiveServers(s);
+  for (const s of template.stations) {
+    const servers = serversFor(s);
     stations[s.id] = {
       def: s,
       queue: [],
-      busyUntil: Array.from({ length: n }, () => 0),
+      busyUntil: Array.from({ length: servers }, () => 0),
       maxQueue: 0,
       totalWait: 0,
       served: 0,
@@ -316,10 +431,16 @@ export function runDiscreteEvent(
     };
   }
 
+  // Only the people who actually take part are simulated. A booth may have 600
+  // people walk past; spawning the 480 who never stopped would put half a
+  // million objects in a phone's memory to model nobody doing anything.
+  const funnel = audienceJoiners(template.audience);
+  const joinerCount = funnel.joined;
+
   const arrivals = arrivalTimes(
-    scenario.participantCount,
-    scenario.arrivalWindowSeconds,
-    scenario.arrivalProfile,
+    joinerCount,
+    template.audience.windowSeconds,
+    template.audience.profile,
     rng,
   );
   // Shuffled, because `allocateProfiles` returns them grouped — every prepaid
@@ -329,24 +450,33 @@ export function runDiscreteEvent(
   // by twenty consecutive payers. That is not how a 40/20 mix arrives, and it
   // is the exact input to the 同桌／分桌 staffing comparison the user is asked
   // to trust. Seeded, so the run stays reproducible.
-  const assignedProfiles = shuffled(allocateProfiles(scenario.participantCount, profiles), rng);
+  const assignedProfiles = shuffled(allocateProfiles(joinerCount, profiles), rng);
 
   const agents: AgentRuntime[] = [];
   const events: SimEvent[] = [];
   let seq = 0;
   let maxCorridorOverflow = 0;
   const traversedDoors = new Set<string>();
+  /** Where a fork decided this visitor goes, held until the step finishes. */
+  const pendingJump = new Map<number, string | null | undefined>();
+  /** How often each option came up, per step, for 「拖延獸 42 人」. */
+  const optionCounts = new Map<string, Map<string, number>>();
 
-  const firstStationPos = stationPos(stationMap.get(profiles[0].branch[0])!);
+  /** The station a step happens at, falling back to the first one. */
+  const stationOfStep = (step: InteractionStep | null): InteractionStation =>
+    (step?.stationId ? n.stationById.get(step.stationId) : undefined) ?? template.stations[0];
+
+  const firstStep = n.stepById.get(startStepOf.get(profiles[0].id) ?? "") ?? template.steps[0];
+  const firstStationPos = stationPos(stationOfStep(firstStep));
 
   for (let i = 0; i < arrivals.length; i++) {
     const profile = assignedProfiles[i] ?? profiles[profiles.length - 1];
-    const branch = profile.branch.length ? profile.branch : [scenario.stations[0].id];
+    const startId = startStepOf.get(profile.id) ?? template.steps[0].id;
     agents.push({
       id: i,
       profileId: profile.id,
-      branch,
-      branchIndex: 0,
+      stepId: startId,
+      memory: {},
       arrivalT: arrivals[i],
       journeyStart: arrivals[i],
       journeyEnd: null,
@@ -363,7 +493,7 @@ export function runDiscreteEvent(
     pushEvent(events, { t: arrivals[i], kind: "arrive", agentId: i, seq: seq++ });
   }
 
-  const speed = Math.max(0.2, scenario.settings.speedMetersPerSecond);
+  const speed = Math.max(0.2, template.settings.speedMetersPerSecond);
   const playback: PlaybackFrame[] = [];
   let nextSample = 0;
 
@@ -371,7 +501,7 @@ export function runDiscreteEvent(
     for (let index = 0; index < st.queue.length; index++) {
       const agent = agents[st.queue[index]];
       if (!agent) continue;
-      const placement = queuePlacement(st.def, index, scenario.spatial);
+      const placement = queuePlacement(st.def, index, template.spatial);
       agent.x = placement.point.x;
       agent.z = placement.point.z;
       const queueOverflow = index + 1 > st.def.queueCapacity ? index + 1 - st.def.queueCapacity : 0;
@@ -431,7 +561,19 @@ export function runDiscreteEvent(
     agent.stationId = stationId;
     agent.x = st.def.x;
     agent.z = st.def.z;
-    const dur = serviceDuration(st.def, agent.profileId, rng);
+    const step = agent.stepId ? n.stepById.get(agent.stepId) ?? null : null;
+    // Roll the fork here, not on arrival: the option's extra seconds then land
+    // straight on this server's occupancy.
+    const outcome = step ? resolveBranch(step, agent, rng) : { extraSeconds: 0, jump: undefined };
+    if (outcome.jump !== undefined) pendingJump.set(agentId, outcome.jump);
+    if (outcome.optionLabel && step) {
+      const counts = optionCounts.get(step.id) ?? new Map<string, number>();
+      counts.set(outcome.optionLabel, (counts.get(outcome.optionLabel) ?? 0) + 1);
+      optionCounts.set(step.id, counts);
+    }
+    const dur = step
+      ? sampleDuration(step, outcome.extraSeconds, rng)
+      : serviceDuration(st.def, agent.profileId, rng);
     st.busyUntil[freeIdx] = t + dur;
     st.busyServerSeconds += dur;
     pushEvent(events, {
@@ -457,10 +599,10 @@ export function runDiscreteEvent(
   };
 
   const sendToStation = (agent: AgentRuntime, stationId: string, t: number) => {
-    const st = stationMap.get(stationId)!;
+    const st = n.stationById.get(stationId)!;
     const from = { x: agent.x, z: agent.z };
     const to = stationPos(st);
-    const travel = buildTravelPath(from, to, scenario.spatial, speed);
+    const travel = buildTravelPath(from, to, template.spatial, speed);
     for (const doorId of travel.doorIds) traversedDoors.add(doorId);
     agent.state = "traveling";
     agent.stationId = stationId;
@@ -496,22 +638,23 @@ export function runDiscreteEvent(
     switch (ev.kind) {
       case "arrive": {
         agent.journeyStart = ev.t;
-        const first = agent.branch[0];
-        if (!first) {
+        const step = agent.stepId ? n.stepById.get(agent.stepId) ?? null : null;
+        if (!step) {
           agent.state = "done";
           agent.journeyEnd = ev.t;
           break;
         }
+        const first = stationOfStep(step).id;
         // Spawn at first station (zero travel from "outside").
-        agent.x = stationMap.get(first)!.x;
-        agent.z = stationMap.get(first)!.z;
+        agent.x = n.stationById.get(first)!.x;
+        agent.z = n.stationById.get(first)!.z;
         enqueue(agent, first, ev.t);
         break;
       }
       case "arriveStation": {
         if (!ev.stationId) break;
-        agent.x = stationMap.get(ev.stationId)!.x;
-        agent.z = stationMap.get(ev.stationId)!.z;
+        agent.x = n.stationById.get(ev.stationId)!.x;
+        agent.z = n.stationById.get(ev.stationId)!.z;
         enqueue(agent, ev.stationId, ev.t);
         break;
       }
@@ -519,13 +662,20 @@ export function runDiscreteEvent(
         if (!ev.stationId) break;
         const st = stations[ev.stationId];
         st.served += 1;
-        agent.branchIndex += 1;
-        if (agent.branchIndex >= agent.branch.length) {
+        const done = agent.stepId ? n.stepById.get(agent.stepId) ?? null : null;
+        // The fork resolves when the step FINISHES, so a face that takes longer
+        // has already occupied the server for longer — "a slower option makes
+        // the queue longer" is a fact of the machinery, not a label.
+        const jump = pendingJump.get(agent.id);
+        pendingJump.delete(agent.id);
+        const nextStep = done ? stepAfter(done, jump, n) : null;
+        agent.stepId = nextStep?.id ?? null;
+        if (!nextStep) {
           agent.state = "done";
           agent.stationId = null;
           agent.journeyEnd = ev.t;
         } else {
-          sendToStation(agent, agent.branch[agent.branchIndex], ev.t);
+          sendToStation(agent, stationOfStep(nextStep).id, ev.t);
         }
         // Free server may take next in queue.
         tryStartService(ev.stationId, ev.t);
@@ -552,9 +702,9 @@ export function runDiscreteEvent(
     : simT;
 
   const horizon = Math.max(finishTime, 1);
-  const stationStats: StationStats[] = scenario.stations.map((s) => {
+  const stationStats: StationStats[] = template.stations.map((s) => {
     const st = stations[s.id];
-    const servers = effectiveServers(s);
+    const servers = serversFor(s);
     return {
       stationId: s.id,
       name: s.name,
@@ -587,7 +737,7 @@ export function runDiscreteEvent(
   const maxQueue = Math.max(0, ...stationStats.map((s) => s.maxQueue));
   const maxQueueWhere = stationStats.find((s) => s.maxQueue === maxQueue)?.name ?? null;
   const spatialBottlenecks: SpatialBottleneck[] = [];
-  for (const door of scenario.spatial?.doors ?? []) {
+  for (const door of template.spatial?.doors ?? []) {
     if (!traversedDoors.has(door.id) || door.throughput >= 1) continue;
     spatialBottlenecks.push({
       kind: "door",
@@ -595,11 +745,11 @@ export function runDiscreteEvent(
       name: "門前",
       x: door.x,
       z: door.z,
-      count: door.blocked ? scenario.participantCount : Math.max(1, Math.round(scenario.participantCount * (1 - door.throughput))),
+      count: door.blocked ? joinerCount : Math.max(1, Math.round(joinerCount * (1 - door.throughput))),
     });
   }
-  if (maxCorridorOverflow > 0 && scenario.spatial) {
-    const corridor = scenario.spatial.corridor;
+  if (maxCorridorOverflow > 0 && template.spatial) {
+    const corridor = template.spatial.corridor;
     spatialBottlenecks.push({
       kind: "corridor",
       id: "corridor",
@@ -633,11 +783,34 @@ export function runDiscreteEvent(
   }
   summaryLines.push(`平均全程 ${Math.round(avgJourney)} 秒。`);
 
+  // Steps the visitors actually walked, with how often each option came up.
+  // Only emitted when the flow has something a scenario could not express, so
+  // a classroom result is byte-identical to what it always was.
+  const hasForks = template.steps.some((s) => s.branch);
+  const stepStats: StepStats[] | undefined = hasForks
+    ? template.steps.map((step) => {
+      const counts = optionCounts.get(step.id);
+      return {
+        stepId: step.id,
+        name: step.name,
+        entered: counts ? [...counts.values()].reduce((a, b) => a + b, 0) : 0,
+        avgSeconds: step.avgSeconds,
+        optionCounts: counts
+          ? [...counts.entries()].map(([label, count]) => ({ label, count }))
+          : undefined,
+      };
+    })
+    : undefined;
+
   return {
-    scenarioId: scenario.id,
-    seed: scenario.seed,
-    participantCount: scenario.participantCount,
+    scenarioId: template.id,
+    seed: template.seed,
+    participantCount: joinerCount,
     leftEarly: 0,
+    steps: stepStats,
+    funnel: funnel.passed !== funnel.joined
+      ? { ...funnel, completed: completedAgents.length, leftEarly: 0 }
+      : undefined,
     completed: completedAgents.length,
     unfinished,
     avgJourneySeconds: avgJourney,
@@ -683,14 +856,14 @@ export function runScenarioMedian(
   };
 }
 
-function emptyResult(scenario: EventScenario, msg: string): SimulationResult {
+function emptyTemplateResult(template: InteractionTemplate, msg: string): SimulationResult {
   return {
-    scenarioId: scenario.id,
-    seed: scenario.seed,
-    participantCount: scenario.participantCount,
+    scenarioId: template.id,
+    seed: template.seed,
+    participantCount: template.audience.count,
     leftEarly: 0,
     completed: 0,
-    unfinished: scenario.participantCount,
+    unfinished: template.audience.count,
     avgJourneySeconds: 0,
     maxJourneySeconds: 0,
     totalWaitSeconds: 0,
@@ -706,6 +879,7 @@ function emptyResult(scenario: EventScenario, msg: string): SimulationResult {
     playback: [],
   };
 }
+
 
 function formatMin(seconds: number): string {
   // Round to whole seconds FIRST so 46:59.6 reads 47 分 0 秒, never 46 分 60 秒.
