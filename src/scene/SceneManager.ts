@@ -17,6 +17,7 @@ import {
   OrthographicCamera,
   Plane,
   PlaneGeometry,
+  Quaternion,
   PCFShadowMap,
   Raycaster,
   Scene,
@@ -43,8 +44,15 @@ import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
 import { stackedLabelY, type PlacedLabel } from "./labelLayout";
-import { buildPropGroupCached } from "./propVisual";
+import {
+  buildPropGroupCached,
+  clearPartResult,
+  diceRollQuaternion,
+  diceSettleQuaternion,
+  paintPartResult,
+} from "./propVisual";
 import { propFaceOptions, propForAssetId } from "../core/propCatalog";
+import type { PlaybackStationResult } from "../core/eventFlow";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
 
 const D2R = Math.PI / 180;
@@ -60,6 +68,14 @@ export interface GhostState {
   elevation: number;
   validity: "ok" | "warn" | "bad";
   door?: { hinge?: "left" | "right"; openInward?: boolean; openDeg?: number };
+}
+
+export interface PropPlaybackView {
+  /** Continuous rehearsal clock, seconds. */
+  t: number;
+  results: Record<string, PlaybackStationResult>;
+  /** Placed object id → the station bound to it. */
+  stationOfObject: Record<string, string>;
 }
 
 export interface PickResult {
@@ -82,6 +98,12 @@ interface SessionView {
   simStations?: { id: string; name: string; x: number; z: number; queue: number }[];
   /** Playback draws a station badge per stop; route names on top are soup. */
   hideRouteLabels?: boolean;
+  /**
+   * Latest rolled result per station while a rehearsal plays — the feed for
+   * §25 (dice settling) and §31 (screens showing a result). Null when the
+   * crowd is off; the scene then puts every prop back to rest.
+   */
+  propPlayback?: PropPlaybackView | null;
   /** Non-null in Partner Mode: emphasis per entity plus red/orange/green marks. */
   partner?: PartnerPresentation | null;
 }
@@ -388,6 +410,7 @@ export class SceneManager {
     this.partner = partner;
     this.syncAreasAndTiles(project, simplify);
     this.syncObjects(project, session.showLabels, simplify);
+    this.syncPropPlayback(project, session.propPlayback ?? null);
     this.syncArrays(project);
     this.syncZones(project);
     this.syncRoutes(project, session.focusRouteId ?? null, session.hideRouteLabels ?? false);
@@ -713,6 +736,54 @@ export class SceneManager {
       }
     }
     this.applyRoofVisibility();
+  }
+
+  /**
+   * §25/§31 — animate placed props from the rehearsal's per-station results.
+   *
+   * Mutates only mesh transforms and per-mesh painted materials inside the
+   * already-built groups; the rebuild signature never sees any of it, so a
+   * spinning dice cannot trigger a rebuild and a rebuild mid-spin just
+   * re-settles deterministically on the next tick.
+   */
+  private syncPropPlayback(project: Project, playback: PropPlaybackView | null): void {
+    for (const o of project.objects) {
+      const def = propForAssetId(project.props, o.assetId);
+      if (!def) continue;
+      const entry = this.objectNodes.get(o.id);
+      if (!entry) continue;
+      const ownStation = playback?.stationOfObject[o.id];
+
+      const dice = def.parts.find((p) => p.facesFromOptions);
+      if (dice) {
+        const mesh = entry.group.getObjectByName(`part:${dice.id}`) as Mesh | undefined;
+        if (mesh) {
+          if (!mesh.userData.restQuat) mesh.userData.restQuat = mesh.quaternion.clone();
+          const rest = mesh.userData.restQuat as Quaternion;
+          const result = playback && ownStation ? playback.results[ownStation] : undefined;
+          if (result && playback) {
+            const options = propFaceOptions(project, o.id, def) ?? [];
+            const idx = options.findIndex((opt) => opt.id === result.optionId);
+            // A face beyond the six painted ones settles back to rest — the
+            // box cannot show it, and pretending would print the wrong label.
+            const settle = diceSettleQuaternion(idx) ?? rest.clone();
+            mesh.quaternion.copy(diceRollQuaternion(playback.t - result.t, result.serial, settle));
+          } else {
+            mesh.quaternion.copy(rest);
+          }
+        }
+      }
+
+      for (const part of def.parts) {
+        if (!part.showsResultOf) continue;
+        const mesh = entry.group.getObjectByName(`part:${part.id}`) as Mesh | undefined;
+        if (!mesh) continue;
+        const stationId = part.showsResultOf === "self" ? ownStation : part.showsResultOf;
+        const result = playback && stationId ? playback.results[stationId] : undefined;
+        if (result) paintPartResult(mesh, part, result.label, result.color ?? part.color ?? "#f8fafc");
+        else clearPartResult(mesh);
+      }
+    }
   }
 
   private syncArrays(project: Project): void {

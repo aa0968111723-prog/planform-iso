@@ -389,7 +389,10 @@ function diceStation(): PropDefinition {
     parts: [
       ...t.parts.map((p) => ({ ...p, id: `t_${p.id}` })),
       { ...d.parts[0], id: "dice", size: { width: 0.4, depth: 0.4, height: 0.4 }, offset: { x: 0.3, y: 0.74, z: 0 } },
-      { id: "board", shape: "plane", size: { width: 0.7, depth: 0.02, height: 0.5 }, offset: { x: -0.5, y: 0.78, z: -0.1 }, color: "#f8fafc", text: "題目板" },
+      // §31: during a rehearsal this board shows the face this station just
+      // rolled — the whole point of 骰子結果 → 題目螢幕, wired by default so
+      // the golden prop demonstrates it without anyone configuring anything.
+      { id: "board", shape: "plane", size: { width: 0.7, depth: 0.02, height: 0.5 }, offset: { x: -0.5, y: 0.78, z: -0.1 }, color: "#f8fafc", text: "題目板", showsResultOf: "self" },
       { id: "sign", shape: "plane", size: { width: 0.5, depth: 0.02, height: 1.2 }, offset: { x: 1.35, y: 0.05, z: 0.2 }, color: "#fde68a", text: "城市微光" },
       { id: "signbase", shape: "box", size: { width: 0.4, depth: 0.3, height: 0.05 }, offset: { x: 1.35, y: 0, z: 0.2 }, color: "#475569", finish: "painted-metal" },
     ],
@@ -472,7 +475,13 @@ function quizStation(): PropDefinition {
     dimensions: { width: 2.2, depth: 1.0, height: 1.6 },
     parts: [
       ...t.parts.map((p) => ({ ...p, id: `t_${p.id}` })),
-      ...s.parts.map((p) => ({ ...p, id: `s_${p.id}`, offset: { ...p.offset, x: p.offset.x - 0.6, z: p.offset.z - 0.3 } })),
+      ...s.parts.map((p) => ({
+        ...p,
+        id: `s_${p.id}`,
+        offset: { ...p.offset, x: p.offset.x - 0.6, z: p.offset.z - 0.3 },
+        // §31: the screen shows 答對／答錯 as each question is answered.
+        ...(p.id === "panel" ? { showsResultOf: "self" } : {}),
+      })),
       ...b.parts.map((p) => ({ ...p, id: `b_${p.id}`, offset: { ...p.offset, x: p.offset.x + 0.5, y: p.offset.y + 0.74 } })),
     ],
     anchors: [

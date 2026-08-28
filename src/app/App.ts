@@ -52,6 +52,7 @@ import {
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import type { PlaybackStationResult } from "../core/eventFlow";
 import { absorbSelection, forkDefinition } from "../core/propEdit";
 import {
   catalogFromProject,
@@ -166,6 +167,8 @@ export interface Session {
   /** Zone type waiting for a canvas tap ("點畫面放區域"). */
   zonePlace: ZoneType | null;
   simPositions: { id?: number; x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
+  /** §25/§26/§31 — latest rolled result per station while a rehearsal plays. */
+  simStationResults: Record<string, PlaybackStationResult>;
   bottlenecks: Bottleneck[];
   simPlaying: boolean;
   /** DES playback (preferred over route-walk when a scenario exists). */
@@ -265,6 +268,7 @@ export class App {
     matCandidates: [],
     zonePlace: null,
     simPositions: [],
+    simStationResults: {},
     bottlenecks: [],
     simPlaying: false,
     simMode: "off",
@@ -401,6 +405,7 @@ export class App {
       bottlenecks: this.session.bottlenecks,
       simQueues: this.session.simQueues,
       simStations: this.overlayStations(),
+      propPlayback: this.propPlaybackView(),
       // A booth is 7 m across with eight station badges on it — the flow names
       // on top of that make the plan unreadable exactly when you are watching
       // the crowd. The ribbons and arrows stay; only the names step aside.
@@ -1860,6 +1865,7 @@ export class App {
     this.session.simResult = null;
     this.session.simCompare = null;
     this.session.simPositions = [];
+    this.session.simStationResults = {};
     this.session.simQueues = {};
     this.session.bottlenecks = [];
     this.session.simTime = 0;
@@ -1939,6 +1945,7 @@ export class App {
     this.session.simPaused = false;
     this.session.simTime = result.finishTimeSeconds;
     this.session.simPositions = [];
+    this.session.simStationResults = {};
     this.session.bottlenecks = [];
     this.notifyUi();
   }
@@ -1966,6 +1973,7 @@ export class App {
     this.session.simPaused = false;
     this.session.simTime = result.finishTimeSeconds;
     this.session.simPositions = [];
+    this.session.simStationResults = {};
     this.session.bottlenecks = [];
     this.notifyUi();
   }
@@ -1981,6 +1989,8 @@ export class App {
 
   private playEventResult(result: SimulationResult): void {
     this.stopSimLoopOnly();
+    this.exitDrift.clear();
+    this.lastAgentStation.clear();
     this.session.simMode = "event-flow";
     this.focusSimulation();
     this.session.simPlaying = true;
@@ -2050,6 +2060,7 @@ export class App {
     this.session.simPaused = false;
     this.session.simMode = "off";
     this.session.simPositions = [];
+    this.session.simStationResults = {};
     this.session.bottlenecks = [];
     this.session.simQueues = {};
     this.session.simTime = 0;
@@ -2064,6 +2075,38 @@ export class App {
     }
   }
 
+  /** §57: a finished person walks out at strolling pace, not conference-rush. */
+  private static readonly EXIT_DRIFT_SPEED = 1.1;
+
+  /** §57 rendering state: one drift record per finished person, reset per replay. */
+  private exitDrift = new Map<number, { t0: number; x0: number; z0: number; ex: number; ez: number } | null>();
+  private lastAgentStation = new Map<number, string>();
+
+  /** World-space exit anchor of the prop a station is bound to, if any. */
+  private exitPointForStation(stationId: string): { x: number; z: number } | null {
+    const stations = this.lastFlow?.stations ?? this.state.interaction?.stations ?? [];
+    const st = stations.find((s) => s.id === stationId);
+    const obj = st?.objectId ? this.state.objects.find((o) => o.id === st.objectId) : undefined;
+    const def = obj ? propForAssetId(this.state.props, obj.assetId) : undefined;
+    const exit = def?.anchors.find((a) => a.role === "exit");
+    if (!obj || !exit) return null;
+    // Same rotation convention as resolveStationPosition.
+    const rad = (obj.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return { x: obj.x + exit.x * cos + exit.z * sin, z: obj.z - exit.x * sin + exit.z * cos };
+  }
+
+  /** The scene's §25/§31 feed: results keyed by station, plus who is bound where. */
+  private propPlaybackView(): { t: number; results: Record<string, PlaybackStationResult>; stationOfObject: Record<string, string> } | null {
+    const results = this.session.simStationResults;
+    if (!Object.keys(results).length) return null;
+    const stations = this.lastFlow?.stations ?? this.state.interaction?.stations ?? [];
+    const stationOfObject: Record<string, string> = {};
+    for (const st of stations) if (st.objectId) stationOfObject[st.objectId] = st.id;
+    return { t: this.session.simTime, results, stationOfObject };
+  }
+
   private applyDesFrame(t: number, result: SimulationResult): void {
     const frame = frameAt(result, t);
     if (!frame) return;
@@ -2072,11 +2115,34 @@ export class App {
     // playback at 0 s forever (dt per tick < sampleDt).
     this.session.simTime = t;
     this.session.simQueues = frame.queues;
+    this.session.simStationResults = frame.results ?? {};
+    // §57: someone who finishes at a prop with an exit anchor walks toward it
+    // instead of vanishing at the station. Rendering-only — every journey,
+    // wait and finish time comes from the engine untouched; a station without
+    // an exit anchor keeps the old behaviour (done = gone).
+    const drifting: Session["simPositions"] = [];
+    for (const a of frame.agents) {
+      if (a.stationId) this.lastAgentStation.set(a.id, a.stationId);
+      if (a.state !== "done") continue;
+      let d = this.exitDrift.get(a.id);
+      if (d === undefined) {
+        const from = this.lastAgentStation.get(a.id);
+        const exit = from ? this.exitPointForStation(from) : null;
+        d = exit ? { t0: t, x0: a.x, z0: a.z, ex: exit.x, ez: exit.z } : null;
+        this.exitDrift.set(a.id, d);
+      }
+      if (!d) continue;
+      const dist = Math.hypot(d.ex - d.x0, d.ez - d.z0);
+      const p = dist > 0.01 ? ((t - d.t0) * App.EXIT_DRIFT_SPEED) / dist : 1;
+      if (p >= 1) continue;
+      drifting.push({ id: a.id, x: d.x0 + (d.ex - d.x0) * p, z: d.z0 + (d.ez - d.z0) * p, state: "traveling" });
+    }
     this.session.simPositions = frame.agents
       .filter((a) => a.state !== "pending" && a.state !== "done")
       // id travels with the position so the crowd can keep each figure facing
       // the way it is walking between frames.
       .map((a) => ({ id: a.id, x: a.x, z: a.z, state: a.state }));
+    this.session.simPositions.push(...drifting);
     this.session.bottlenecks = result.stations
       .filter((s) => (frame.queues[s.stationId] ?? 0) >= 3)
       .map((s) => {
@@ -2116,6 +2182,7 @@ export class App {
         this.session.simPaused = false;
         this.session.simTime = result.finishTimeSeconds;
         this.session.simPositions = [];
+    this.session.simStationResults = {};
         this.session.bottlenecks = [];
         this.notifyUi();
         return;

@@ -24,12 +24,15 @@ import {
   BoxGeometry,
   CanvasTexture,
   CylinderGeometry,
+  Euler,
   Group,
   LinearFilter,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
+  Quaternion,
   SphereGeometry,
+  Vector3,
 } from "three";
 import { materialFromPreset, MATERIAL_PRESETS, type MaterialPresetId } from "./materials";
 import type { InteractionOption, PropDefinition, PropPart } from "../core/model";
@@ -162,6 +165,9 @@ function buildPart(part: PropPart, options: readonly InteractionOption[] | undef
       break;
     }
   }
+  // Named so rehearsal playback can find the dice to spin and the screen to
+  // repaint inside a cloned group.
+  mesh.name = `part:${part.id}`;
   // Part offsets are floor-centre based; three.js geometry is centred.
   const lift = part.shape === "plane" ? height / 2 : part.shape === "sphere" ? width / 2 : height / 2;
   mesh.position.set(part.offset.x, part.offset.y + lift, part.offset.z);
@@ -169,6 +175,105 @@ function buildPart(part: PropPart, options: readonly InteractionOption[] | undef
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
+}
+
+// --- rehearsal animation (§25 dice, §31 displays) ----------------------------
+
+/** How long a dice tumbles before settling on the rolled face. */
+export const DICE_SPIN_SECONDS = 1.6;
+
+const FACE_ORDER = [4, 5, 0, 1, 2, 3]; // duplicated from diceMaterials on purpose: tests pin both
+
+/**
+ * Material-slot → the rotation that turns that face upward. BoxGeometry slot
+ * order is +x, -x, +y, -y, +z, -z; each entry maps that slot's normal to +y.
+ * All rotations are about x or z, so the group's own y-rotation (the placed
+ * object facing) cannot tilt the settled face off vertical.
+ */
+const SLOT_SETTLE: Quaternion[] = [
+  new Quaternion().setFromEuler(new Euler(0, 0, Math.PI / 2)),   // +x up
+  new Quaternion().setFromEuler(new Euler(0, 0, -Math.PI / 2)),  // -x up
+  new Quaternion(),                                               // +y already up
+  new Quaternion().setFromEuler(new Euler(Math.PI, 0, 0)),       // -y up
+  new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0)),  // +z up
+  new Quaternion().setFromEuler(new Euler(Math.PI / 2, 0, 0)),   // -z up
+];
+
+/**
+ * The rotation that shows option `optionIndex` face-up, or null when that
+ * option has no painted face (a d12's 7th face lives in the odds, not on the
+ * box — the dice then settles back to rest and the label display carries it).
+ */
+export function diceSettleQuaternion(optionIndex: number): Quaternion | null {
+  if (optionIndex < 0 || optionIndex >= 6) return null;
+  return SLOT_SETTLE[FACE_ORDER[optionIndex]].clone();
+}
+
+/**
+ * §25's whole animation as one pure function of playback time: 擲 → 轉 → 停.
+ *
+ * The dice is always the settled face rotated a further `turns` about a fixed
+ * tilted axis, and that extra angle winds down to exactly zero — so the spin
+ * DECELERATES into the result instead of tumbling at full speed and snapping
+ * on the last frame. (The first version blended a free tumble toward the
+ * settled face and could visibly lurch AWAY at 80% before jumping in; the
+ * deceleration test caught it.) No physics engine, per §25.
+ *
+ * Deterministic: same elapsed and same serial always give the same
+ * orientation, and the serial tilts the axis and the turn count so two rolls
+ * of the same face do not look like a replay of each other.
+ */
+export function diceRollQuaternion(elapsed: number, serial: number, settle: Quaternion): Quaternion {
+  const p = Math.min(1, Math.max(0, elapsed / DICE_SPIN_SECONDS));
+  if (p >= 1) return settle.clone();
+  // Ease-out cubic: angular velocity is proportional to (1 - p)², reaching
+  // zero exactly as the face comes to rest.
+  const remaining = (1 - p) ** 3;
+  const turns = 2.5 + (serial % 3) * 0.5;
+  const axis = new Vector3(Math.sin(serial * 1.7), 1, Math.cos(serial * 2.3)).normalize();
+  const spin = new Quaternion().setFromAxisAngle(axis, turns * 2 * Math.PI * remaining);
+  return spin.multiply(settle);
+}
+
+/**
+ * §31: paint a rolled result onto a display part. Clones nothing until a
+ * result actually lands; then the painted material belongs to THIS mesh, so
+ * two screens of the same definition can show two different stations. The
+ * repaint key makes this per-tick safe — same result, no work.
+ */
+export function paintPartResult(mesh: Mesh, part: PropPart, label: string, background: string): void {
+  const key = `${label}|${background}`;
+  if (mesh.userData.resultKey === key) return;
+  const painted = paintedMaterial(label, background);
+  if (!("baseResultMaterial" in mesh.userData)) mesh.userData.baseResultMaterial = mesh.material;
+  const prev = mesh.userData.ownResultMaterial as MeshStandardMaterial | undefined;
+  if (part.shape === "plane") {
+    mesh.material = painted;
+  } else {
+    // Box: the painted face is slot 4 (+z), same as a text part's front.
+    const current = mesh.material;
+    const base: MeshStandardMaterial[] = Array.isArray(current)
+      ? (current as MeshStandardMaterial[]).slice(0, 6)
+      : new Array<MeshStandardMaterial>(6).fill(current as MeshStandardMaterial);
+    while (base.length < 6) base.push(base[0]);
+    base[4] = painted;
+    mesh.material = base as never;
+  }
+  // Textures are shared via the face cache; disposing the material is safe.
+  prev?.dispose();
+  mesh.userData.ownResultMaterial = painted;
+  mesh.userData.resultKey = key;
+}
+
+/** Put a display part back the way it was built (playback stopped). */
+export function clearPartResult(mesh: Mesh): void {
+  if (!("baseResultMaterial" in mesh.userData)) return;
+  const own = mesh.userData.ownResultMaterial as MeshStandardMaterial | undefined;
+  mesh.material = mesh.userData.baseResultMaterial as never;
+  own?.dispose();
+  delete mesh.userData.baseResultMaterial;
+  delete mesh.userData.ownResultMaterial;
+  delete mesh.userData.resultKey;
 }
 
 // --- the compiler ------------------------------------------------------------

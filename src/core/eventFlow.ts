@@ -9,6 +9,7 @@
 
 import type {
   EventScenario,
+  InteractionOption,
   InteractionStation,
   InteractionStep,
   InteractionTemplate,
@@ -132,6 +133,25 @@ export interface PlaybackFrame {
   t: number;
   agents: PlaybackAgent[];
   queues: Record<string, number>;
+  /**
+   * Latest served-fork outcome per station, when any station has rolled one.
+   * Playback-only — the parity fixture excludes `playback`, and nothing here
+   * feeds a number the user reads. A dice face settling (§25), the screen a
+   * result shows on (§31) and the 「目前結果」 readout (§26) all render from
+   * this record.
+   */
+  results?: Record<string, PlaybackStationResult>;
+}
+
+export interface PlaybackStationResult {
+  stepId: string;
+  optionId: string;
+  label: string;
+  color?: string;
+  /** When this outcome was rolled (service start). */
+  t: number;
+  /** Increments per roll at this station, so a repeated face still reads as a new roll. */
+  serial: number;
 }
 
 export interface ScenarioCompareResult {
@@ -341,6 +361,8 @@ interface BranchOutcome {
   /** undefined = follow the step's own next; otherwise this wins. */
   jump: string | null | undefined;
   optionLabel?: string;
+  /** The picked chance option itself, for the playback result record. */
+  option?: InteractionOption;
 }
 
 /**
@@ -369,7 +391,7 @@ function resolveBranch(step: InteractionStep, agent: AgentRuntime, rng: () => nu
       }
     }
     if (branch.record) agent.memory[branch.record] = picked.value ?? picked.id;
-    return { extraSeconds: picked.extraSeconds ?? 0, jump: picked.next, optionLabel: picked.label };
+    return { extraSeconds: picked.extraSeconds ?? 0, jump: picked.next, optionLabel: picked.label, option: picked };
   }
 
   const key = branch.on.map((k) => agent.memory[k] ?? "");
@@ -554,6 +576,11 @@ export function runInteraction(
 
   const speed = Math.max(0.2, template.settings.speedMetersPerSecond);
   const playback: PlaybackFrame[] = [];
+  // Served-fork outcomes only (tryStartService): a 0-second ask-step is a
+  // decision, and 「要不要玩」 answered 路過 is not a dice result. A run with
+  // no served forks — every classroom — never allocates a `results` key.
+  const latestResults: Record<string, PlaybackStationResult> = {};
+  const resultSerials: Record<string, number> = {};
   let nextSample = 0;
 
   const refreshQueuePositions = (st: StationRuntime) => {
@@ -588,7 +615,7 @@ export function runInteraction(
       agent.x = point.x;
       agent.z = point.z;
     }
-    playback.push({
+    const frame: PlaybackFrame = {
       t,
       agents: agents.map((a) => ({
         id: a.id,
@@ -599,7 +626,9 @@ export function runInteraction(
         state: a.state,
       })),
       queues: { ...queues },
-    });
+    };
+    if (Object.keys(latestResults).length) frame.results = { ...latestResults };
+    playback.push(frame);
   };
 
   const tryStartService = (stationId: string, t: number) => {
@@ -631,6 +660,17 @@ export function runInteraction(
     // Roll the fork here, not on arrival: the option's extra seconds then land
     // straight on this server's occupancy.
     const outcome = step ? resolveBranch(step, agent, rng) : { extraSeconds: 0, jump: undefined };
+    if (step?.branch?.kind === "chance" && outcome.option) {
+      const serial = (resultSerials[stationId] = (resultSerials[stationId] ?? 0) + 1);
+      latestResults[stationId] = {
+        stepId: step.id,
+        optionId: outcome.option.id,
+        label: outcome.option.label,
+        color: outcome.option.color,
+        t,
+        serial,
+      };
+    }
     if (outcome.jump !== undefined) pendingJump.set(agentId, outcome.jump);
     if (outcome.optionLabel && step) {
       const counts = optionCounts.get(step.id) ?? new Map<string, number>();

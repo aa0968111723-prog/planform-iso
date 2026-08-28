@@ -641,6 +641,14 @@ export interface PropPart {
    * with the panel.
    */
   facesFromOptions?: boolean;
+  /**
+   * §31 display link — during a rehearsal this part shows the latest rolled
+   * option of a station. `"self"` = the prop's own bound station (the screen
+   * part inside a 骰子遊戲站 assembly); any other value is a station id (a
+   * standalone 互動螢幕 pointed at a placed dice). Rendering-only: the engine
+   * never reads it.
+   */
+  showsResultOf?: string;
 }
 
 /** A place people stand, in the prop's local frame (metres, +Z = facing). */

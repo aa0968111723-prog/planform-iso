@@ -475,6 +475,9 @@ function migratePropPart(raw: Partial<PropPart>, i: number): PropPart | null {
     ...(typeof raw.text === "string" ? { text: raw.text } : {}),
     ...(typeof raw.imageBlobId === "string" ? { imageBlobId: raw.imageBlobId } : {}),
     ...(raw.facesFromOptions === true ? { facesFromOptions: true } : {}),
+    ...(typeof raw.showsResultOf === "string" && raw.showsResultOf
+      ? { showsResultOf: raw.showsResultOf }
+      : {}),
   };
 }
 
