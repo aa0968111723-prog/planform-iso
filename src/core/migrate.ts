@@ -566,6 +566,9 @@ function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | n
     ...(typeof raw.icon === "string" ? { icon: raw.icon } : {}),
     version: Number.isFinite(raw.version) ? Math.max(1, Math.round(Number(raw.version))) : 1,
     ...(typeof raw.source === "string" ? { source: raw.source } : {}),
+    ...(typeof raw.visualFrom === "string" && raw.visualFrom
+      ? { visualFrom: raw.visualFrom }
+      : {}),
   };
 }
 

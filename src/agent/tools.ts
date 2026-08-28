@@ -15,6 +15,7 @@ export const AGENT_TOOL_ALLOWLIST: ReadonlySet<AgentToolName> = new Set([
   "getSimulationSummary",
   "createAssetFromCatalog",
   "createCustomAssetProxy",
+  "createPropFromRecipe",
   "requestAssetReconstruction",
   "importAsset",
   "updateAssetMetadata",

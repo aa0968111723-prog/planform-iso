@@ -218,5 +218,5 @@ tag `PLANFORM_PROP_STUDIO_READY`；**不 merge**。
 | 4. 模擬綁定（接線契約） | ✅ | 20 測試、8 變異全擋；parity 零改動 |
 | 5. Prop Studio UI＋群組 | ✅ | studio overlay（預設種子、零件/互動/錨點編輯、autosave 草稿）、我的道具裝置庫、§71 fork、§93 群組吸收；live 瀏覽器煙霧測試全過 |
 | 6. 彩排／場刊／夥伴／連動 | ✅ | 引擎 per-frame 站台結果、§25 減速落面、§31 顯示連動、§57 離場漂移、§96 場刊前綴閘、§26 屬性面板、§85 夥伴模式點站台、§32 Studio 顯示連動選擇器；32 測試、20/21 變異被擋（1 個等價）。**真瀏覽器抓到 Step 4 就存在的 `propFaceOptions` bug（六個面畫成「玩／路過」），已修＋3 條回歸測試** |
-| 7. GLB／AI／匯入匯出 | ⬜ | |
+| 7. GLB／AI／匯入匯出 | ✅ | §40 `visualFrom` 借用 GLB visual（anchors/遊戲/footprint 仍是道具自己的）、§35 recipe intent/tool/executor＋`propRecipe.ts`、`summarize()` 認得 props（否則 recipe 在預覽表隱形）、`commit()` 修好「刪掉的 optional 區塊不會生效」、`.planform-prop.json` 匯出匯入（每種拒絕都講人話）；28 測試、13/13 變異被擋 |
 | 8. E2E／效能／審查／tag | ⬜ | |

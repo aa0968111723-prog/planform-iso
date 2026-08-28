@@ -63,7 +63,10 @@ export function entryFromProp(def: PropDefinition): AssetCatalogEntry {
     kind,
     icon: def.icon ?? "🎲",
     color: def.parts[0]?.color ?? "#8fb4c9",
-    visualRef: propVisualRef(def),
+    // §40: a definition can borrow an imported model's visual. The scene
+    // dispatches on this, so pointing it at a `glb:` ref is the whole upgrade
+    // — anchors, game and footprint stay the prop's own.
+    visualRef: def.visualFrom ?? propVisualRef(def),
     planSymbolRef: `plan:prop:${def.id}`,
     tags: ["custom", "prop", def.category],
     createdBy: "studio",

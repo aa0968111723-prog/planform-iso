@@ -55,6 +55,8 @@ import {
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import { claimPropId, parsePropFile, propFileName, serializeProp } from "../export/propFile";
+import { downloadText } from "../export/exporters";
 import { clearPropGroupCache } from "../scene/propVisual";
 import { registerPropVisuals } from "../scene/visualRegistry";
 import type { PlaybackStationResult } from "../core/eventFlow";
@@ -633,6 +635,33 @@ export class App {
 
   openPropStudioFor(defId: string): void {
     this.openPropStudioHook?.(defId);
+  }
+
+  /** Write one definition out as a `.planform-prop.json`. */
+  exportProp(defId: string): void {
+    const def = this.propDefinitions().find((d) => d.id === defId);
+    if (!def) return;
+    downloadText(propFileName(def), serializeProp(def, { app: "planform-iso" }));
+    this.toast(`已匯出「${def.name}」`, false);
+  }
+
+  /**
+   * Read one in. A prop the project already has is never overwritten — the
+   * copy on disk may be older than the one being edited here, and a file
+   * dialog offers no undo.
+   */
+  async importProp(file: File): Promise<boolean> {
+    const result = parsePropFile(await file.text());
+    if (!result.ok) {
+      this.toast(result.reason, false);
+      return false;
+    }
+    const taken = new Set(this.propDefinitions().map((d) => d.id));
+    const def = claimPropId(result.prop, taken);
+    this.addPropToProject(def, { place: false });
+    const renamed = def.id !== result.prop.id ? "（已另存為新的一份，沒有覆蓋原本的）" : "";
+    this.toast([`已匯入「${def.name}」${renamed}`, ...result.warnings].join(" "), true);
+    return true;
   }
 
   /** Definitions come with their mirrored entry, or the library cannot place them. */

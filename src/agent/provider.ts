@@ -48,6 +48,35 @@ export class MockProvider implements AgentProvider {
       messages.push("已建立簡化素材，可立即放進場佈。");
     }
 
+    // §35: 「幫我做一個六面骰子，每面一個題目」. Checked BEFORE the generic
+    // 自訂素材 rule, which would otherwise swallow 「做一個…」 and produce a
+    // flat proxy box instead of a playable prop.
+    if (/(骰子|轉盤|抽卡箱|抽卡|道具|關卡)/.test(text) && /(做|建|新增|弄|生成|幫我)/.test(text)) {
+      const kind = /轉盤/.test(text) ? "spinner"
+        : /抽卡/.test(text) ? "cardbox"
+          : /骰子/.test(text) ? "dice" : "box";
+      const faceMatch = text.match(/([0-9]+|[一二三四五六七八九十]+)\s*(面|個面|格|區塊|張)/);
+      const zh: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+      const faceCount = faceMatch
+        ? (Number(faceMatch[1]) || zh[faceMatch[1]] || 6)
+        : undefined;
+      const name = /轉盤/.test(text) ? "轉盤" : /抽卡/.test(text) ? "抽卡箱" : /骰子/.test(text) ? "大型骰子" : "自訂道具";
+      intents.push({ type: "create-prop", name, kind, interactive: true,
+        ...(faceCount ? { faces: Array.from({ length: Math.min(12, faceCount) }, (_, i) => ({ label: `第 ${i + 1} 面` })) } : {}) });
+      toolCalls.push({
+        tool: "createPropFromRecipe",
+        args: {
+          name, kind,
+          ...(faceCount
+            ? { faces: Array.from({ length: Math.min(12, faceCount) }, (_, i) => ({ label: `第 ${i + 1} 面` })) }
+            : {}),
+        },
+      });
+      messages.push(faceCount
+        ? `做了一個 ${faceCount} 面的「${name}」，每一面的題目可以在道具工作室裡改。`
+        : `做了一個「${name}」，細節可以在道具工作室裡改。`);
+    }
+
     if (/放\s*([兩三四五六七八九十\d]+)\s*.*報到|兩個報到|2\s*個報到|報到桌/.test(text) && /放|擺|這裡/.test(text)) {
       const count = /兩|2/.test(text) ? 2 : 1;
       intents.push({ type: "place-assets", assetId: "builtin:regTable", count, target: { type: "near-entrance" } });

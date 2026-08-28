@@ -920,6 +920,14 @@ export class UI {
       el("p", { class: "hint", text: "自己做骰子、轉盤、抽卡箱——放進場地就能彩排。" }),
       el("div", { class: "row wrap" }, [
         button("＋ 新增道具", () => this.openPropStudio(), "btn btn--primary"),
+        button("匯入道具檔", () => {
+          const input = el("input", { type: "file", accept: ".json,application/json" } as never) as HTMLInputElement;
+          input.addEventListener("change", () => {
+            const file = input.files?.[0];
+            if (file) void this.app.importProp(file).then(() => this.update());
+          });
+          input.click();
+        }, "btn btn--ghost"),
         button("從選取的物件建立組合道具", () => {
           const name = window.prompt("組合道具的名字", "骰子遊戲站");
           if (name === null) return;
@@ -936,6 +944,7 @@ export class UI {
         el("span", { class: "list__grow", text: `${def.icon ?? "▦"} ${def.name}${instances ? `（場上 ${instances}）` : ""}` }),
         button("放置", () => this.app.beginPlacementByAssetId(`custom:${def.id}`), "chip chip--sm"),
         button("編輯", () => this.openPropStudio(def, instances), "chip chip--sm"),
+        button("匯出", () => this.app.exportProp(def.id), "chip chip--sm"),
         button("刪除", () => {
           if (!window.confirm(`刪除「${def.name}」？場上的 ${instances} 份和它的互動也會一起移除。`)) return;
           this.app.deletePropDefinition(def.id);
