@@ -1,0 +1,2018 @@
+{
+  "generatedBy": "scripts/research/emit-docs.mjs",
+  "tool": "Perplexity API (sonar-pro) via scripts/research/pplx.mjs",
+  "note": "These are the pages the research pass consulted. A citation here means 'this URL was returned and read', NOT 'this claim is verified'. Verified conclusions live in knowledge.json with their own confidence field.",
+  "topicCount": 15,
+  "topics": [
+    {
+      "id": "01-ai-3d-editor-architecture",
+      "topic": "AI 操作 3D 編輯器的最佳架構",
+      "question": "What is the recommended architecture for letting an LLM agent operate a 3D scene editor safely? Specifically: tool-calling over a domain model versus emitting raw scene JSON; why editors expose a command/transaction layer instead of direct scene-graph mutation; and how preview/commit gates are structured. Cite official docs or well-known open-source editor source (e.g. three.js editor, Blender, Godot) with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T22:57:40.499Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://docs.godotengine.org/en/3.1/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (3.1) documentation in English",
+          "date": "2023-02-15",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/3.3/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (3.3) documentation in English",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/3.4/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (3.4) documentation in English",
+          "date": "2023-02-15",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/3.6/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (3.6) documentation in English",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://godotforums.org/d/41196-undoredo-and-tool-scripts",
+          "title": "Undo/Redo and tool scripts - Godot Forums",
+          "date": "2024-09-20",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://apis.io/schemas/threejs/threejs-scene/",
+          "title": "Three.js JSON Object Scene | APIs.io Schemas",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/editor-i-want-to-save-the-scene-in-file/15147",
+          "title": "Editor: I want to save the scene In File - Questions - three.js forum",
+          "date": "2020-05-13",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://docs.blender.org/api/current/bpy.ops.html",
+          "title": "Operators (bpy.ops)¶",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://forum.godotengine.org/t/how-to-register-changes-to-a-scene-in-editor-plugin/52844",
+          "title": "How to register changes to a scene in editor plugin? - Godot Forum",
+          "date": "2024-03-22",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/the-best-way-to-save-and-open-three-js-scene/16158",
+          "title": "The best way to save and open three.js scene - Questions",
+          "date": "2020-06-12",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://forum.godotengine.org/t/how-to-get-editorundoredomanager-from-an-editorscript-not-an-editorplugin/94577",
+          "title": "How to get EditorUndoRedoManager from an EditorScript (not ...",
+          "date": "2024-12-13",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.blender.org/api/current/bpy.context.html",
+          "title": "Context Access (bpy.context) - Blender Python API",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://blender.stackexchange.com/questions/203775/confusion-about-context",
+          "title": "Confusion about context",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.blender.org/api/3.4/bpy.ops.html",
+          "title": "Operators (bpy.ops)",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.blender.org/api/current/bpy.types.Context.html",
+          "title": "Context(bpy_struct) - Blender Python API",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/makc/three.js.fork/blob/master/editor/docs/Implementing%20additional%20commands%20for%20undo-redo.md",
+          "title": "How to implement additional commands for undo/redo functionality?",
+          "date": "2014-07-12",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developer.blender.org/docs/features/core/undo/",
+          "title": "Undo System - Blender Developer Documentation",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://moonjump.com/forum/coding/wrote-an-undo-redo-system-for-my-godot-level-editor-command-pattern-in-gdscript-deccd2",
+          "title": "wrote an undo/redo system for my Godot level editor - Moonjump",
+          "date": "2026-01-28",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://gist.github.com/rotoglup/e6b79a5c5a4b47d6684c473b42bde235",
+          "title": "201909 - A look into threejs editor app",
+          "date": "2020-04-21",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://masterallarts.com/learn/threejs-from-zero/s8-04-scene-authoring/",
+          "title": "Article s8-04: S8-04 Scene Authoring — Three.js From Zero",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/about-undo-redo/9466",
+          "title": "About Undo/Redo - Resources",
+          "date": "2019-09-06",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://lzugis.cn/threejs-wiki/en/wiki/6.1-visual-editor-application.html",
+          "title": "Visual Editor | Three.js Wiki - lzugis.cn",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/3.0/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (3.0) documentation in English",
+          "date": "2023-02-15",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/stable/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (stable) documentation in English",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/4.4/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (4.4) documentation in English",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/undo-redo-in-three-js-scene/3025",
+          "title": "Undo / Redo in three.js scene - Questions",
+          "date": "2018-06-05",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/latest/classes/class_undoredo.html",
+          "title": "UndoRedo — Godot Engine (latest) documentation in English",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.godotengine.org/en/stable/classes/class_editorundoredomanager.html",
+          "title": "EditorUndoRedoManager - Godot Docs",
+          "date": null,
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "02-threejs-editor-scenegraph",
+      "topic": "Three.js 編輯器與場景圖控制",
+      "question": "How does the official three.js editor structure its undo/redo and scene-graph commands? Describe the Command pattern used in three.js editor (editor/js/commands), how objects are added/moved/removed, and what the official three.js docs say about Object3D transform and matrix updates. Give official URLs (threejs.org, github.com/mrdoob/three.js).",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T22:58:13.707Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://threejs.org/docs/api/en/core/Object3D",
+          "title": "[name]() - Three.js",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://threejs.org/editor/",
+          "title": "three.js editor",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/makc/three.js.fork/blob/dev/editor/docs/Implementing%20additional%20commands%20for%20undo-redo.md",
+          "title": "three.js.fork/editor/docs/Implementing additional commands for undo-redo.md at dev · makc/three.js.fork",
+          "date": "2014-07-12",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/makc/three.js.fork/blob/master/editor/docs/Implementing%20additional%20commands%20for%20undo-redo.md",
+          "title": "How to implement additional commands for undo/redo functionality?",
+          "date": "2014-07-12",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/question-about-object3d-updatematrixworld/6925",
+          "title": "Question about Object3D.updateMatrixWorld() - three.js forum",
+          "date": "2019-04-05",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.w3cschool.cn/ehsib/ehsib-rmlj3qky.html",
+          "title": "three.js Object3D",
+          "date": "2023-02-16",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://biochem-fan.hatenablog.com/entry/20140524/1400885250",
+          "title": "Three.js のメモ - biochem_fanのブログ",
+          "date": "2014-05-23",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/add-objects-to-the-editor-while-the-player-is-running/11470",
+          "title": "Add objects to the editor while the player is running - three.js forum",
+          "date": "2019-12-08",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/mrdoob/three.js/issues/10218",
+          "title": "Object3D - matrices do not auto update · Issue #10218 - GitHub",
+          "date": "2016-11-24",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/mrdoob/three.js/issues/4599",
+          "title": "Make matrixWorld & matrix always up-to-date? · Issue #4599 - GitHub",
+          "date": "2014-03-22",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/solved-how-to-update-matrices-manually/1154",
+          "title": "[SOLVED] How to update matrices manually? - three.js forum",
+          "date": "2017-11-07",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://stackoverflow.com/questions/23130832/three-js-update-objects-matrix-and-scale",
+          "title": "Three.js update object's matrix and scale?",
+          "date": "2014-04-17",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://threejs.org/docs/pages/Object3D.html",
+          "title": "Object3D – three.js docs",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/mrdoob/three.js/tree/dev/editor/js/commands",
+          "title": "three.js/editor/js/commands at dev · mrdoob/three.js",
+          "date": "2010-03-23",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://stackoverflow.com/questions/74052761/what-is-the-usage-of-three-js-object3d-matrixworldautoupdate-and-updatematrixwor",
+          "title": "what is the usage of three js Object3D.matrixWorldAutoUpdate and updateMatrixWorld() api?",
+          "date": "2022-10-13",
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "03-space-planning-event-layout",
+      "topic": "空間設計與活動場地排版",
+      "question": "What are the standard published metrics for event and meeting space planning: square metres per person for theatre, classroom, banquet/rounds, reception (standing), and floor-seating layouts? Cite event-industry or convention-centre official planning guides with URLs, and state clearly which numbers are conventions rather than legal requirements.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T22:58:23.925Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://spaces.townhall.co.uk/how-much-event-space-do-you-need/",
+          "title": "How Much Space Do You Need for 50, 100 or 200 Guests?",
+          "date": "2026-05-20",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.connectionsentertainment.co.uk/venue-capacity-for-entertainment-events-a-practical-guide/",
+          "title": "Venue capacity for entertainment events: a practical guide",
+          "date": "2026-07-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://jigsawconferences.co.uk/articles/venue-capacity-calculation-guide-uk-corporate-events",
+          "title": "Venue capacity calculation guide for UK corporate events",
+          "date": "2026-03-25",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.mattersofgathering.com/post/essential-floor-plan-guidelines-for-a-successful-event",
+          "title": "Essential Floor Plan Guidelines for a Successful Event",
+          "date": "2024-07-20",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://venues.london/blog/venue-layout-guide/",
+          "title": "Venue Layouts Explained: Theatre, Cabaret & More",
+          "date": "2026-02-26",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://kitec.com.hk/how-to-choose-the-right-event-venue-size-in-hong-kong/",
+          "title": "How Kitec Fits Into The Hong...",
+          "date": "2026-05-06",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.scribd.com/document/1007802663/Rules-for-Event-Sizing-and-Space-Planning-in-a-Convention-Centre",
+          "title": "Rules for Event Sizing and Space Planning in a Convention Centre",
+          "date": "2026-04-07",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.greatevent.com/how-much-meeting-space-do-i-need-for-100-people/",
+          "title": "How Much Meeting Space Do I Need for 100 People?",
+          "date": "2026-08-16",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://mississaugaconvention.com/event-venue-capacity-guide/",
+          "title": "Venue Capacity Guide: Avoid Overcrowding in 2026 - Mississauga ...",
+          "date": "2026-04-23",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.coohom.com/article/banquet-hall-size-standards-across-different-event-industries",
+          "title": "Banquet Hall Size Standards: How Much Space per Guest? - Coohom",
+          "date": "2026-04-25",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.coohom.com/article/industry-standards-for-banquet-wedding-and-event-hall-dimensions",
+          "title": "Industry Standards for Banquet, Wedding, and Event Hall Dimensions",
+          "date": "2026-04-25",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.socialtables.com/blog/event-planning/capacity-party-space-calculator/",
+          "title": "Calculate Event Capacity Correctly in 3 Simple Steps",
+          "date": "2019-10-24",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://univents.app/en/free-tools/raum-kapazitaet-rechner",
+          "title": "Room Capacity Calculator: people per layout | Univents",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://univents.app/en/free-tools/room-capacity-calculator",
+          "title": "Room Capacity Calculator: people per layout",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://npu.co/2026/08/21/how-much-event-space-do-you-actually-need-finding-the-right-fit/",
+          "title": "How Much Event Space Do You Actually Need? Finding the Right Fit",
+          "date": "2026-08-20",
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "04-expo-booth-circulation",
+      "topic": "展場與校園攤位動線",
+      "question": "What are published guidelines for exhibition booth layout and visitor circulation: standard booth module sizes (3m x 3m and similar), aisle widths in exhibition halls, open-corner versus closed-back booths, and how booth entry should relate to the main aisle so it does not block flow? Cite exhibition-industry associations or convention centre exhibitor manuals with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T22:59:15.605Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://aaoms.org/wp-content/uploads/2025/02/AM25_Exhibitor_BoothLayout.pdf",
+          "title": "Booth Construction and Layout | AAOMS",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://aaoms.org/wp-content/uploads/2025/10/AM26_BoothLayout.pdf",
+          "title": "Booth Construction and Layout",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://ww1.namm.org/exhibit/thenammshow/important-guidelines/display-guidelines-rules-regulations",
+          "title": "Booth Display Types & Regulations",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.asishow.com/media/2380/or17boothconstructionguidelines.pdf",
+          "title": "Booth Space and Set-Up - asishow.com",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://cdn.ymaws.com/membership.tepsa.org/resource/collection/966AF821-EEED-4B93-9EC8-FB2D749634E4/booth-guidelines-25.pdf",
+          "title": "2025 Booth Guidelines",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://cdn.asp.events/CLIENT_Business_DCF4FF16_FAB8_0D4B_807D8955A223D6D8/sites/B2BME-2023/media/booth-rules-and-regulations-1-1-.pdf",
+          "title": "BOOTH RULES AND REGULATIONS",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://ed-spaces.com/wp-content/uploads/2024/08/EDspaces_2024_Rules_Regs1.pdf",
+          "title": "BOOTH REGULATIONS",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ismrm.org/26/exhibitors/Booth%20Schematics%20&%20Regulations%202026.pdf",
+          "title": "2026 Booth Space Design Options",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://na.eventscloud.com/file_uploads/2c42580f16bcd8e79ea7746b8dcda329_BoothRulesRegulations.pdf",
+          "title": "[PDF] BOOTH RULES AND REGULATIONS",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://cdn.asp.events/CLIENT_CL_US_323E7AA7_5056_B733_8303D39C538813E0/sites/DI-2024/media/DTECH-2023-Exhibit-Space-Guidelines.pdf",
+          "title": "[PDF] Exhibit Space & Booth Layout Guidelines - ASP Events",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://landscapeontario.com/attach/1380217281.Expo_10_x_10_Booth_Dimensions_and_Sightline_Rules_and_Regulations.pdf",
+          "title": "Expo 10' x 10' Booth Dimensions and Sightline Rules and Regulations",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://na.eventscloud.com/file_uploads/3b57c776fc4c0cbe31aaaf96acd11fc3_BoothRulesRegulations.pdf",
+          "title": "BOOTH RULES AND REGULATIONS",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ismrm.org/23/exhibitors/Booth_Schematics_Regulations.pdf",
+          "title": "2023 Booth Space Design Options",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://mjbizconference.com/wp-content/uploads/2019/01/Inline-booth-rules-and-regulations_1.29.19_NEXT.pdf",
+          "title": "Exhibit and Signage Rules for In-line Booths",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://ordering.ges.com/011602251/download/BoothRulesandRegulations",
+          "title": "BOOTH RULES AND REGULATIONS",
+          "date": null,
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "05-queue-design-bottleneck",
+      "topic": "排隊區與人流瓶頸設計",
+      "question": "What is the established queueing-theory guidance for designing service queues in venues: single shared queue versus multiple parallel queues, M/M/c behaviour and why utilisation above roughly 80 percent causes waiting time to explode, space required per person in a queue, and how to size a queue area. Cite textbooks, university course pages or official operations-research references with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T22:59:47.766Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://www.ijirset.com/upload/2017/september/21_ANALYSIS%20OF%20QUEUEING%20THEORY%20IN%20SUPERMARKETS%20_1_.pdf",
+          "title": "[PDF] Analysis and Application of Queuing Theory in Supermarkets - ijirset",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.malayajournal.org/articles/MJM0S200061.pdf",
+          "title": "Mathematical modeling in comparative relation of single ...",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://tijer.org/tijer/papers/TIJER2306323.pdf",
+          "title": "[PDF] QUALITATIVE PERFORMANCE ANALYSIS OF QUEUE SYSTEM IN ...",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://ijrti.org/papers/IJRTI2206309.pdf",
+          "title": "[PDF] ANALYSIS OF QUEUING MODEL IN RETAIL OUTLET - IJRTI.org",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://emunix.emich.edu/~aross15/math419/chapter8queueing.pdf",
+          "title": "Chapter 8: Queueing Theory",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.lib.purdue.edu/dissertations/AAI3055510/",
+          "title": "On the psychological cost of waiting in queues",
+          "date": "2005-11-30",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://pubsonline.informs.org/do/10.1287/orms.2009.03.05/full/",
+          "title": "To Queue or Not to Queue | ORMS Today",
+          "date": "2009-06-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://homepages.ecs.vuw.ac.nz/~schukova/SCIE201/Lectures/Lecture9_final2018.html",
+          "title": "Queueing Systems M/M/1 and M/M/c",
+          "date": "2018-05-31",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docenti.ing.unipi.it/~a080368/Teaching/PEVA/pdf/Notes%20on%20Queueing%20Theory%20-%20Students%2020220727.pdf",
+          "title": "Notes on Queueing Theory",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.dii.uchile.cl/wp-content/uploads/2015/11/Measuring-the-Effect-of-Waiting-Time-on-Customer-Purchases.pdf",
+          "title": "[PDF] MANAGEMENT SCIENCE",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://de.slideshare.net/slideshow/queue-29810748/29810748",
+          "title": "simulation in Queue",
+          "date": "2014-01-08",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://web.uettaxila.edu.pk/CMS/AUT2013/ieORbs/notes/Chapter%20-%20Waiting%20Line%20Models.pdf",
+          "title": "Waiting Lines and Queuing Theory Models",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.r-bloggers.com/2017/12/mmc-queues/",
+          "title": "MMC Queues - R-bloggers",
+          "date": "2017-12-02",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://assets.metrolinx.com/image/upload/v1738255845/Documents/Engineering/DS-12_Pedestrian_Flow_Modelling_Design_Standard_v1.0.pdf",
+          "title": "DS-12 PEDESTRIAN FLOW",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://hub.hku.hk/handle/10722/243219",
+          "title": "Impact of Queue Configuration on Service Time: Evidence from a Supermarket",
+          "date": "2017-08-25",
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "06-classroom-teahouse-meditation-layout",
+      "topic": "教室、茶會、禪學社活動的空間配置",
+      "question": "空間配置參考：教室型活動、茶會 (tea gathering / reception) 與靜坐/禪修活動的場地配置慣例。靜坐或禪修時每人所需的坐墊面積與間距一般是多少？茶會的站立式與座位式配置每人面積？教室課桌椅排列的行距與走道慣例？請引用官方或學術來源網址，並說明哪些數字只是慣例而非法規。",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:00:03.279Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://www.subong.org.hk/zh-hant/content/%E5%9D%90%E7%A6%AA%E7%AC%AC%E4%B8%80%E8%AA%B2",
+          "title": "修持方法",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.fgs.org.tw/cultivation/fgu-chan/dialogue-09.htm",
+          "title": "禪修釋疑",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.dharmazen.org/X1Chinese/D22Method/M109SitTool.htm",
+          "title": "打坐生理衛生2 - 法爾禪修中心",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.dharmazen.org/X2GB/D22Method/M109SitTool.htm",
+          "title": "打坐生理卫生2",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "http://m.shixiu.net/nanshi/zhuzuo/dhcx/5188.html",
+          "title": "第五章 禅观略讲--定慧初修--手机实修驿站",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "http://www.xuefo.tw/nr/article63/627092.html",
+          "title": "傳明法師：禅修的主要途徑二打坐坐法",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ddmbachicago.org/chan_zh/meditation_zh/",
+          "title": "禪修入門",
+          "date": "2016-11-06",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://tsan0717.pixnet.net/blog/posts/10003000340",
+          "title": "打坐方法| tsan0717的部落格| 不設分類分享",
+          "date": "2005-12-06",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://book.bfnn.org/books/0605.htm",
+          "title": "靜坐問答",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ctworld.org/meditation/01_a02.htm",
+          "title": "靜坐指導",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "http://www.mba-la.org/38748223522503326377303403546935672.html",
+          "title": "靜坐應有的認識",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ddcep.org.tw/default-ddmtw/xmnews/cont?xsmsid=0K297379120077217595",
+          "title": "禪在日常生活中 - 問題Q&A在家打坐是否一定要準備方墊等，還是方便即可？是否固定地方較好？時間上有無建議？",
+          "date": "2017-04-12",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://jiguangtemple.org/%E5%9D%90%E7%A6%AA/",
+          "title": "坐禪",
+          "date": "2009-12-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ctworld.org.tw/disciple/feeling/2016feeling/717.htm",
+          "title": "禪本平常──日常禪修的功效",
+          "date": "2011-10-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "http://srimala.fgs.org.tw/learned/04-05.htm",
+          "title": "修持篇－禪修心得",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://vocus.cc/article/5d8db3cdfd89780001bfca9e",
+          "title": "那些厲害的人是如何開始學習禪修靜坐的？",
+          "date": "2022-05-21",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.lama.com.tw/content/edu/data.aspx?id=3771",
+          "title": "禪修手冊靜坐須知- 佛法科學",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://siongui.github.io/zh/2014/02/14/sitting-meditation-handout/",
+          "title": "靜坐講義",
+          "date": "2014-02-14",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "http://fowap.goodweb.net.cn/news/news_view.asp?newsid=45618",
+          "title": "禅修的主要途径 二 打坐坐法 - 传明法师",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://studybuddhism.com/zh-TW/jin-jie-yan-xi/qi-dao-he-yi-gui/qian-xing/chan-xiu-qian-de-liu-zhong-zhun-bei-gong-zuo/shi-dang-de-zuo-dian-ding-li-yu-zuo-zi",
+          "title": "適當的坐墊、頂禮與坐姿",
+          "date": null,
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "07-furniture-dimensions",
+      "topic": "桌椅、地墊、攤位與服務站的常見尺寸",
+      "question": "What are standard published dimensions for: banquet/folding rectangular tables (6ft and 8ft) and round tables (60in, 72in), stacking chairs, registration/reception desks, yoga or meditation mats (zabuton/zafu and standard yoga mat), and exhibition booth tables? Give width x depth x height in both inches and metres. Cite manufacturer specification pages or official standards with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:00:36.464Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://englishelm.com/products/english-elm-fielder-6-foot-rectangular-folding-banquet-table-durable-hardwood-heavy-duty-legs-easy-storage",
+          "title": "Fielder 6-Foot Rectangular Folding Banquet Table - English Elm",
+          "date": "2025-08-11",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://expodirect.co.uk/product/6ft-rectangular-banqueting-table-183cm-heavy-duty-folding-event-table-eventpro-series",
+          "title": "Commercial 6ft Rectangular Folding Banqueting Table",
+          "date": "2026-03-29",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.staples.com/buy/6-ft-tables-rectangle-0atz00a",
+          "title": "6 Ft Tables Rectangle",
+          "date": "2026-01-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.sagemeditation.com/zafu-and-zabuton-meditation-cushion-set/",
+          "title": "Zafu and Zabuton Meditation Cushion Set",
+          "date": "2024-08-07",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://htsyoga.com/yoga-mat-size-chart-standard-vs-long-vs-extra-wide-by-height/",
+          "title": "Yoga Mat Size Chart: Standard vs Long vs Extra-Wide (By Height)",
+          "date": "2026-02-21",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://zafu.net/product/zabuton-meditation-mat",
+          "title": "Zabuton Meditation Cushions - Carolina Morning",
+          "date": "2025-12-30",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.staples.com/buy/6-foot-banquet-tables-0akz00a",
+          "title": "6-Foot Banquet Tables",
+          "date": "2025-01-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.amazon.com/Buckwheat-Zafu-Zabuton-Meditation-Cushion/dp/B00H2UKNCQ",
+          "title": "Amazon.com: Buckwheat Zafu and Zabuton Meditation Cushion Set (2pc), Red : Sports & Outdoors",
+          "date": "2012-11-24",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Zafu",
+          "title": "Zafu - Wikipedia",
+          "date": "2004-08-21",
+          "sourceType": "encyclopedia"
+        },
+        {
+          "url": "https://www.sunandmoonoriginals.com/product/zafu-zabuton-set/",
+          "title": "Zafu & Zabuton Set Meditation Cushions",
+          "date": "2026-08-07",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://yogiczone.com/yoga-mats/yoga-mat-size/",
+          "title": "Finding The Right Yoga Mat Size For Your Body Type",
+          "date": "2025-12-31",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://ctceventfurniture.com/products/30w-x-72l-granite-white-plastic-event-and-party-folding-table-rb-3072",
+          "title": "6-Foot Plastic Folding Table",
+          "date": "2023-10-13",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.amazon.com/ZenBless-Zabuton-Meditation-Cushion-Sitting/dp/B0C7ZGRHHM",
+          "title": "ZenBless Zafu and Zabuton Meditation Cushion Set,Yoga Meditation Floor Pillow,Large Square Meditation Mat and Pillow Set for Sitting on Floor(23.6\")",
+          "date": "2024-08-28",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://htsyoga.com/yoga-mat-dimensions-standard-sizes-thickness-chart/",
+          "title": "Yoga Mat Dimensions: Standard Sizes and Thickness Chart",
+          "date": "2026-08-06",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.theyogasensei.com/guides/meditation-cushion-set",
+          "title": "Meditation Cushion Sets: Zafu and Zabuton Buying Guide",
+          "date": "2026-07-26",
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "08-mobile-3d-editor-ux",
+      "topic": "手機版 3D 編輯器 UX",
+      "question": "What do official platform guidelines say about touch target sizes and gesture design for mobile apps, and what are documented UX patterns for 3D manipulation on touch screens (one-finger orbit vs two-finger pan, pinch zoom, tap-to-select, transform gizmos on small screens)? Cite Apple Human Interface Guidelines, Material Design, and W3C/MDN pointer events with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:01:16.079Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://m3.material.io/foundations/designing/structure",
+          "title": "Touch targets - Accessibility designing – Material Design 3",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://m2.material.io/develop/web/supporting/touch-target",
+          "title": "Touch Target - Material Design",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.mdui.org/en/design/1/patterns/gestures.html",
+          "title": "Gestures - Patterns - Material Design 1 - mdui",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://support.google.com/accessibility/android/answer/7101858?hl=en",
+          "title": "Touch target size - Android Accessibility Help",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://m3.material.io/foundations/interaction/gestures",
+          "title": "Gestures – Material Design 3",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.uiuxatlas.com/lessons/accessibility/touch-target-sizing/",
+          "title": "Touch Target Sizing (WCAG 2.5.8 / 2.5.5) · UI/UX Atlas",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://m1.material.io/layout/metrics-keylines.html",
+          "title": "Metrics & keylines - Layout - Material Design",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://stackoverflow.com/questions/37517021/what-exactly-is-touch-target-size-in-android-material-design",
+          "title": "What exactly is \"Touch Target Size\" in Android Material Design",
+          "date": "2016-05-30",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://theappbusiness.github.io/accessibility-guidelines/guidelines/2.6.1.html",
+          "title": "Touch Target Size and Spacing",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/cvs-health/android-compose-accessibility-techniques/blob/main/doc/interactions/MinimumTouchTargetSize.md",
+          "title": "android-compose-accessibility-techniques/doc/interactions/MinimumTouchTargetSize.md at main · cvs-health/android-compose-accessibility-techniques",
+          "date": "2024-05-09",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.mobileviewer.io/blog/touch-target-size",
+          "title": "Touch Target Size: Google's Guidelines for Mobile Buttons",
+          "date": "2026-02-16",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://blog.logrocket.com/ux-design/all-accessible-touch-target-sizes/",
+          "title": "All accessible touch target sizes - LogRocket Blog",
+          "date": "2024-03-04",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://m2.material.io/design/interaction/gestures.html",
+          "title": "Gestures",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.linkedin.com/top-content/user-experience/mobile-first-design-principles/touch-target-sizing-guidelines/",
+          "title": "Touch Target Sizing Guidelines - LinkedIn",
+          "date": "2026-05-26",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://m3.material.io/foundations/interaction/states",
+          "title": "States – Material Design 3",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.w3.org/news/2026/pointer-events-level-3-is-now-a-w3c-recommendation/",
+          "title": "Pointer Events Level 3 is now a W3C Recommendation | 2026 | News",
+          "date": "2026-06-30",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events",
+          "title": "Pointer events - Web APIs | MDN",
+          "date": "2026-08-28",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/mdn/content/blob/main/files/en-us/web/api/pointer_events/pinch_zoom_gestures/index.md?plain=1",
+          "title": "index.md - GitHub",
+          "date": "2020-09-15",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/touch-action",
+          "title": "touch-action CSS property - MDN Web Docs",
+          "date": "2026-04-20",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events/Using_Pointer_Events",
+          "title": "Using Pointer Events - Web APIs | MDN",
+          "date": "2025-09-18",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/PointerEvent",
+          "title": "PointerEvent - Web APIs | MDN",
+          "date": "2025-06-25",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/pointer-events",
+          "title": "pointer-events CSS property - MDN Web Docs",
+          "date": "2026-08-14",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events/Multi-touch_interaction",
+          "title": "Multi-touch interaction - Pointer events - MDN Web Docs",
+          "date": "2025-06-11",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/mdn/dom-examples/blob/main/pointerevents/Multi-touch_interaction.html",
+          "title": "dom-examples/pointerevents/Multi-touch_interaction.html at main · mdn/dom-examples",
+          "date": "2017-02-13",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.w3.org/TR/pointerevents3/",
+          "title": "Pointer Events - W3C",
+          "date": "2026-06-30",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events...",
+          "title": "Pointer events - Web APIs | MDN",
+          "date": "2025-06-11",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://cadeproject.org/updates/w3c-publishes-pointer-events-level-3-as-a-web-standard/",
+          "title": "W3C publishes Pointer Events Level 3 as a web standard - CADE",
+          "date": "2026-07-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://cadeproject.org/updates/w3c-moves-pointer-events-level-3-toward-recommendation-status/",
+          "title": "W3C moves Pointer Events Level 3 toward recommendation status",
+          "date": "2026-06-14",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.w3.org/TR/pointerevents/",
+          "title": "Pointer Events - W3C",
+          "date": "2026-08-26",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://github.com/mdn/content/blob/main/files/en-us/web/api/pointerevent/index.md?plain=1",
+          "title": "content/files/en-us/web/api/pointerevent/index.md at main · mdn/content",
+          "date": "2020-09-15",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developer.apple.com/design/human-interface-guidelines/accessibility",
+          "title": "Accessibility | Apple Developer Documentation",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.humanstandards.org/docs/code-design-tokens/touch-targets-spacing",
+          "title": "Touch Targets & Spacing - Docs - Human Standards",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.humanstandards.org/docs/ergonomics/targets-spacing",
+          "title": "Targets & Spacing - Docs - Human Standards",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.humanstandards.org/perception/touch/",
+          "title": "Touch | Human Standards",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.brilworks.com/blog/apple-human-interface-guidelines/",
+          "title": "Apple Human Interface Guidelines: Best Practices & UI Kits - Brilworks",
+          "date": "2026-04-16",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://developer.apple.com/design/human-interface-guidelines",
+          "title": "Human Interface Guidelines | Apple Developer Documentation",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.lukew.com/ff/entry.asp?1085",
+          "title": "Touch Target Sizes - LukeW Ideation + Design",
+          "date": "2010-05-04",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.allaccessible.org/blog/wcag-258-target-size-minimum-implementation-guide",
+          "title": "WCAG 2.5.8 Target Size (Minimum): Complete Implementation Guide",
+          "date": "2025-12-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://skills.sh/ehmo/platform-design-skills/ios-design-guidelines",
+          "title": "ios-design-guidelines by ehmo/platform-design-skills - Skills.sh",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://dequeuniversity.com/rules/attest-ios/1.0/touch-target-size",
+          "title": "not found",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://uxcel.com/lessons/ios-app-design-712",
+          "title": "iOS App Design | Uxcel Lesson",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://medium.com/@zacdicko/size-matters-accessibility-and-touch-targets-56e942adc0cc",
+          "title": "Size matters! Accessibility and Touch Targets",
+          "date": "2018-04-05",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://blog.openreplay.com/improving-tap-targets-mobile-ux/",
+          "title": "Improving Tap Targets for Better Mobile UX",
+          "date": "2025-08-27",
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "09-glb-gltf-optimization",
+      "topic": "GLB、GLTF 與模型最佳化",
+      "question": "What does the official glTF 2.0 specification and the Khronos/gltf-transform documentation recommend for optimising GLB assets for the web: Draco vs Meshopt compression, KTX2/Basis textures, texture resizing, node/mesh pruning, and recommended budgets for web delivery? Cite khronos.org, github.com/KhronosGroup, and gltf-transform.dev official docs with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:01:46.588Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_texture_basisu",
+          "title": "glTF/extensions/2.0/Khronos/KHR_texture_basisu at main · KhronosGroup/glTF",
+          "date": "2013-01-30",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://deepwiki.com/KhronosGroup/glTF-Sample-Models/5.1-texture-compression-with-ktx2-and-basis-universal",
+          "title": "Texture Compression with KTX2 and Basis Universal ...",
+          "date": "2025-04-24",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_texture_basisu/README.md",
+          "title": "glTF/extensions/2.0/Khronos/KHR_texture_basisu ...",
+          "date": "2013-01-30",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.khronos.org/ktx/",
+          "title": "KTX - GPU Texture Container Format",
+          "date": null,
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://github.com/KhronosGroup/glTF/pull/1612",
+          "title": "Basis Universal and IBL with KTX2 images by lexaknyazev · Pull Request #1612 · KhronosGroup/glTF",
+          "date": "2019-05-16",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.khronos.org/news/press/khronos-ktx-2-0-textures-enable-compact-visually-rich-gltf-3d-assets",
+          "title": "Khronos KTX 2.0 Textures Enable Compact, Visually Rich, ...",
+          "date": "2021-04-20",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Vendor/EXT_meshopt_compression/README.md",
+          "title": "glTF/extensions/2.0/Vendor/EXT_meshopt_compression/README ...",
+          "date": "2013-01-30",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.khronos.org/gltf/",
+          "title": "glTF - Runtime 3D Asset Delivery",
+          "date": null,
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://www.khronos.org/assets/uploads/apis/KTX-2.0-Launch-Overview-Apr21_.pdf",
+          "title": "© The Khronos® Group Inc. 2021 - Page 1",
+          "date": null,
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://community.khronos.org/t/gltf-basisu-extension-platform-support/110144",
+          "title": "glTF basisu extension platform support",
+          "date": "2023-10-11",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://gltf-transform.dev/modules/extensions/classes/KHRTextureBasisu",
+          "title": "KHRTextureBasisu",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://community.khronos.org/t/ext-meshopt-compression-not-supported/110356",
+          "title": "EXT_meshopt_compression not supported - glTF - Khronos Forums",
+          "date": "2023-12-18",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://www.khronos.org/assets/uploads/press_releases/Rel190-KTX2-0-Release_CN.pdf",
+          "title": "Khronos KTX 2.0 纹理",
+          "date": null,
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://www.rapidcompact.com/khronos-ktx2-basis/",
+          "title": "Khronos KTX 2.0 Ratified: Compress Your Textures with ...",
+          "date": "2021-04-21",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/KhronosGroup/3D-Formats-Guidelines/blob/main/KTXDeveloperGuide.md",
+          "title": "3D-Formats-Guidelines/KTXDeveloperGuide.md at main · KhronosGroup/3D-Formats-Guidelines",
+          "date": "2021-01-14",
+          "sourceType": "official-docs"
+        }
+      ]
+    },
+    {
+      "id": "10-agent-tool-calling",
+      "topic": "Agent tool calling",
+      "question": "What do the official Anthropic, OpenAI and Model Context Protocol docs say about designing tool schemas for LLM agents: JSON Schema for parameters, strict validation, returning structured errors instead of silently succeeding, allowlisting tools, and preventing prompt injection from tool results? Cite docs.anthropic.com, platform.openai.com and modelcontextprotocol.io with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:02:29.986Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://docs.anthropic.com/zh-CN/docs/agents-and-tools/tool-use/implement-tool-use",
+          "title": "如何实现工具使用",
+          "date": "2023-12-21",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://docs.anthropic.com/id/docs/agents-and-tools/tool-use/implement-tool-use",
+          "title": "Cara mengimplementasikan penggunaan tool",
+          "date": "2023-12-21",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.anthropic.com/news/usage-policy-update",
+          "title": "Usage Policy update - Anthropic",
+          "date": "2023-11-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://medium.com/@judeaugustinej/beginners-guide-to-tools-usage-in-claude-39d910ff76da",
+          "title": "Beginners Guide to Tool Use in Claude | by Judeaugustinej - Medium",
+          "date": "2025-09-06",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.anthropic.com/engineering/advanced-tool-use",
+          "title": "Introducing advanced tool use on the Claude Developer Platform",
+          "date": "2025-11-24",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html",
+          "title": "Anthropic Claude tool use - Amazon Bedrock - AWS Documentation",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://apis.io/schemas/anthropic/anthropic-tool-use/",
+          "title": "Anthropic Tool Use | APIs.io Schemas",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/aws-samples/anthropic-on-aws/blob/main/complex-schema-tool-use/README.md",
+          "title": "anthropic-on-aws/complex-schema-tool-use/README.md at main",
+          "date": "2024-05-29",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/anthropics/skills/blob/main/skills/claude-api/shared/tool-use-concepts.md",
+          "title": "skills/skills/claude-api/shared/tool-use-concepts.md at main",
+          "date": "2025-09-22",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/blob/main/Anthropic/Claude%20Code/Prompt.txt",
+          "title": "system-prompts-and-models-of-ai-tools - Anthropic",
+          "date": "2025-03-05",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/Effect-TS/effect/issues/6091",
+          "title": "Use Anthropic's native Structured Outputs instead of tool-call ...",
+          "date": "2026-02-25",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools",
+          "title": "Define tools - Claude Platform Docs",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://deepwiki.com/anthropics/anthropic-sdk-python/7.1-tool-definitions-and-parameters",
+          "title": "Tool Definitions and Parameters | anthropics/anthropic-sdk-python | DeepWiki",
+          "date": "2026-02-05",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://docs.anthropic.com/id/docs/claude-code/security",
+          "title": "Keamanan - Anthropic",
+          "date": "2023-12-21",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://docs.anthropic.com/id/api/prompt-validation",
+          "title": "Validasi prompt - Anthropic",
+          "date": "2023-12-21",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://developers.openai.com/api/docs/guides/function-calling",
+          "title": "Function calling | OpenAI API",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://community.openai.com/t/tool-calling-with-arrays-building-the-json-schema/840869",
+          "title": "Tool calling with arrays - building the JSON schema - API",
+          "date": "2024-06-26",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://developers.openai.com/api/docs/guides/structured-outputs",
+          "title": "Structured model outputs | OpenAI API",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://help.openai.com/en/articles/8555517-function-calling-in-the-openai-api",
+          "title": "Function Calling in the OpenAI API",
+          "date": "2026-08-13",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://openai.com/index/introducing-structured-outputs-in-the-api/",
+          "title": "Introducing Structured Outputs in the API - OpenAI",
+          "date": "2024-08-06",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling",
+          "title": "Programmatic Tool Calling | OpenAI API",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://community.openai.com/t/oneof-allof-usage-has-problems-with-strict-mode/966047",
+          "title": "oneOf, allOf Usage has problems with strict mode - Bugs",
+          "date": "2024-10-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://community.openai.com/t/tool-calls-does-the-schema-matter/859354",
+          "title": "Tool Calls - Does the Schema Matter? - OpenAI Developer Community",
+          "date": "2024-07-09",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://community.openai.com/t/how-can-i-use-function-calling-with-response-format-structured-output-feature-for-final-response/965784",
+          "title": "How can I use function calling with response format (structured ...",
+          "date": "2024-10-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/vllm-project/vllm/issues/27746",
+          "title": "`strict` value in function definitions causes request error ...",
+          "date": "2025-10-29",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://chaseagents.com/blog/openai-function-calling-schema-valid-fails",
+          "title": "OpenAI function calling: why schema-valid calls still fail",
+          "date": "2026-06-07",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://community.openai.com/t/new-function-calling-with-strict-has-a-problem-with-minimum-integer-type/903258",
+          "title": "New Function Calling with \"Strict\" has a problem with \" ...",
+          "date": "2024-08-11",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://community.openai.com/t/partially-structured-output-free-text-output-but-force-correct-tool-call-json/955147",
+          "title": "Partially structured output? Free text output, but force correct tool call ...",
+          "date": "2024-09-24",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.meta-intelligence.tech/en/insight-function-calling",
+          "title": "LLM Function Calling: OpenAI Tools API, Multi-Step Tool Chains ...",
+          "date": "2025-09-26",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://community.openai.com/t/function-calling-parameter-types/268564",
+          "title": "Function Calling parameter types - OpenAI Developer Community",
+          "date": "2023-06-17",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2026-07-28/server/tools",
+          "title": "Tools",
+          "date": "2026-07-28",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+          "title": "Tools",
+          "date": "2025-11-25",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/tools",
+          "title": "Tools - Model Context Protocol",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2026-07-28",
+          "title": "Specification",
+          "date": "2026-07-28",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/tools",
+          "title": "Data Types",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/modelcontextprotocol/modelcontextprotocol",
+          "title": "Specification and documentation for the Model Context ...",
+          "date": "2026-07-28",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic",
+          "title": "Overview",
+          "date": "2026-07-28",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/draft/server/tools",
+          "title": "Tools",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/draft/schema",
+          "title": "Schema Reference",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-06-18/schema",
+          "title": "Schema Reference",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://openreview.net/pdf?id=UVgbFuXPaO",
+          "title": "000",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-06-18",
+          "title": "Features",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-03-26",
+          "title": "Specification - Model Context Protocol",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-11-25/schema",
+          "title": "Schema Reference",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic",
+          "title": "Overview",
+          "date": null,
+          "sourceType": "official-docs"
+        }
+      ]
+    },
+    {
+      "id": "11-preview-commit-rollback",
+      "topic": "Preview / Commit / Rollback",
+      "question": "What are the established software patterns for preview/commit/rollback and undo in editing applications: the Command pattern and undo stacks, memento pattern, transactional draft state versus committed state, and structural sharing / immutable snapshots. Cite authoritative references (official docs, well-known open source implementations) with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:03:10.376Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://www.freepascal.org/~michael/articles/cdcover6/cdcover6.pdf",
+          "title": "[PDF] The undo stack and reusing the memento pattern - Free Pascal",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://algomaster.io/learn/lld/memento",
+          "title": "Memento Design Pattern - LLD - AlgoMaster.io",
+          "date": "2025-06-19",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://softwareengineering.stackexchange.com/questions/429524/memento-pattern-for-undo-redo-and-save-load-with-multiple-objects",
+          "title": "Memento pattern for Undo/Redo AND Save/Load with multiple objects",
+          "date": "2021-06-20",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.codeproject.com/Articles/18025/Generic-Memento-Pattern-for-Undo-Redo-in-C-",
+          "title": "CodeProject",
+          "date": "2007-03-15",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.devleader.ca/2026/06/23/memento-pattern-realworld-example-in-c-complete-implementation",
+          "title": "Memento Pattern Real-World Example in C#: Complete Implementation",
+          "date": "2026-06-23",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://stackoverflow.com/questions/55462044/how-to-use-memento-pattern-with-undo-functionality",
+          "title": "How to use memento pattern with undo functionality",
+          "date": "2019-04-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.devleader.ca/2026/06/15/how-to-implement-memento-pattern-in-c-stepbystep-guide",
+          "title": "How to Implement Memento Pattern in C#: Step-by-Step Guide",
+          "date": "2026-06-15",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://stackoverflow.com/questions/54416318/how-to-make-a-undo-redo-function",
+          "title": "How to make a undo/redo function",
+          "date": "2024-06-23",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://blackflow.co.uk/entreprise-software-development/memento-design-pattern-saving-and-restoring-state/",
+          "title": "Memento Design Pattern: Saving and Restoring State - BlackFlow",
+          "date": "2026-02-08",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/Mshiravi10/MementoDesignPattern",
+          "title": "GitHub - Mshiravi10/MementoDesignPattern: Memento Design Pattern in C#",
+          "date": "2024-06-08",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://codingtechroom.com/question/-fast-undo-redo-memento-command-pattern",
+          "title": "How to Implement Fast Undo/Redo Functionality Using Memento and Command Patterns?",
+          "date": "2025-01-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://github.com/georgeduckett/OperationalTransform",
+          "title": "A basic implementation of an Operational Transform ...",
+          "date": "2017-06-07",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://stackoverflow.com/questions/20373876/java-memento-pattern-and-undo",
+          "title": "Java - Memento pattern and Undo",
+          "date": "2016-02-13",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://java-design-patterns.com/patterns/memento/",
+          "title": "Memento Pattern in Java: Preserving Object State for Undo Operations",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://medium.com/design-patterns-in-python/memento-pattern-eba610b3b59c",
+          "title": "Memento Pattern",
+          "date": "2021-03-03",
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "12-local-first-pwa",
+      "topic": "local-first 與離線 PWA",
+      "question": "What do official web platform docs recommend for local-first offline PWAs: IndexedDB vs localStorage for structured data and blobs, StorageManager estimate and persist for quota, service worker caching strategies, and handling QuotaExceededError? Cite MDN, web.dev and W3C specs with URLs.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:03:25.681Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://web.dev/learn/pwa/offline-data",
+          "title": "Offline data - web.dev",
+          "date": "2022-01-10",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://web.dev/articles/storage-for-the-web",
+          "title": "Storage for the web | Articles",
+          "date": "2024-09-23",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.w3.org/TR/IndexedDB/",
+          "title": "Indexed Database API 3.0",
+          "date": "2025-08-13",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://instantpwa.com/answers/indexeddb-vs-localstorage-pwa",
+          "title": "IndexedDB vs localStorage for PWAs",
+          "date": "2026-07-25",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://web.dev/articles/offline-cookbook",
+          "title": "Common techniques to build offline applications",
+          "date": null,
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://jsschools.com/web_dev/build-offline-first-web-apps-service-workers-impl/",
+          "title": "Build Offline-First Web Apps: Service Workers Implementation ...",
+          "date": "2025-06-21",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://diragb.dev/blog/indexeddb-vs-localstorage-vs-cookies/",
+          "title": "IndexedDB vs LocalStorage vs Cookies - Dirag Biswas",
+          "date": "2026-04-15",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API",
+          "title": "IndexedDB API - MDN Web Docs - Mozilla",
+          "date": "2025-04-03",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.w3.org/TR/2012/WD-quota-api-20120703/",
+          "title": "Quota Management API",
+          "date": null,
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://www.w3.org/TR/quota-api/",
+          "title": "Quota Management API",
+          "date": "2016-05-23",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://progressier.com/pwa-capabilities/indexeddb-demo",
+          "title": "IndexedDB PWA Demo - Progressier",
+          "date": "2026-08-20",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.lingua-e.com/en/errors/localstorage-quota-exceeded",
+          "title": "localStorage Quota Exceeded: What It Means and How to Fix It",
+          "date": "2026-07-18",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria",
+          "title": "Storage quotas and eviction criteria - Web APIs | MDN",
+          "date": "2026-01-05",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://www.w3.org/TR/2015/REC-IndexedDB-20150108/",
+          "title": "Indexed Database API",
+          "date": "2015-01-08",
+          "sourceType": "official-standard"
+        },
+        {
+          "url": "https://www.w3.org/2011/06/Web%20Storage.html",
+          "title": "Privacy",
+          "date": null,
+          "sourceType": "official-standard"
+        }
+      ]
+    },
+    {
+      "id": "13-tamkang-tamsui-venues",
+      "topic": "淡江大學與淡水地區公開場地資料",
+      "question": "淡江大學 (Tamkang University, 新北市淡水區) 官方網站上，有哪些公開的場地借用資訊？例如學生活動中心、會議室、教室借用辦法、社團活動場地申請規定，以及各場地的容納人數或尺寸資料。請只引用淡江大學官方網域 (tku.edu.tw) 或新北市政府官方網站的網址，並明確說明哪些資料查得到、哪些查不到。",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:03:41.567Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://spacerental.tku.edu.tw/",
+          "title": "淡江大學對外場地借用資訊網首頁",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://spacerental.tku.edu.tw/space_detail.aspx?id=119",
+          "title": "福園、書卷廣場、牧羊及陽光草坪 - 淡江大學對外場地借用資訊網",
+          "date": "2025-05-18",
+          "sourceType": "university"
+        },
+        {
+          "url": "https://www.sports.tku.edu.tw/wp-content/uploads/2023/07/%E6%B7%A1%E6%B0%B4%E6%A0%A1%E5%9C%92_112%E5%90%84%E9%A1%9E%E5%A0%B4%E5%9C%B0%E5%8F%8A%E8%A8%AD%E5%82%99%E5%99%A8%E6%9D%90%E5%80%9F%E7%94%A8%E7%B6%AD%E8%AD%B7%E8%B2%BB%E6%94%B6%E8%B2%BB%E4%B8%80%E8%A6%BD%E8%A1%A8.pdf",
+          "title": "112 學年度淡江大學淡水校園各類場地及設備器材借用維護 ...",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "http://spirit.tku.edu.tw:8088/dashboard/doc/%E5%8F%B0%E5%8C%97%E6%A0%A1%E5%9C%92_112%E5%90%84%E9%A1%9E%E5%A0%B4%E5%9C%B0%E5%8F%8A%E8%A8%AD%E5%82%99%E5%99%A8%E6%9D%90%E5%80%9F%E7%94%A8%E7%B6%AD%E8%AD%B7%E8%B2%BB%E6%94%B6%E8%B2%BB%E4%B8%80%E8%A6%BD%E8%A1%A8.pdf",
+          "title": "112 學年度淡江大學台北校園各類場地及設備器材借用維護 ...",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://space.in.tku.edu.tw/register",
+          "title": "注意事項",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://www.sports.tku.edu.tw/wp-content/uploads/2025/07/%E6%B7%A1%E6%B0%B4%E6%A0%A1%E5%9C%92_114%E5%90%84%E9%A1%9E%E5%A0%B4%E5%9C%B0%E5%8F%8A%E8%A8%AD%E5%82%99%E5%99%A8%E6%9D%90%E5%80%9F%E7%94%A8%E7%B6%AD%E8%AD%B7%E8%B2%BB%E6%94%B6%E8%B2%BB%E4%B8%80%E8%A6%BD%E8%A1%A81140626%E4%BF%AE%E8%A8%82.pdf",
+          "title": "[PDF] 各類場地及設備器材借用維護費收費一覽表 - 淡江大學體育事務處",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://www.sports.tku.edu.tw/wp-content/uploads/2025/08/%E6%B7%A1%E6%B0%B4%E6%A0%A1%E5%9C%92_114%E5%90%84%E9%A1%9E%E5%A0%B4%E5%9C%B0%E5%8F%8A%E8%A8%AD%E5%82%99%E5%99%A8%E6%9D%90%E5%80%9F%E7%94%A8%E7%B6%AD%E8%AD%B7%E8%B2%BB%E6%94%B6%E8%B2%BB%E4%B8%80%E8%A6%BD%E8%A1%A81140811%E4%BF%AE%E8%A8%82.pdf",
+          "title": "會 議 室",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "http://spirit.tku.edu.tw/tku/service_table.jsp?sectionId=3",
+          "title": "「68筆」表格下載文件",
+          "date": "2024-09-21",
+          "sourceType": "university"
+        },
+        {
+          "url": "https://www.im.tku.edu.tw/%E6%95%99%E5%AE%A4-%E6%9C%83%E8%AD%B0%E5%AE%A4-%E7%89%A9%E5%93%81%E5%80%9F%E7%94%A8%E6%B5%81%E7%A8%8B/",
+          "title": "教室/會議室/物品借用流程",
+          "date": "2025-12-02",
+          "sourceType": "university"
+        },
+        {
+          "url": "https://spacerental.tku.edu.tw/space_detail.aspx?id=106",
+          "title": "淡江大學對外場地借用資訊網場地資訊詳文",
+          "date": "2025-05-19",
+          "sourceType": "university"
+        },
+        {
+          "url": "https://www.sports.tku.edu.tw/sports_tku_news/%E3%80%90%E9%81%8B%E5%8B%95%E5%A0%B4%E5%9C%B0%E5%80%9F%E7%94%A8%E9%83%BD%E7%9C%8B%E9%80%99%E3%80%91/",
+          "title": "【運動場地借用都看這】114年2月14日8時起開始受理113學年度第2學期各室內外運動場地線上登記！ - 淡江大學 體育事務處",
+          "date": "2025-02-11",
+          "sourceType": "university"
+        },
+        {
+          "url": "https://sites.google.com/tkueca.org/3rd/home/%E6%B4%BB%E5%8B%95%E5%A0%B4%E5%9C%B0",
+          "title": "課外活動輔導組- 活動場地",
+          "date": "2025-09-09",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.sports.tku.edu.tw/wp-content/uploads/2020/01/File-2.pdf",
+          "title": "本校各場地之維護費依借用時段計價",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://spacerental.tku.edu.tw/space_detail.aspx?id=34",
+          "title": "台北校園 - 淡江大學對外場地借用資訊網",
+          "date": "2026-02-15",
+          "sourceType": "university"
+        },
+        {
+          "url": "http://www.general.tku.edu.tw/Download.aspx?dir=Archive&file=9F-3F-1D-79-7A-29-C8-DF-B4-87-6D-05-1A-94-9F-1C.pdf&filename=%E9%BB%91%E5%A4%A9%E9%B5%9D%E5%B1%95%E7%A4%BA%E5%BB%B3%E6%9C%8D%E5%8B%99%E9%9C%80%E6%B1%82%E5%96%AE&sn=97",
+          "title": "淡江大學黑天鵝展示廳服務需求單",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://www.lib.tku.edu.tw/Front/FAQ/FAQ-SpaceServices/News.aspx?id=T3ojouHBHks=&Sn=478",
+          "title": "如何借用討論室？",
+          "date": "2023-08-29",
+          "sourceType": "university"
+        },
+        {
+          "url": "https://athx.acad.tku.edu.tw/athx/news/1e7df0c1-2d1a-4d92-acde-31a0207235ff/xunxW4voLnW.pdf",
+          "title": "[PDF] 淡江大學114 學年度第2 學期網路借用教室作業日程表",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://athx.acad.tku.edu.tw/athx/news/402c10b5-99a3-490e-ac49-d29e56f41838/xtnW7EU0K8f.pdf",
+          "title": "淡江大學113 學年度第2 學期網路借用教室作業日程表",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://athx.acad.tku.edu.tw/athx/news/a4114ef4-8007-41df-8b34-0b2e8da6803b/xssBHbz16Ky.pdf",
+          "title": "淡江大學113 學年度第1 學期網路借用教室作業日程表",
+          "date": null,
+          "sourceType": "university"
+        },
+        {
+          "url": "https://www.sports.tku.edu.tw/wp-content/uploads/2025/09/%E9%99%84%E4%BB%B6X_%E6%B7%A1%E6%B1%9F%E5%A4%A7%E5%AD%B8%E9%AB%94%E8%82%B2%E4%BA%8B%E5%8B%99%E8%99%95%E5%A4%A7%E5%AD%B8%E5%AD%B8%E7%BF%92%E5%AE%A3%E5%B0%8E%E8%B3%87%E6%96%9903.pdf",
+          "title": "淡江大學體育事務處大學學習宣導資料",
+          "date": null,
+          "sourceType": "university"
+        }
+      ]
+    },
+    {
+      "id": "14-safety-accessibility-egress",
+      "topic": "活動安全、無障礙與通道設計提醒",
+      "question": "臺灣的建築技術規則與無障礙設施設計規範中，關於室內走道淨寬、避難層出入口、樓梯與走廊寬度、輪椅迴轉空間 (turning space) 與無障礙通路的規定為何？另外 NFPA 101 與 ADA Standards 對 egress width 與 accessible route 的規定為何？請引用官方法規網址 (例如 law.moj.gov.tw、營建署、nfpa.org、ada.gov)，並明確標示這些是需要由專業人員在現場確認的規範，不能由軟體宣稱合規。",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:04:01.577Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://www.freeway.gov.tw/Upload/201604/%E5%BB%BA%E7%AF%89%E7%89%A9%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E6%96%BD%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84.pdf",
+          "title": "建築物無障礙設施設計規範",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://gazette.nat.gov.tw/EG_FileManager/eguploadpub/eg018047/ch02/type1/gov10/num4/Eg.htm",
+          "title": "行政院公報資訊網 - nat.gov.tw",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www-ws.gov.taipei/001/Upload/461/relfile/22722/3504232/0210da0c-96df-4e96-9ff2-23d222eb1fd6.pdf",
+          "title": "建築物無障礙設施設計規範",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=D0070115",
+          "title": "建築技術規則(設計施工編) - 全國法規資料庫",
+          "date": "2021-03-15",
+          "sourceType": "government"
+        },
+        {
+          "url": "https://arkiteki.com/term/%E7%AC%AC%E4%BA%8C%E7%AB%A0%E7%84%A1%E9%9A%9C%E7%A4%99%E9%80%9A%E8%B7%AF",
+          "title": "建築物無障礙設施設計規範｜第二章｜無障礙通路",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://gazette.nat.gov.tw/EG_FileManager/eguploadpub/eg017170/ch02/type3/gov10/num3/Eg.htm",
+          "title": "內政部公告：預告「建築技術規則」建築設計施工編部分條文修正草案",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://home-inspection.luteinmaster.com/%E5%BB%BA%E7%AF%89%E6%B3%95%E8%A6%8F%E5%85%A5%E9%96%802-4%EF%BC%9A%E9%80%83%E7%94%9F%E5%8B%95%E7%B7%9A%EF%BC%9A%E6%A8%93%E6%A2%AF%E9%96%93%E3%80%81%E8%B5%B0%E9%81%93%E5%AF%AC%E5%BA%A6%E6%98%AF/",
+          "title": "建築法規入門2/4：逃生動線：樓梯間、走道寬度是否符合法規？",
+          "date": "2025-05-04",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://lawplayer.com/article/6438f66fe800e5f0b933e8d7",
+          "title": "原有合法建築物公共安全改善辦法§18 － 2025全國法規資料庫法條白話 …",
+          "date": "2025-01-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "http://www.fsci.org.tw/files/common_unit/f99f6ad1-340e-4a86-b4d5-59a1ce500a9a/doc/1060421%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84%E7%B0%A1%E5%A0%B1.pdf",
+          "title": "[PDF] 建築物無障礙設施設計規範條文與解說",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.nlma.gov.tw/ch/legislation/regsearch/6175",
+          "title": "建築技術規則」建築設計施工編",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://arkiteki.com/term/hb71z5ofq2gwww0gogg8",
+          "title": "建築技術規則建築設計施工編｜第二章｜一般設計通則 - ArkiTeki 建築資料平台",
+          "date": "2025-02-28",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://ws.moi.gov.tw/Download.ashx?u=LzAwMS9VcGxvYWQvT2xkRmlsZV9BYnJpX0dvdi9yZXNlYXJjaC82NzYvMTQ0NzkyOTgzNDEucGRm&n=Y29tcGxldGUucGRm",
+          "title": "我國「建築技術規則」建築設計施工編第三、四章修正條文解說與補充圖例",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "http://web.ici-biot.com/ap/test2/Corridor/2.GeneralCorridor/%E4%B8%80%E8%88%AC%E8%B5%B0%E5%BB%8A.html",
+          "title": "【貳】防火避難設施類檢查紀錄（六）走廊一般走廊",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.gj119.com.tw/law/?parent_id=1316",
+          "title": "建築技術規則建築設計施工編第095~107條 - 國介企業股份有限公司",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.rootlaw.com.tw/LawArticle.aspx?LawID=A040040100000902-1101007&LawNO=4000&LawNO1=89000&LawNoOrder=2&ShowType=SectionArticle",
+          "title": "法規名稱： 建築技術規則建築設計施工編",
+          "date": "1999-01-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://lawplayer.com/article/6438f57ae800e5f0b933d766",
+          "title": "建築技術規則建築設計施工編第92 條- 2026 最新全國法規資料庫",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.nlma.gov.tw/ch/legislation/law&regusw/6175",
+          "title": "內政部國土署 |「建築技術規則」建築設計施工編",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://sites.google.com/view/build-wincad/",
+          "title": "解釋令大全-林忠慶 - Google Sites",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://arkiteki.com/term/%E5%BB%BA%E7%AF%89%E8%A8%AD%E8%A8%88%E6%96%BD%E5%B7%A5%E7%B7%A8%EF%BD%9C%E7%AC%AC%E5%9B%9B%E7%AB%A0%EF%BD%9C%E9%98%B2%E7%81%AB%E9%81%BF%E9%9B%A3%E8%A8%AD%E6%96%BD%E5%8F%8A%E6%B6%88",
+          "title": "解釋函令｜建築設計施工編｜第四章",
+          "date": null,
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "15-oss-license-risk",
+      "topic": "開源套件與授權風險",
+      "question": "What are the licences of three.js, vite, vitest, playwright, gltf-transform (@gltf-transform/core and functions), and vite-plugin-pwa? For each, state the SPDX identifier and cite the official LICENSE file URL on GitHub. Also summarise what MIT and Apache-2.0 require for a redistributed web application.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-28T23:04:23.053Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://github.com/mrdoob/three.js/blob/dev/LICENSE",
+          "title": "three.js/LICENSE at dev · mrdoob/three.js · GitHub",
+          "date": "2010-03-23",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://discourse.threejs.org/t/found-a-github-repo-that-just-copy-paste-plagiarized-threejs-and-may-also-contain-malicious-code/53838",
+          "title": "Found a GitHub repo that just copy-paste plagiarized ThreeJS, and ...",
+          "date": "2023-07-13",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/mrdoob/three.js/",
+          "title": "mrdoob/three.js: JavaScript 3D Library.",
+          "date": "2010-03-23",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/microsoft/playwright/blob/main/LICENSE",
+          "title": "playwright/LICENSE at main · microsoft/playwright · GitHub",
+          "date": "2019-11-15",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/vite-pwa/vite-plugin-pwa",
+          "title": "vite-pwa/vite-plugin-pwa: Zero-config PWA for Vite - GitHub",
+          "date": "2020-08-25",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/vitest-dev/vitest/blob/main/LICENSE",
+          "title": "vitest/LICENSE at main - GitHub",
+          "date": "2021-12-03",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/microsoft/playwright",
+          "title": "Playwright is a framework for Web Testing and Automation ... - GitHub",
+          "date": "2019-11-15",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/orgs/vite-pwa/repositories",
+          "title": "vite-pwa repositories - GitHub",
+          "date": "2025-05-01",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/vitest-dev/vitest/blob/HEAD/LICENSE",
+          "title": "vitest/LICENSE at 000459a9ae9624a8518a6399bd1c1117ef87f0b9 · vitest-dev/vitest",
+          "date": "2021-12-03",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/rohitvarkey/three-js/blob/master/threejs/LICENSE",
+          "title": "three-js/threejs/LICENSE at master · rohitvarkey/three-js",
+          "date": "2015-07-04",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/vitest-dev/vitest",
+          "title": "vitest-dev/vitest: Next generation testing framework powered by Vite.",
+          "date": "2021-12-03",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/vite-pwa/vite-plugin-pwa/blob/main/README.md",
+          "title": "vite-plugin-pwa/README.md at main · vite-pwa/vite-plugin-pwa",
+          "date": "2020-08-25",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/donmccurdy/glTF-Transform/blob/main/LICENSE.md",
+          "title": "LICENSE.md - donmccurdy/glTF-Transform - GitHub",
+          "date": "2018-09-21",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/vitejs/vite/blob/main/LICENSE",
+          "title": "vite/LICENSE at main · vitejs/vite - GitHub",
+          "date": "2020-04-21",
+          "sourceType": "official-docs"
+        },
+        {
+          "url": "https://github.com/hi-ogawa/vitest/blob/main/LICENSE",
+          "title": "vitest/LICENSE at main · hi-ogawa/vitest",
+          "date": "2023-10-30",
+          "sourceType": "official-docs"
+        }
+      ]
+    }
+  ]
+}
