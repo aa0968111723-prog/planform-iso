@@ -446,6 +446,37 @@ function structuredCloneish(step: InteractionStep): InteractionStep {
 }
 
 /** Stations a template can place a step at, in list order. */
+/**
+ * Change how many people a station can serve at once.
+ *
+ * Its own function because the rule is not obvious. `effectiveServers` takes
+ * `min(staffCount, parallelServers)`, so writing positions alone left the
+ * control inert: raising 走廊入口 from 1 to 4 opened exactly one server and the
+ * run came back identical to the last decimal, while the panel went on naming
+ * that station as the worst spot.
+ *
+ * With no role declared, the people and the positions ARE the same number, so
+ * one control sets both. A station a role staffs keeps its own headcount —
+ * that is the entire point of declaring the role — and a self-service step has
+ * no headcount to imply.
+ */
+export function setStationPositions(
+  t: InteractionTemplate,
+  stationId: string,
+  positions: number,
+): InteractionTemplate {
+  const n = Math.max(1, Math.round(positions));
+  return {
+    ...t,
+    stations: t.stations.map((st) => {
+      if (st.id !== stationId) return st;
+      const next: InteractionStation = { ...st, parallelServers: n };
+      if (!next.staffRoleId && !next.selfService) next.staffCount = n;
+      return next;
+    }),
+  };
+}
+
 export function stationChoices(t: InteractionTemplate): { id: string; name: string }[] {
   return t.stations.map((s) => ({ id: s.id, name: s.name }));
 }

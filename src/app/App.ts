@@ -32,6 +32,7 @@ import {
   removeStep,
   renameStep,
   setOptionCount,
+  setStationPositions,
   setStepStation,
   templateFromScenario,
   updateStep,
@@ -1155,7 +1156,11 @@ export class App {
 
   /** Run the rehearsal and turn it into wall-clock sentences. */
   runRehearsal(): RehearsalEvent[] {
-    const result = this.runEventSimulation();
+    // A booth plan used to rehearse a check-in desk here — and worse,
+    // `runEventSimulation` calls `ensureEventScenario`, which WRITES that
+    // invented classroom scenario into the project. One tap on 演練一次 and the
+    // plan permanently carried a 進場流程 it never had.
+    const result = (this.hasFlow() ? this.runFlowSimulation() : null) ?? this.runEventSimulation();
     const timeline = buildRehearsalTimeline(result);
     if (this.session.partner) this.session.partner.timeline = timeline;
     this.notifyUi();
@@ -1582,10 +1587,17 @@ export class App {
   }
 
   updateFlowStation(id: string, patch: Partial<InteractionStation>): void {
-    this.updateFlow((t) => ({
-      ...t,
-      stations: t.stations.map((st) => (st.id === id ? { ...st, ...patch } : st)),
-    }));
+    this.updateFlow((t) => {
+      const applied: InteractionTemplate = {
+        ...t,
+        stations: t.stations.map((st) => (st.id === id ? { ...st, ...patch } : st)),
+      };
+      // 「同時幾人」 has to open real service positions — see
+      // `setStationPositions` for why writing one number was not enough.
+      return patch.parallelServers === undefined
+        ? applied
+        : setStationPositions(applied, id, patch.parallelServers);
+    });
   }
 
   updateFlowAudience(patch: Partial<InteractionAudience>): void {

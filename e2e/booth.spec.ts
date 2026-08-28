@@ -209,6 +209,45 @@ test.describe("outdoor booth", () => {
     expect(moved.after.avgWaitSeconds).toBeGreaterThan(moved.before.avgWaitSeconds);
   });
 
+  test("夥伴模式 rehearses the booth's own steps and writes nothing into the plan", async ({ page }) => {
+    await openBooth(page);
+    const before = await page.evaluate(() => {
+      const s = (window as unknown as {
+        planform: { store: { getState(): { scenarios: unknown[]; interaction?: { stations: { name: string }[] } } } };
+      }).planform.store.getState();
+      return { scenarios: s.scenarios.length, stations: s.interaction?.stations.map((st) => st.name) ?? [] };
+    });
+    expect(before.stations.length).toBeGreaterThan(0);
+
+    const rehearsal = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: {
+          app: {
+            enterPartnerMode?(): void;
+            runRehearsal(): { text: string }[];
+            partnerBriefing(): { flowSummary?: string };
+          };
+          store: { getState(): { scenarios: unknown[] } };
+        };
+      }).planform;
+      const timeline = pf.app.runRehearsal();
+      return {
+        brief: pf.app.partnerBriefing().flowSummary ?? "",
+        timeline: timeline.map((e) => e.text).join(" | "),
+        scenariosAfter: pf.store.getState().scenarios.length,
+      };
+    });
+
+    // The brief names the plan's own stations, not an invented check-in desk.
+    for (const station of before.stations) {
+      expect(rehearsal.brief, `the brief must name ${station}`).toContain(station);
+    }
+    expect(rehearsal.brief).not.toContain("報到");
+    expect(rehearsal.timeline).not.toContain("報到");
+    // And the rehearsal must not leave a fabricated 進場流程 behind in the plan.
+    expect(rehearsal.scenariosAfter).toBe(before.scenarios);
+  });
+
   test("俯視 ↔ 立體 changes the camera, not the plan", async ({ page }) => {
     await openBooth(page);
     const snapshot = () => page.evaluate(() => {

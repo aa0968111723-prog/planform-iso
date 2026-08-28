@@ -278,15 +278,36 @@ export function queuePlacement(
   // 30-person queue was drawn seven metres outside the building while the tool
   // reported it as fitting. Now the line wraps into the same lanes the capacity
   // was computed from, and once every lane is full it is honestly an overflow.
-  const lane = Number.isFinite(perLane) ? Math.floor(queueIndex / perLane) : 0;
+  const laneIndex = Number.isFinite(perLane) ? Math.floor(queueIndex / perLane) : 0;
   const inLane = Number.isFinite(perLane) ? queueIndex % perLane : queueIndex;
   // Lanes stack across the room, away from its centre line, so the first lane
-  // is the one nearest the wall and the walking lane stays open.
+  // is the one nearest the wall and the walking lane stays open. Past the last
+  // lane they WRAP rather than inventing more: the overflow is already reported
+  // as a number, and there is no eleventh lane to stand in. Without the wrap
+  // the clamp below would still keep everyone inside — by stacking them ON the
+  // wall line, which reads as a rendering bug rather than as a queue.
+  const lane = lanes > 0 ? laneIndex % lanes : 0;
   const lateral = lane === 0 ? 0 : (lane % 2 === 1 ? 1 : -1) * Math.ceil(lane / 2) * 0.6;
   const point = {
     x: station.x + direction.x * spacing * (inLane + 1),
     z: station.z + lateral,
   };
+  // Nobody queues outside the building.
+  //
+  // At the corridor mouth the approach is 0.6 m long, so `perLane` is 1 and
+  // every queuer got their own lane — the line was drawn PERPENDICULAR to the
+  // corridor, marching 3.6 m past the outer wall on one side and into the
+  // 巧拼 seating field on the other. A person judging whether the corridor can
+  // hold the entry queue was looking at a line whose drawn length had nothing
+  // to do with the corridor.
+  //
+  // `capacity` and `overflow` are deliberately computed above from the
+  // UNCLAMPED index, so 「排隊人龍會塞滿走廊（約多出 N 人）」 still reports the
+  // full overflow. This clamps where people are DRAWN, not how many fit.
+  if (room) {
+    point.x = Math.min(room.x + room.length, Math.max(room.x, point.x));
+    point.z = Math.min(room.z + room.width, Math.max(room.z, point.z));
+  }
   return { point, capacity, overflow: queueIndex + 1 > capacity };
 }
 
