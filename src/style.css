@@ -283,9 +283,12 @@ html, body {
 .hint { margin: 0; font-size: 11px; color: var(--text-dim); line-height: 1.5; }
 .color { width: 40px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
 
+/* Themed, not hard-coded dark: this shipped as `rgba(2,6,23,.55)`, so the
+   readout — the block that carries every simulation number — rendered as a
+   near-black slab inside a white panel in the default light theme. */
 .readout {
   font-size: 12px; line-height: 1.7; padding: 8px 10px;
-  border-radius: 8px; background: rgba(2, 6, 23, 0.55); border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface-1); border: 1px solid var(--border);
 }
 .readout--warn { border-color: var(--danger); color: var(--bad-text); }
 
@@ -298,7 +301,7 @@ html, body {
   appearance: none; cursor: pointer; text-align: left;
   display: flex; align-items: center; gap: 8px;
   padding: 9px; border-radius: 10px;
-  border: 1px solid var(--border); background: rgba(30, 41, 59, 0.6); color: var(--text);
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
   transition: background 0.15s, border-color 0.15s, transform 0.05s;
 }
 .card:hover { background: var(--surface-hover); border-color: var(--accent); }
@@ -492,7 +495,7 @@ html, body {
   display: flex; flex-direction: column; gap: 2px;
   min-height: var(--tap); padding: 10px 12px;
   border: 1px solid var(--border); border-radius: 10px;
-  background: rgba(30, 41, 59, 0.6); color: var(--text); font: inherit;
+  background: var(--surface-2); color: var(--text); font: inherit;
 }
 .menuitem:hover { background: var(--surface-hover); }
 .menuitem--active { border-color: var(--accent); background: rgba(56, 189, 248, 0.18); color: var(--accent); }
@@ -614,7 +617,7 @@ html, body {
 .partnerstep {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; font-size: 15px; line-height: 1.5;
-  border: 1px solid var(--border); border-radius: 12px; background: rgba(30, 41, 59, 0.45);
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1);
 }
 .partnerstep__no {
   flex: 0 0 auto; width: 26px; height: 26px; border-radius: 999px;
@@ -662,7 +665,7 @@ html, body {
   display: grid; grid-template-columns: minmax(0, 1.2fr) 1fr 18px 1fr;
   align-items: center; gap: 6px;
   padding: 8px 10px; font-size: 13px;
-  border: 1px solid var(--border); border-radius: 10px; background: rgba(2, 6, 23, 0.45);
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1);
 }
 .comparerow__label { color: var(--text-dim); }
 .comparerow__arrow { text-align: center; color: var(--text-dim); }
