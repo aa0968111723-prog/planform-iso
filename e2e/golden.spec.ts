@@ -164,7 +164,7 @@ test.describe("Golden Flow 2 — 60 人＋收費（平板）", () => {
     const onsite = page.locator(".left .field", { hasText: "其中現場繳費" }).locator("input");
     await onsite.fill("20");
     await onsite.dispatchEvent("change");
-    await page.locator(".left button", { hasText: "▶ 模擬" }).click();
+    await page.locator(".left button", { hasText: "▶ 開始彩排" }).click();
     await expect(page.locator(".left .readout", { hasText: "最多排隊" })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible();
     // Engineering vocabulary stays folded in 進階.
@@ -270,7 +270,7 @@ test.describe("Golden Flow 5 — E310 60 人壓力流程", () => {
     await settle(page);
     await page.locator(".topbar .chip", { hasText: "動線" }).first().click();
     await settle(page);
-    await page.locator(".left button", { hasText: "▶ 模擬" }).click();
+    await page.locator(".left button", { hasText: "▶ 開始彩排" }).click();
     await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible({ timeout: 20_000 });
   });
 });

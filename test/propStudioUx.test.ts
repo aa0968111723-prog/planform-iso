@@ -30,6 +30,13 @@ describe("the app offers the word it promises", () => {
     expect(FLOW_PANEL).toContain("▶ 再彩排一次");
   });
 
+  it("Partner Mode uses the same word — it was left behind by the first pass", () => {
+    const partner = read("src/ui/partnerMode.ts");
+    expect(partner).toContain("▶ 開始彩排");
+    expect(partner).not.toContain("▶ 演練一次");
+    expect(partner).not.toContain("▶ 再演練一次");
+  });
+
   it("the four old names for one action are gone from the buttons", () => {
     // 模擬 survives as a NAV label and inside prose; what must not come back is
     // a button offering a different word for the thing the hint calls 彩排.

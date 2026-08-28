@@ -691,6 +691,13 @@ export class App {
 
   /** Definitions come with their mirrored entry, or the library cannot place them. */
   addPropToProject(def: PropDefinition, opts: { place?: boolean } = {}): void {
+    // A caller that hands over nothing — a preset id that no longer exists,
+    // a failed import — used to take the whole mutate down with it and leave
+    // the store mid-write. Refuse it as data, not as a crash.
+    if (!def || typeof def.id !== "string" || !def.id) {
+      this.toast("這個道具讀不出來，沒有加入", false);
+      return;
+    }
     this.store.mutate((p) => {
       const others = (p.props ?? []).filter((d) => d.id !== def.id);
       p.props = [...others, def];
@@ -2151,7 +2158,7 @@ export class App {
     return true;
   }
 
-  /** ▶ 演練一次 — the numbers first; the walk-through is the separate ▶ 播放走位. */
+  /** ▶ 開始彩排 — the numbers first; the walk-through is the separate ▶ 看人走一遍. */
   startFlowPlayback(): void {
     const result = this.runFlowSimulation();
     if (!result) return;
@@ -2180,8 +2187,8 @@ export class App {
   }
 
   startEventPlayback(): void {
-    // ▶ 模擬 shows the numbers immediately; the animated walk-through is the
-    // separate opt-in ▶ 播放走位 (replaySimulation).
+    // ▶ 開始彩排 shows the numbers immediately; the animated walk-through is
+    // the separate opt-in ▶ 看人走一遍 (replaySimulation).
     const result = this.runEventSimulation();
     this.stopSimLoopOnly();
     this.session.simMode = "event-flow";

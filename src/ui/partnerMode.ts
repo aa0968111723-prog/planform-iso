@@ -58,7 +58,7 @@ export function buildPartnerMode(
   const brief = el("button", { type: "button", class: "partnerbrief" }) as HTMLButtonElement;
   brief.addEventListener("click", () => openSheet(sheetKind === "steps" ? "none" : "steps"));
   const actions = el("div", { class: "partneractions" }, [
-    button("▶ 演練一次", () => {
+    button("▶ 開始彩排", () => {
       app.runRehearsal();
       openSheet("timeline");
     }, "btn partneraction"),
@@ -235,7 +235,7 @@ export function buildPartnerMode(
     sheetBody.innerHTML = "";
     const timeline: RehearsalEvent[] = app.session.partner?.timeline ?? [];
     if (!timeline.length) {
-      sheetBody.append(el("p", { class: "partnerempty", text: "按「▶ 演練一次」就會看到現場的時間軸。" }));
+      sheetBody.append(el("p", { class: "partnerempty", text: "按「▶ 開始彩排」就會看到現場的時間軸。" }));
       return;
     }
     const result = app.session.simResult;
@@ -334,7 +334,7 @@ export function buildPartnerMode(
     // rehearsal figure belongs in the timeline, not on the button.
     const hint = actions.querySelector(".partneraction");
     if (hint instanceof HTMLElement) {
-      hint.textContent = app.session.simResult ? "▶ 再演練一次" : "▶ 演練一次";
+      hint.textContent = app.session.simResult ? "▶ 再彩排一次" : "▶ 開始彩排";
     }
   }
 
