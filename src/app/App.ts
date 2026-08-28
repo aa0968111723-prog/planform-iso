@@ -1816,6 +1816,14 @@ export class App {
   }
 
   restartSimulation(): void {
+    // Mid-walk-through, 重來 means "play it again from the start" — it used to
+    // stop the crowd, jump the clock to the end and re-run the whole engine,
+    // which is the one thing the button does not say. The frames are already
+    // computed; replay them.
+    if (this.session.simPlaying && this.session.simResult) {
+      this.playEventResult(this.session.simResult);
+      return;
+    }
     if (this.hasFlow()) this.startFlowPlayback();
     else if (this.session.simMode === "event-flow") this.startEventPlayback();
     else if (this.session.simMode === "route-walk") this.startRouteWalk();

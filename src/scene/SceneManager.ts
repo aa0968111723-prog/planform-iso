@@ -31,6 +31,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { AssetCatalog } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
 import { isBoothProject } from "../core/boothCatalog";
+import { calibrationComplete, venueNeedsCalibration } from "../core/model";
 import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
 import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
@@ -1377,7 +1378,7 @@ export class SceneManager {
       this.applyPalette(EXPORT_PALETTE);
       this.syncAreasAndTiles(project, false);
       this.renderer.render(this.scene, this.camera);
-      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background, project.name);
+      return this.cropExportBackground(this.renderer.domElement, EXPORT_PALETTE.background, project);
     } finally {
       editorLayers.forEach((g, i) => (g.visible = prevVisible[i]));
       this.applyPalette(scenePalette(this.theme));
@@ -1437,7 +1438,7 @@ export class SceneManager {
   }
 
   /** Remove the solid scene background around the fitted plan. */
-  private cropExportBackground(source: HTMLCanvasElement, background: number, projectName: string): string {
+  private cropExportBackground(source: HTMLCanvasElement, background: number, project: Project): string {
     const raster = document.createElement("canvas");
     raster.width = source.width;
     raster.height = source.height;
@@ -1472,10 +1473,18 @@ export class SceneManager {
     out.fillRect(0, 0, framed.width, framed.height);
     out.fillStyle = "#0f172a";
     out.font = "700 42px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif";
-    out.fillText(projectName, 34, 51);
+    out.fillText(project.name, 34, 51);
     out.fillStyle = "#64748b";
     out.font = "600 24px system-ui, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif";
-    out.fillText("3D 場佈圖 · 微立體視角 · 尺寸待現場校正", 34, 88);
+    // Asked, not asserted. This line used to be hard-coded, so it stamped
+    // 「尺寸待現場校正」 over a plan whose owner had typed their own measured
+    // room size — and it kept saying it after a full field calibration, while
+    // the other seven sheets correctly dropped it. One artifact in the album
+    // contradicting the rest is worse than either answer alone.
+    const pending = venueNeedsCalibration(project) && !calibrationComplete(project)
+      ? " · 尺寸待現場校正"
+      : "";
+    out.fillText(`3D 場佈圖 · 微立體視角${pending}`, 34, 88);
     out.drawImage(source, minX, minY, croppedW, croppedH, 0, headerH, croppedW, croppedH);
     return framed.toDataURL("image/png");
   }

@@ -24,7 +24,7 @@ import {
   stepAfter,
   templateFromScenario,
 } from "./interactionCompile";
-import { buildTravelPath, pointAtPolyline, queuePlacement, routeLength } from "./simSpatial";
+import { buildTravelPath, pointAtPolyline, queuePlacement, routeLength, stationRoom } from "./simSpatial";
 
 // --- PRNG -----------------------------------------------------------------
 
@@ -564,7 +564,14 @@ export function runInteraction(
       agent.x = placement.point.x;
       agent.z = placement.point.z;
       const queueOverflow = index + 1 > st.def.queueCapacity ? index + 1 - st.def.queueCapacity : 0;
-      if (placement.overflow || queueOverflow > 0) maxCorridorOverflow = Math.max(maxCorridorOverflow, index + 1 - Math.min(placement.capacity, st.def.queueCapacity));
+      // Only a queue that is actually IN the corridor can fill the corridor.
+      // This used to take every station, so a line backing up inside the
+      // classroom printed 「排隊人龍會塞滿走廊」 and put a red 走廊 marker in the
+      // middle of a corridor with nobody in it.
+      if ((placement.overflow || queueOverflow > 0)
+        && stationRoom(st.def, template.spatial) === "corridor") {
+        maxCorridorOverflow = Math.max(maxCorridorOverflow, index + 1 - Math.min(placement.capacity, st.def.queueCapacity));
+      }
     }
   };
 

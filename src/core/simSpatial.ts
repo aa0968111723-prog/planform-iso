@@ -232,6 +232,28 @@ function spatialRoute(points: RoutePoint[]): Route {
   return { id: "__travel__", name: "", color: "", points, visible: true, type: "custom" };
 }
 
+/**
+ * Which room a station stands in.
+ *
+ * Exported because two different answers depended on it and only one of them
+ * asked: the queue is placed inside the station's own room, but the
+ * 「排隊人龍會塞滿走廊」 warning counted the overflow of EVERY station — so a
+ * queue backing up inside the classroom printed a corridor warning and drew a
+ * red marker in the middle of an empty corridor.
+ */
+export function stationRoom(
+  station: { x: number; z: number },
+  spatial: SimulationSpatial | undefined,
+): "corridor" | "classroom" | null {
+  const inRect = (r: { x: number; z: number; length: number; width: number } | undefined) =>
+    !!r
+    && station.x >= r.x - 1e-6 && station.x <= r.x + r.length + 1e-6
+    && station.z >= r.z - 1e-6 && station.z <= r.z + r.width + 1e-6;
+  if (inRect(spatial?.corridor)) return "corridor";
+  if (inRect(spatial?.classroom)) return "classroom";
+  return null;
+}
+
 export function queuePlacement(
   station: ServiceStation,
   queueIndex: number,
@@ -242,12 +264,8 @@ export function queuePlacement(
   // corridor, not across it); capacity is the walkable length on the side the
   // queue extends into, so a corridor station overflows when the line would
   // run past the corridor, not when the corridor is merely narrow.
-  const inRect = (r: { x: number; z: number; length: number; width: number } | undefined) =>
-    !!r &&
-    station.x >= r.x - 1e-6 && station.x <= r.x + r.length + 1e-6 &&
-    station.z >= r.z - 1e-6 && station.z <= r.z + r.width + 1e-6;
-  const room = inRect(spatial?.corridor) ? spatial?.corridor
-    : inRect(spatial?.classroom) ? spatial?.classroom
+  const room = stationRoom(station, spatial) === "corridor" ? spatial?.corridor
+    : stationRoom(station, spatial) === "classroom" ? spatial?.classroom
     : undefined;
   let direction: SpatialPoint = { x: -1, z: 0 };
   let available = Number.POSITIVE_INFINITY;

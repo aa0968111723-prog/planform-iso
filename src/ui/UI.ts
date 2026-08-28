@@ -987,7 +987,14 @@ export class UI {
         importInput.value = "";
         return;
       }
-      try { this.app.store.loadProject(await importProjectJson(f) as never); this.showToast("已匯入專案"); } catch { this.showToast("匯入失敗：檔案格式不正確"); }
+      try {
+        // Pass the answer the dialog was based on. Without it the store fell
+        // back to its own arrays-only test and cleared the undo stack — for a
+        // plan whose work is a resized room and a calibration, that is the
+        // whole plan gone with the promised 復原 step never taken.
+        this.app.store.loadProject(await importProjectJson(f) as never, { undoBeforeLoad: hasContent });
+        this.showToast("已匯入專案");
+      } catch { this.showToast("匯入失敗：檔案格式不正確"); }
       importInput.value = "";
     });
     const layoutName = el("input", { type: "text", placeholder: "命名平面圖", class: "field__input" }) as HTMLInputElement;
@@ -1098,10 +1105,21 @@ export class UI {
       el("div", { class: "subhead", text: "活動資訊" }),
       textField("活動名稱", state().name, (v) => this.app.store.mutate((p) => (p.name = v), { history: false })),
       textField("簡短說明（夥伴模式顯示）", state().description, (v) => this.app.updateDescription(v)),
-      el("div", { class: "subhead", text: "這個專案的版本（方案 A／方案 B／最後版）" }),
+      // Not 「這個專案的版本」: the store keeps ONE global list, so these are
+      // every plan's saved versions and 載入 will happily swap in another
+      // event's arrangement. Namespacing the key is a migration; saying what
+      // it does today is a string.
+      el("div", { class: "subhead", text: "已存的排法（所有專案共用一份清單）" }),
       el("div", { class: "row" }, [layoutName, button("儲存", () => {
-        const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);
-        if (saved) { refreshList(); this.showToast("已儲存平面圖"); }
+        const name = layoutName.value.trim() || state().name;
+        // The field defaults to the project's own name, so pressing 儲存 twice
+        // silently replaced 方案 A — and the save takes no undo checkpoint, so
+        // the earlier arrangement was unrecoverable. 刪除, ten lines below,
+        // has always asked.
+        if (this.app.store.hasNamedLayout(name)
+          && !window.confirm(`已經有「${name}」了，要用現在的排法蓋掉它嗎？舊的排法無法復原。`)) return;
+        const saved = this.app.store.saveNamedLayout(name);
+        if (saved) { refreshList(); this.showToast(`已儲存「${name}」`); }
       })]),
       el("div", { class: "row" }, [layoutList,
         button("載入", () => {
