@@ -522,7 +522,13 @@ export function runDiscreteEvent(
       avgWaitSeconds: st.served ? st.totalWait / st.served : 0,
       totalWaitSeconds: st.totalWait,
       served: st.served,
-      utilization: Math.min(1, st.busyServerSeconds / (horizon * servers)),
+      // A station nobody staffs is idle, not undefined. `servers` is 0 for a
+      // desk switched off by a staffing variant (同桌 turns the separate
+      // payment desk off), and the bare division made this NaN — which the
+      // 進階 station table printed to the user as 「利用率 NaN%」.
+      utilization: servers > 0 && horizon > 0
+        ? Math.min(1, st.busyServerSeconds / (horizon * servers))
+        : 0,
       busyServerSeconds: st.busyServerSeconds,
     };
   });
