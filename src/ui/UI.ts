@@ -181,6 +181,13 @@ export class UI {
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.openPropStudioHook = (defId) => {
+      const def = this.app.propDefinitionForEdit(defId);
+      if (!def) return;
+      const placed = this.app.store.getState().objects
+        .filter((o) => o.assetId === `custom:${defId}`).length;
+      this.openPropStudio(def, placed);
+    };
     this.app.store.onLayoutError = (action) =>
       this.showToast(action === "save" ? "儲存平面圖失敗，請先匯出 JSON" : "刪除平面圖失敗，原檔案仍保留");
     this.app.onImprove = () => this.agentSheet.runPreset("幫我改善，把報到和收費分開，入口旁邊留 1 公尺不要擋門");
@@ -913,7 +920,15 @@ export class UI {
       el("p", { class: "hint", text: "自己做骰子、轉盤、抽卡箱——放進場地就能彩排。" }),
       el("div", { class: "row wrap" }, [
         button("＋ 新增道具", () => this.openPropStudio(), "btn btn--primary"),
-        button("從選取的物件建立組合道具", () => {
+        button("匯入道具檔", () => {
+          const input = el("input", { type: "file", accept: ".json,application/json" } as never) as HTMLInputElement;
+          input.addEventListener("change", () => {
+            const file = input.files?.[0];
+            if (file) void this.app.importProp(file).then(() => this.update());
+          });
+          input.click();
+        }, "btn btn--ghost"),
+        button("群組成一個道具（先框選幾個物件）", () => {
           const name = window.prompt("組合道具的名字", "骰子遊戲站");
           if (name === null) return;
           this.app.groupSelectionIntoProp(name.trim() || "組合道具");
@@ -928,7 +943,9 @@ export class UI {
       rows.push(el("div", { class: "list__row" }, [
         el("span", { class: "list__grow", text: `${def.icon ?? "▦"} ${def.name}${instances ? `（場上 ${instances}）` : ""}` }),
         button("放置", () => this.app.beginPlacementByAssetId(`custom:${def.id}`), "chip chip--sm"),
-        button("編輯", () => this.openPropStudio(def, instances), "chip chip--sm"),
+        // Opened from what is RUNNING, not from the frozen seed.
+        button("編輯", () => this.openPropStudio(this.app.propDefinitionForEdit(def.id) ?? def, instances), "chip chip--sm"),
+        button("匯出", () => this.app.exportProp(def.id), "chip chip--sm"),
         button("刪除", () => {
           if (!window.confirm(`刪除「${def.name}」？場上的 ${instances} 份和它的互動也會一起移除。`)) return;
           this.app.deletePropDefinition(def.id);
@@ -956,12 +973,27 @@ export class UI {
         const newer = inProject && meta.version > inProject.version;
         rows.push(el("div", { class: "list__row" }, [
           el("span", { class: "list__grow", text: `${meta.icon ?? "▦"} ${meta.name}${meta.interactive ? " ·互動" : ""}` }),
-          button(newer ? "更新到新版" : "加入專案", () => {
+          button(!inProject ? "加入專案" : newer ? "更新到新版" : "改用裝置上的版本", () => {
             const def = loadLibraryProp(meta.id);
             if (!def) { this.showToast("這個道具讀不出來，可能已損毀", false); return; }
-            if (newer && !window.confirm(`專案裡的「${meta.name}」是舊版。更新後場上的每一份都會換新，確定？`)) return;
-            this.app.addPropToProject(def, { place: !inProject });
-            if (newer) this.showToast(`已更新「${meta.name}」到新版`);
+            // Any overwrite of a copy the project already has gets a confirm,
+            // not just an upgrade. The 「加入專案」 label used to fire on an
+            // OLDER library body too, silently reverting every Studio edit
+            // with nothing on screen to notice it by.
+            if (inProject) {
+              const older = meta.version < inProject.version;
+              const warning = older
+                ? `裝置上的「${meta.name}」比專案裡的舊（v${meta.version} → 專案 v${inProject.version}）。`
+                  + `換過去會蓋掉專案裡改過的內容，場上的每一份也會跟著變。確定？`
+                : `用裝置上的「${meta.name}」覆蓋專案裡的版本？場上的每一份都會換新。`;
+              if (!window.confirm(warning)) return;
+            }
+            // updatePropDefinition, not addPropToProject: the latter swaps the
+            // definition and regenerates the entry but never reseeds the live
+            // splices, so the confirm's promise 「場上的每一份都會換新」 was
+            // only true of the geometry.
+            if (inProject) this.app.updatePropDefinition({ ...def, version: inProject.version });
+            else this.app.addPropToProject(def, { place: true });
           }, "chip chip--sm"),
           button("刪除", () => {
             if (!window.confirm(`從我的道具刪除「${meta.name}」？（不影響已加入專案的）`)) return;
@@ -972,7 +1004,11 @@ export class UI {
       }
     }
 
-    return section("互動道具", rows, defs.length > 0);
+    // Open even when empty. It used to open only once you ALREADY had a
+    // prop, so on a fresh project the whole feature — including
+    // 「＋ 新增道具」 — was behind a closed summary, hidden exactly when
+    // someone is looking for it.
+    return section("互動道具", rows);
   }
 
   private openPropStudio(edit?: PropDefinition, instanceCount = 0): void {
@@ -1167,7 +1203,7 @@ export class UI {
       el("div", { class: "subhead", text: "模擬摘要" }),
       el("p", { class: "hint", text: this.app.session.simResult
         ? this.app.session.simResult.summaryLines.join(" ")
-        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
+        : "先到「動線」按一次 ▶ 開始彩排，再回來匯出摘要。" }),
       button("匯出模擬摘要圖", () => {
         const r = this.app.session.simResult ?? this.app.runEventSimulation();
         share("route", null, "模擬摘要", { simplify: true, titleSuffix: "模擬摘要", extraNotes: r.summaryLines });

@@ -1,6 +1,7 @@
 import {
   BoxGeometry,
   BufferGeometry,
+  CylinderGeometry,
   Color,
   DoubleSide,
   EdgesGeometry,
@@ -48,8 +49,8 @@ import {
   buildPropGroupCached,
   clearPartResult,
   diceRollQuaternion,
-  diceSettleQuaternion,
   paintPartResult,
+  settleQuaternionFor,
 } from "./propVisual";
 import { propFaceOptions, propForAssetId } from "../core/propCatalog";
 import type { PlaybackStationResult } from "../core/eventFlow";
@@ -106,6 +107,13 @@ interface SessionView {
   propPlayback?: PropPlaybackView | null;
   /** Non-null in Partner Mode: emphasis per entity plus red/orange/green marks. */
   partner?: PartnerPresentation | null;
+  /**
+   * §58/§59 — the four places people stand around a selected prop, in WORLD
+   * coordinates. Drawn on the plan so 「移動整組之後站位有沒有跟著走」 is a
+   * thing you can look at rather than infer: the readouts are phrased relative
+   * to the prop, so they read identically before and after a move.
+   */
+  propAnchors?: { role: string; label: string; x: number; z: number }[];
 }
 
 /** How the scene should present a plan to a partner rather than an editor. */
@@ -114,6 +122,20 @@ export interface PartnerPresentation {
   emphasis: PartnerEmphasis;
   marks: PartnerMark[];
 }
+
+/** Same language as the §85 sentences: your post, the visitor, the queue, the way out. */
+const ANCHOR_COLOR: Record<string, number> = {
+  staff: 0x38bdf8,
+  player: 0x22c55e,
+  queue: 0xf59e0b,
+  exit: 0xa78bfa,
+};
+const ANCHOR_TEXT: Record<string, string> = {
+  staff: "#bae6fd",
+  player: "#bbf7d0",
+  queue: "#fde68a",
+  exit: "#ddd6fe",
+};
 
 const MARK_COLOR: Record<PartnerMark["tone"], string> = {
   bad: "#ef4444",
@@ -172,6 +194,7 @@ export class SceneManager {
   private partnerGroup = new Group(); // partner-mode marks (never in editor mode)
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
+  private anchorLabels = new Map<string, TextLabel>();
   private stationLabels = new Map<string, TextLabel>();
   private bottleneckLabels = new Map<string, TextLabel>();
   private arrayNodes = new Map<string, { mesh: InstancedMesh; overlay: Group; sig: string }>();
@@ -754,9 +777,9 @@ export class SceneManager {
       if (!entry) continue;
       const ownStation = playback?.stationOfObject[o.id];
 
-      const dice = def.parts.find((p) => p.facesFromOptions);
-      if (dice) {
-        const mesh = entry.group.getObjectByName(`part:${dice.id}`) as Mesh | undefined;
+      const roller = def.parts.find((p) => p.facesFromOptions);
+      if (roller) {
+        const mesh = entry.group.getObjectByName(`part:${roller.id}`) as Mesh | undefined;
         if (mesh) {
           if (!mesh.userData.restQuat) mesh.userData.restQuat = mesh.quaternion.clone();
           const rest = mesh.userData.restQuat as Quaternion;
@@ -764,9 +787,13 @@ export class SceneManager {
           if (result && playback) {
             const options = propFaceOptions(project, o.id, def) ?? [];
             const idx = options.findIndex((opt) => opt.id === result.optionId);
-            // A face beyond the six painted ones settles back to rest — the
-            // box cannot show it, and pretending would print the wrong label.
-            const settle = diceSettleQuaternion(idx) ?? rest.clone();
+            // Ask the PART how it comes to rest. A dice turns a face upward; a
+            // spinner turns a wedge to its pointer and stays flat. Applying the
+            // dice rotation to a disc stood the wheel on its edge for five of
+            // six outcomes and left it there for the rest of the rehearsal.
+            // An outcome the part cannot show settles back to rest rather than
+            // displaying the wrong one.
+            const settle = settleQuaternionFor(roller, idx, options.length) ?? rest.clone();
             mesh.quaternion.copy(diceRollQuaternion(playback.t - result.t, result.serial, settle));
           } else {
             mesh.quaternion.copy(rest);
@@ -1252,6 +1279,23 @@ export class SceneManager {
         label.sprite.position.set(st.x, 1.1, st.z);
       }
     }
+    // §58/§59: the selected prop's standing positions, on the floor.
+    for (const a of session.propAnchors ?? []) {
+      const color = ANCHOR_COLOR[a.role] ?? 0x94a3b8;
+      const pad = new Mesh(
+        new CylinderGeometry(0.24, 0.24, 0.03, 20),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.75, depthWrite: false }),
+      );
+      pad.position.set(a.x, 0.05, a.z);
+      this.overlayGroup.add(pad);
+      const key = `anchor:${a.role}`;
+      const label = this.anchorLabels.get(key) ?? new TextLabel();
+      this.anchorLabels.set(key, label);
+      this.overlayGroup.add(label.sprite);
+      label.set(a.label, ANCHOR_TEXT[a.role] ?? "#e2e8f0");
+      label.sprite.position.set(a.x, 0.75, a.z);
+    }
+
     // People are drawn by SimCrowd in its own persistent group — instanced and
     // reused, so playback does not allocate a mesh per person per frame.
     this.crowd.update(session.simPositions);

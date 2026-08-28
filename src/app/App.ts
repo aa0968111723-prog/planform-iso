@@ -28,13 +28,16 @@ import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
 import { BOOTH_ZONE_ROLES, isBoothProject } from "../core/boothCatalog";
 import {
   addStep,
+  duplicateStep,
   instantiatePropInteraction,
+  liveSeedFromInstance,
+  moveStep,
+  propStationId,
   propTemplateSkeleton,
   removePropInteraction,
-  duplicateStep,
-  moveStep,
   removeStep,
   renameStep,
+  reseedPropInteraction,
   setOptionCount,
   setStationPositions,
   setStepStation,
@@ -52,6 +55,10 @@ import {
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import { claimPropId, parsePropFile, propFileName, serializeProp } from "../export/propFile";
+import { downloadText } from "../export/exporters";
+import { clearPropGroupCache } from "../scene/propVisual";
+import { registerPropVisuals } from "../scene/visualRegistry";
 import type { PlaybackStationResult } from "../core/eventFlow";
 import { anchorSentences, stationNow } from "../core/rehearsal";
 import type { AnchorSentence, StationNowReadout } from "../core/rehearsal";
@@ -201,6 +208,8 @@ export interface PartnerSession {
   suggestion: PartnerSuggestion | null;
   /** §85: the interactive station a volunteer tapped, if any. */
   stationObjectId: string | null;
+  /** Bumped on every tap, so re-tapping the SAME station reopens the sheet. */
+  stationTap?: number;
   /** True while a rehearsal or suggestion is being computed. */
   busy: boolean;
 }
@@ -295,6 +304,8 @@ export class App {
 
   readonly quickAgent: QuickAgent;
   notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
+  /** Set by the UI: open the Prop Studio on a definition. */
+  openPropStudioHook: ((defId: string) => void) | null = null;
   /** UI hook: open the AI sheet with the 幫我改善 request (set by UI). */
   onImprove: (() => void) | null = null;
 
@@ -394,6 +405,9 @@ export class App {
   onChange(cb: () => void): () => void { this.uiListeners.add(cb); return () => this.uiListeners.delete(cb); }
   private notifyUi(): void { for (const cb of this.uiListeners) cb(); }
   private syncScene(): void {
+    // The ghost and the library thumbnail resolve visuals without a project in
+    // hand, so the registry is refreshed from the one we are about to draw.
+    registerPropVisuals(this.state.props);
     this.scene.sync(this.viewState, {
       selection: this.session.selection,
       ghost: this.session.ghost,
@@ -410,6 +424,7 @@ export class App {
       simQueues: this.session.simQueues,
       simStations: this.overlayStations(),
       propPlayback: this.propPlaybackView(),
+      propAnchors: this.selectedPropAnchors(),
       // A booth is 7 m across with eight station badges on it — the flow names
       // on top of that make the plan unreadable exactly when you are watching
       // the crowd. The ribbons and arrows stay; only the names step aside.
@@ -476,6 +491,10 @@ export class App {
     const c = this.centerOfClassroom();
     this.updateGhostAt(c.x, c.z);
     this.notifyUi();
+    // Placement mode is otherwise silent: the ghost appears in the middle of
+    // the room and nothing says the next tap puts it down. 「怎麼放到攤位」 was
+    // a blind tester's second blocker.
+    this.toast(`點畫面選位置放下「${entry.name}」`);
   }
 
   /**
@@ -613,8 +632,72 @@ export class App {
     return this.state.props ?? [];
   }
 
+  /** The definition a placed object draws from, if it is a prop at all. */
+  propForObject(objectId: string): PropDefinition | undefined {
+    const obj = this.state.objects.find((o) => o.id === objectId);
+    return propForAssetId(this.state.props, obj?.assetId);
+  }
+
+  openPropStudioFor(defId: string): void {
+    this.openPropStudioHook?.(defId);
+  }
+
+  /**
+   * The definition as it is ACTUALLY RUNNING, for the Studio to open.
+   *
+   * Editing wrote through to the live splice, but opening still read the
+   * frozen seed — so renaming six faces in the flow panel, then reopening
+   * 編輯道具 to change a colour, showed the old names and saved them back over
+   * the new ones. Silent, and on the most ordinary sequence in the product.
+   * With one placed copy we can show exactly what is on the floor; with
+   * several there is no single truth, so the seed stands and the Studio's own
+   * copy says to use 只改這一個.
+   */
+  propDefinitionForEdit(defId: string): PropDefinition | undefined {
+    const def = this.propDefinitions().find((d) => d.id === defId);
+    if (!def) return undefined;
+    const placed = this.state.objects.filter((o) => o.assetId === propEntryId(def));
+    if (placed.length !== 1) return def;
+    const live = liveSeedFromInstance(this.state.interaction, def, placed[0].id);
+    return live ? { ...def, interaction: live } : def;
+  }
+
+  /** Write one definition out as a `.planform-prop.json`. */
+  exportProp(defId: string): void {
+    const def = this.propDefinitions().find((d) => d.id === defId);
+    if (!def) return;
+    downloadText(propFileName(def), serializeProp(def, { app: "planform-iso" }));
+    this.toast(`已匯出「${def.name}」`, false);
+  }
+
+  /**
+   * Read one in. A prop the project already has is never overwritten — the
+   * copy on disk may be older than the one being edited here, and a file
+   * dialog offers no undo.
+   */
+  async importProp(file: File): Promise<boolean> {
+    const result = parsePropFile(await file.text());
+    if (!result.ok) {
+      this.toast(result.reason, false);
+      return false;
+    }
+    const taken = new Set(this.propDefinitions().map((d) => d.id));
+    const def = claimPropId(result.prop, taken);
+    this.addPropToProject(def, { place: false });
+    const renamed = def.id !== result.prop.id ? "（已另存為新的一份，沒有覆蓋原本的）" : "";
+    this.toast([`已匯入「${def.name}」${renamed}`, ...result.warnings].join(" "), true);
+    return true;
+  }
+
   /** Definitions come with their mirrored entry, or the library cannot place them. */
   addPropToProject(def: PropDefinition, opts: { place?: boolean } = {}): void {
+    // A caller that hands over nothing — a preset id that no longer exists,
+    // a failed import — used to take the whole mutate down with it and leave
+    // the store mid-write. Refuse it as data, not as a crash.
+    if (!def || typeof def.id !== "string" || !def.id) {
+      this.toast("這個道具讀不出來，沒有加入", false);
+      return;
+    }
     this.store.mutate((p) => {
       const others = (p.props ?? []).filter((d) => d.id !== def.id);
       p.props = [...others, def];
@@ -624,17 +707,57 @@ export class App {
   }
 
   /**
-   * Edit a definition. The version bump is not cosmetic: the scene's rebuild
-   * signature includes entry.version, so this is what makes every placed
-   * instance redraw with the new look.
+   * Edit a definition, and make the edit reach everything already standing on
+   * it.
+   *
+   * The version bump is not cosmetic: the scene's rebuild signature includes
+   * entry.version, which is what redraws placed instances with the new LOOK.
+   * The interaction needs its own pass, because a placed prop's station and
+   * steps were copied out of the seed at placement time and nothing refreshed
+   * them — so every face rename, every service time, every skip rate typed
+   * into the Studio was a silent no-op on the props actually on the floor,
+   * while the toast reported success. Three cases, and the middle one is the
+   * common one:
+   *
+   *   - the definition gained an interaction  -> splice it into every instance
+   *   - it still has one                      -> reseed content, keep wiring
+   *   - it lost one (移除互動)                 -> unwind every splice, or the
+   *                                              station keeps serving people
+   *                                              at a prop that has no game
    */
   updatePropDefinition(def: PropDefinition): void {
     const bumped = { ...def, version: def.version + 1 };
+    const entryId = propEntryId(def);
+    let touched = 0;
     this.store.mutate((p) => {
       p.props = (p.props ?? []).map((d) => (d.id === def.id ? bumped : d));
       p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+
+      const placed = p.objects.filter((o) => o.assetId === entryId);
+      for (const obj of placed) {
+        const bound = p.interaction?.stations.some((s) => s.id === propStationId(obj.id));
+        if (bumped.interaction && bound && p.interaction) {
+          p.interaction = reseedPropInteraction(p.interaction, bumped, obj.id);
+          touched += 1;
+        } else if (bumped.interaction && !bound) {
+          p.interaction = instantiatePropInteraction(
+            p.interaction ?? propTemplateSkeleton(), bumped, obj.id, { x: obj.x, z: obj.z },
+          );
+          touched += 1;
+        } else if (!bumped.interaction && bound && p.interaction) {
+          const next = removePropInteraction(p.interaction, obj.id);
+          if (next === null) delete p.interaction;
+          else p.interaction = next;
+          touched += 1;
+        }
+      }
     });
     this.resetFlowRun();
+    if (touched) {
+      this.toast(bumped.interaction
+        ? `已更新「${bumped.name}」，場上的 ${touched} 份都跟著改了`
+        : `已移除「${bumped.name}」的互動，場上的 ${touched} 份不再是關卡`, true);
+    }
   }
 
   /** Delete a definition AND everything standing on it — objects and splices. */
@@ -666,7 +789,12 @@ export class App {
     const obj = this.state.objects.find((o) => o.id === objectId);
     const def = propForAssetId(this.state.props, obj?.assetId);
     if (!obj || !def) return null;
-    const fork = forkDefinition(def);
+    // Fork what is RUNNING, not the frozen seed. An organiser who renamed all
+    // six faces in the flow panel used to lose every one of them here, because
+    // forkDefinition deep-copied the definition and the live splice was then
+    // rebuilt from preset defaults.
+    const live = liveSeedFromInstance(this.state.interaction, def, objectId);
+    const fork = forkDefinition(live ? { ...def, interaction: live } : def);
     this.store.mutate((p) => {
       p.props = [...(p.props ?? []), fork];
       p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
@@ -677,7 +805,9 @@ export class App {
         p.interaction = cleared === null ? undefined : cleared;
         if (!p.interaction) delete p.interaction;
         if (fork.interaction) {
-          p.interaction = instantiatePropInteraction(p.interaction ?? propTemplateSkeleton(), fork, objectId);
+          p.interaction = instantiatePropInteraction(
+            p.interaction ?? propTemplateSkeleton(), fork, objectId, { x: obj.x, z: obj.z },
+          );
         }
       }
     });
@@ -768,7 +898,7 @@ export class App {
           announced = "已建立互動流程：「" + def.name + "」";
         }
       }
-      p.interaction = instantiatePropInteraction(p.interaction, def, obj.id);
+      p.interaction = instantiatePropInteraction(p.interaction, def, obj.id, { x: obj.x, z: obj.z });
     });
     this.resetFlowRun();
     if (announced) this.toast(announced, true);
@@ -941,6 +1071,13 @@ export class App {
   }
 
   seedSessionFromPlan(project: Project): void {
+    // Built prop groups are cached by definition id, and §39 makes each
+    // project's copy of a library prop an independently edited snapshot — so
+    // two projects can hold the same id at the same version with different
+    // parts. Without this, opening the second project drew the first one's
+    // prop, and nothing would ever correct it.
+    clearPropGroupCache();
+    registerPropVisuals(project.props);
     this.rehydrateVisuals();
     // A rehearsal belongs to the plan it was started on. Carrying the agents,
     // the queue counts or the statistics into the next project would show
@@ -1419,6 +1556,35 @@ export class App {
       serving,
       queued: this.session.simQueues[station.id] ?? 0,
     });
+  }
+
+  /**
+   * §58/§59/§93 — the selected prop's four standing positions in world space.
+   *
+   * Only for a selection of one, and only for a prop: drawing every prop's
+   * anchors at once would bury the plan, and §26's 不要所有人頭上一直顯示 is
+   * the same instinct. This is what makes 「移動整組，站位跟著走」 verifiable
+   * by looking — the written sentences are prop-relative and read the same
+   * before and after a move.
+   */
+  private selectedPropAnchors(): { role: string; label: string; x: number; z: number }[] | undefined {
+    if (this.session.selection.size !== 1) return undefined;
+    const id = [...this.session.selection][0];
+    const obj = this.state.objects.find((o) => o.id === id);
+    const def = obj ? propForAssetId(this.state.props, obj.assetId) : undefined;
+    if (!obj || !def?.anchors.length || obj.hidden) return undefined;
+    const rad = (obj.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const LABEL: Record<string, string> = {
+      staff: "工作人員", player: "參加者", queue: "排隊起點", exit: "完成出口",
+    };
+    return def.anchors.map((a) => ({
+      role: a.role,
+      label: LABEL[a.role] ?? a.role,
+      x: obj.x + a.x * cos + a.z * sin,
+      z: obj.z - a.x * sin + a.z * cos,
+    }));
   }
 
   /** A served figure stands ON its station; 60 cm is well inside one lane. */
@@ -1992,7 +2158,7 @@ export class App {
     return true;
   }
 
-  /** ▶ 演練一次 — the numbers first; the walk-through is the separate ▶ 播放走位. */
+  /** ▶ 開始彩排 — the numbers first; the walk-through is the separate ▶ 看人走一遍. */
   startFlowPlayback(): void {
     const result = this.runFlowSimulation();
     if (!result) return;
@@ -2021,8 +2187,8 @@ export class App {
   }
 
   startEventPlayback(): void {
-    // ▶ 模擬 shows the numbers immediately; the animated walk-through is the
-    // separate opt-in ▶ 播放走位 (replaySimulation).
+    // ▶ 開始彩排 shows the numbers immediately; the animated walk-through is
+    // the separate opt-in ▶ 看人走一遍 (replaySimulation).
     const result = this.runEventSimulation();
     this.stopSimLoopOnly();
     this.session.simMode = "event-flow";
@@ -2557,10 +2723,12 @@ export class App {
         const pick = this.scene.pick(e.clientX, e.clientY);
         const guide = pick?.type === "object" ? this.propAnchorGuide(pick.id) : null;
         const next = guide ? pick!.id : null;
-        if (this.session.partner.stationObjectId !== next) {
-          this.session.partner.stationObjectId = next;
-          this.notifyUi();
-        }
+        // Always notify, even when the id is unchanged: closing the sheet and
+        // tapping the same station again has to bring it back, and the sheet
+        // decides that from a tick, not from the id.
+        this.session.partner.stationObjectId = next;
+        this.session.partner.stationTap = (this.session.partner.stationTap ?? 0) + 1;
+        this.notifyUi();
       }
       return;
     }

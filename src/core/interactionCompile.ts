@@ -22,6 +22,7 @@ import {
 import type {
   AudienceSegment,
   PropDefinition,
+  PropInteractionSeed,
   BoothConfig,
   BoothStation,
   EventScenario,
@@ -329,6 +330,187 @@ export function propTemplateSkeleton(name = "攤位流程"): InteractionTemplate
 }
 
 /**
+ * Push an edited definition's interaction onto the splice already running for
+ * `objectId`, in place.
+ *
+ * This is what makes 儲存修改 mean something for a prop that is already on the
+ * floor — which is the normal case, because people place a thing and then tune
+ * it. Without it the Studio edited a frozen seed: the live station, the six
+ * faces, the service time and the skip rate were all snapshot at placement and
+ * never refreshed, so every 互動 edit was a silent no-op while the toast said
+ * it had been saved.
+ *
+ * CONTENT is overwritten, WIRING is preserved. Face labels, colours, prompts,
+ * per-face seconds and weights, the station's numbers, the staff role's size
+ * and the skip rate all come from the new seed; every `next` pointer, the
+ * ask-step's position in the list and the fragment's place in the flow stay
+ * exactly as they are. That distinction is the point: re-splicing from scratch
+ * would rewire terminals that other props now depend on.
+ *
+ * Adding or removing FACES is content too — a 6-face dice edited to 8 grows
+ * two options, wired to fall through like every other new row.
+ *
+ * Per-instance edits made in the flow panel are overwritten, and that is the
+ * intent: this is the 更新範本 door. §71's 只改這一個 is the other one.
+ */
+export function reseedPropInteraction(
+  template: InteractionTemplate,
+  def: PropDefinition,
+  objectId: string,
+): InteractionTemplate {
+  const seed = def.interaction;
+  const stationId = propStationId(objectId);
+  if (!seed || !template.stations.some((s) => s.id === stationId)) return template;
+
+  const prefix = `p_${objectId}_`;
+  const seedById = new Map(seed.steps.map((st) => [`${prefix}${st.id}`, st]));
+  const askId = propAskId(objectId);
+  const skipRate = Math.min(1, Math.max(0, seed.skipRate ?? 0));
+
+  const steps = template.steps.map((step) => {
+    if (step.id === askId && step.branch?.kind === "chance") {
+      // The ask keeps its two options and their targets; only the odds and the
+      // prop's display name follow the definition.
+      const branch = step.branch;
+      return {
+        ...step,
+        name: `要不要玩「${def.name}」`,
+        branch: {
+          ...branch,
+          options: branch.options.map((o) => o.id === "skip"
+            ? { ...o, weight: skipRate }
+            : { ...o, label: def.name, weight: 1 - skipRate }),
+        },
+      };
+    }
+    const from = seedById.get(step.id);
+    if (!from) return step;
+    const next: InteractionStep = {
+      ...step,
+      name: from.name,
+      avgSeconds: from.avgSeconds,
+      ...(from.prompt !== undefined ? { prompt: from.prompt } : {}),
+      ...(from.serviceVariance !== undefined ? { serviceVariance: from.serviceVariance } : {}),
+    };
+    if (from.branch?.kind === "chance" && step.branch?.kind === "chance") {
+      const live = step.branch.options;
+      next.branch = {
+        ...step.branch,
+        // Content per face, wiring per position: a face that already exists
+        // keeps its `next`; a new face falls through like any new row.
+        options: from.branch.options.map((o, i) => ({
+          ...o,
+          ...(live[i]?.next !== undefined ? { next: live[i].next } : {}),
+        })),
+      };
+    }
+    return next;
+  });
+
+  const stations = template.stations.map((st) => st.id !== stationId ? st : {
+    ...st,
+    name: def.name,
+    parallelServers: seed.station.parallelServers,
+    meanServiceSeconds: seed.station.meanServiceSeconds,
+    queueCapacity: seed.station.queueCapacity,
+    staffCount: seed.staffRole?.count ?? st.staffCount,
+    ...(seed.station.selfService ? { selfService: true as const } : {}),
+    ...anchorFields(def),
+  });
+
+  // The shared role follows the definition's count. Renaming it would split
+  // copies onto two crews — structural, not an edit.
+  const staff = seed.staffRole
+    ? template.staff.map((r) => r.name === seed.staffRole!.name
+      ? { ...r, count: seed.staffRole!.count }
+      : r)
+    : template.staff;
+
+  return { ...template, steps, stations, staff };
+}
+
+/** Drop keys whose value is undefined, so a fresh station carries no empty fields. */
+function stripUndefined<T extends object>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+/** The station fields a definition's anchors dictate. Shared by splice and reseed. */
+function anchorFields(def: PropDefinition): Partial<InteractionStation> {
+  const player = def.anchors.find((a) => a.role === "player");
+  const queue = def.anchors.find((a) => a.role === "queue");
+  // `undefined` rather than an absent key: a spread cannot DELETE, so an
+  // anchor removed from the definition used to leave the station standing at
+  // the offset it no longer has — with §63 validation and the §85 partner
+  // sentences reading the definition and giving the other answer.
+  return {
+    anchorOffset: player ? { x: player.x, z: player.z } : undefined,
+    queueDirectionDeg: queue?.facingDeg,
+  };
+}
+
+/**
+ * Read a placed prop's LIVE interaction back out as a seed.
+ *
+ * §71's 只改這一個 used to fork the frozen definition, so an organiser who had
+ * renamed all six faces in the flow panel lost every one of them the moment
+ * they pressed it. A fork has to start from what is actually running.
+ */
+export function liveSeedFromInstance(
+  template: InteractionTemplate | undefined,
+  def: PropDefinition,
+  objectId: string,
+): PropInteractionSeed | undefined {
+  const seed = def.interaction;
+  if (!seed || !template) return seed;
+  const stationId = propStationId(objectId);
+  const station = template.stations.find((s) => s.id === stationId);
+  if (!station) return seed;
+  const prefix = `p_${objectId}_`;
+  const ask = template.steps.find((s) => s.id === propAskId(objectId));
+  const askSkip = ask?.branch?.kind === "chance"
+    ? ask.branch.options.find((o) => o.id === "skip")?.weight
+    : undefined;
+
+  const steps = seed.steps.map((st) => {
+    const live = template.steps.find((s) => s.id === `${prefix}${st.id}`);
+    if (!live) return st;
+    // Ids and wiring come from the DEFINITION — the fork is a fresh seed and
+    // will be re-spliced. Everything a person edits comes from the live copy.
+    const seedBranch = st.branch;
+    return {
+      ...st,
+      name: live.name,
+      avgSeconds: live.avgSeconds,
+      ...(live.prompt !== undefined ? { prompt: live.prompt } : {}),
+      ...(live.branch?.kind === "chance" && seedBranch?.kind === "chance"
+        ? {
+          branch: {
+            ...seedBranch,
+            options: live.branch.options.map((o, i) => ({
+              ...o,
+              next: seedBranch.options[i]?.next,
+            })),
+          },
+        }
+        : {}),
+    };
+  });
+
+  return {
+    ...seed,
+    steps,
+    station: {
+      ...seed.station,
+      parallelServers: station.parallelServers,
+      meanServiceSeconds: station.meanServiceSeconds,
+      queueCapacity: station.queueCapacity,
+    },
+    ...(seed.staffRole ? { staffRole: { ...seed.staffRole, count: station.staffCount } } : {}),
+    ...(askSkip !== undefined ? { skipRate: askSkip } : {}),
+  };
+}
+
+/**
  * Splice a prop's interaction into the template, bound to a placed object.
  *
  * Copies of one definition each get their own splice (their own ask, steps
@@ -344,6 +526,7 @@ export function instantiatePropInteraction(
   template: InteractionTemplate,
   def: PropDefinition,
   objectId: string,
+  at?: { x: number; z: number },
 ): InteractionTemplate {
   const seed = def.interaction;
   if (!seed || !seed.steps.length) return template;
@@ -386,14 +569,15 @@ export function instantiatePropInteraction(
     }
   }
 
-  const playerAnchor = def.anchors.find((a) => a.role === "player");
-  const queueAnchor = def.anchors.find((a) => a.role === "queue");
   const station: InteractionStation = {
     id: stationId,
     name: def.name,
     type: "custom",
-    x: 0,
-    z: 0,
+    // Seeded from the object when the caller knows it. `resolveStationPosition`
+    // recomputes this on every run, so these are only the fallback — but a
+    // fallback of 0,0 is the corner of the room, which is never right.
+    x: at?.x ?? 0,
+    z: at?.z ?? 0,
     staffCount: seed.staffRole?.count ?? 1,
     parallelServers: seed.station.parallelServers,
     meanServiceSeconds: seed.station.meanServiceSeconds,
@@ -401,8 +585,7 @@ export function instantiatePropInteraction(
     ...(seed.station.selfService ? { selfService: true } : {}),
     ...(staffRoleId ? { staffRoleId } : {}),
     objectId,
-    ...(playerAnchor ? { anchorOffset: { x: playerAnchor.x, z: playerAnchor.z } } : {}),
-    ...(queueAnchor?.facingDeg !== undefined ? { queueDirectionDeg: queueAnchor.facingDeg } : {}),
+    ...stripUndefined(anchorFields(def)),
   };
 
   const skipRate = Math.min(1, Math.max(0, seed.skipRate ?? 0));

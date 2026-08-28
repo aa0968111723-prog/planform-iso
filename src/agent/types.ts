@@ -21,6 +21,22 @@ export type AgentIntent =
   | { type: "optimize-layout"; objectives: OptimizationObjective[] }
   | { type: "explain-bottleneck" }
   | { type: "prepare-team-view" }
+  // §35 「AI 幫我做一個道具」. The agent proposes a RECIPE — a named prop with
+  // a size, a look and, for a game, how many faces and what is on them. It
+  // never writes geometry or project JSON; the executor turns the recipe into
+  // a PropDefinition through the same builders the Studio uses, into the
+  // draft, so the answer arrives as the existing preview → 套用/取消 loop.
+  | {
+    type: "create-prop";
+    name: string;
+    /** dice | spinner | cardbox | box | table | screen | sign — a preset to start from. */
+    kind?: string;
+    dimensions?: { width: number; depth: number; height: number };
+    color?: string;
+    /** Faces / wedges / cards, when the prop is a game. */
+    faces?: { label: string; color?: string; prompt?: string }[];
+    interactive?: boolean;
+  }
   | { type: "unknown"; raw: string };
 
 export type AgentToolName =
@@ -34,6 +50,7 @@ export type AgentToolName =
   | "getSimulationSummary"
   | "createAssetFromCatalog"
   | "createCustomAssetProxy"
+  | "createPropFromRecipe"
   | "requestAssetReconstruction"
   | "importAsset"
   | "updateAssetMetadata"
@@ -81,6 +98,12 @@ export interface AgentDiffSummary {
   movedObjectIds: string[];
   removedObjectIds: string[];
   addedCatalogIds: string[];
+  /** Prop definitions the draft adds, changes or drops. Without these a prop
+   *  recipe was INVISIBLE in the preview table — the user was asked to accept
+   *  a change the summary did not mention. */
+  addedPropIds: string[];
+  changedPropIds: string[];
+  removedPropIds: string[];
   notes: string[];
   validationBefore?: { errors: number; warnings: number };
   validationAfter?: { errors: number; warnings: number };

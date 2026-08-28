@@ -195,6 +195,22 @@ smoke；三輪審查（架構/UX/視覺；本機無已登入 Claude CLI，由全
 subagent 執行，PR body 一行如實揭露）；Grok 盲測 §91/§92/§93；PR body；
 tag `PLANFORM_PROP_STUDIO_READY`；**不 merge**。
 
+## 事後：審查與盲測改變了什麼
+
+三輪審查加一次五面向對抗式稽核，是在**每一條測試都綠**的樹上跑的，找到 23 條
+確認缺陷（去重 16）。它們幾乎全是同一個形狀：**單獨看每一塊都對，組合起來錯**。
+最貴的三個——放置骰子的六個面畫成「玩／路過」、Studio 的編輯對場上道具無效、
+存檔重開後教室的服務位從 4 掉到 1——單元測試一條都沒抓到，因為每一條都在
+「一筆 definition」或「一個函式」的尺度上測，而缺陷住在它們之間。
+
+之後新增的測試因此一律走**真實組合路徑**：fixture 經過 `instantiatePropInteraction`
+（所以 ask-step 在場）、經過 `migrateProject`（所以走真正的載入路徑）、
+由引擎判定而不是比對陣列。
+
+Grok 盲測的價值在另一個地方：它兩次說「不能」，理由都不是 bug，而是
+**介面表達不出使用者想做的事**——沒有步驟編輯器、站位看不見。這種缺陷
+沒有任何單元測試會失敗，也不會有人在寫程式時想到。
+
 ## 風險清單
 
 | 風險 | 處置 |
@@ -218,5 +234,5 @@ tag `PLANFORM_PROP_STUDIO_READY`；**不 merge**。
 | 4. 模擬綁定（接線契約） | ✅ | 20 測試、8 變異全擋；parity 零改動 |
 | 5. Prop Studio UI＋群組 | ✅ | studio overlay（預設種子、零件/互動/錨點編輯、autosave 草稿）、我的道具裝置庫、§71 fork、§93 群組吸收；live 瀏覽器煙霧測試全過 |
 | 6. 彩排／場刊／夥伴／連動 | ✅ | 引擎 per-frame 站台結果、§25 減速落面、§31 顯示連動、§57 離場漂移、§96 場刊前綴閘、§26 屬性面板、§85 夥伴模式點站台、§32 Studio 顯示連動選擇器；32 測試、20/21 變異被擋（1 個等價）。**真瀏覽器抓到 Step 4 就存在的 `propFaceOptions` bug（六個面畫成「玩／路過」），已修＋3 條回歸測試** |
-| 7. GLB／AI／匯入匯出 | ⬜ | |
-| 8. E2E／效能／審查／tag | ⬜ | |
+| 7. GLB／AI／匯入匯出 | ✅ | §40 `visualFrom` 借用 GLB visual（anchors/遊戲/footprint 仍是道具自己的）、§35 recipe intent/tool/executor＋`propRecipe.ts`、`summarize()` 認得 props（否則 recipe 在預覽表隱形）、`commit()` 修好「刪掉的 optional 區塊不會生效」、`.planform-prop.json` 匯出匯入（每種拒絕都講人話）；28 測試、13/13 變異被擋 |
+| 8. E2E／效能／審查／tag | ✅ | §94/§95 golden e2e＋§80 效能（每幀 0.1 ms 中位數）；五面向對抗式稽核＋三輪審查共 23 條確認缺陷（去重 16）全數修復；Grok 三題盲測第一輪 §92/§93 不能 → 修完全部「能」；PR body 更新；tag `PLANFORM_PROP_STUDIO_READY`；**未 merge** |

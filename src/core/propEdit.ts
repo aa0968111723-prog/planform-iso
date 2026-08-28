@@ -57,6 +57,20 @@ export interface AbsorbResult {
  * NAMED in the result; silently merging two games into one station would
  * change both games' numbers without anyone deciding that.
  */
+/**
+ * Prop-local (x, z) -> assembly-local, for a source placed at `dx, dz` and
+ * turned `rotationDeg`. Same rotation convention as `resolveStationPosition`.
+ */
+function localToAssembly(rotationDeg: number, dx: number, dz: number) {
+  const rad = (rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return (x: number, z: number) => ({
+    x: dx + x * cos + z * sin,
+    z: dz - x * sin + z * cos,
+  });
+}
+
 export function absorbSelection(input: AbsorbInput, name = "組合道具"): AbsorbResult | null {
   const objects = input.objects.filter((o) => !o.hidden);
   if (!objects.length) return null;
@@ -75,23 +89,36 @@ export function absorbSelection(input: AbsorbInput, name = "組合道具"): Abso
     const dx = obj.x - cx;
     const dz = obj.z - cz;
     if (def) {
+      // A part's offset is expressed in the SOURCE prop's local frame, which
+      // the placed object rotates in the world. Translating without rotating
+      // put a spinner's pointer and a station's sign on the wrong side of a
+      // prop the moment it had been turned — and the player anchor with them,
+      // so the §85 sentence a volunteer reads pointed at the prop's back.
+      // Same convention as resolveStationPosition and propValidationIssues.
+      const spin = localToAssembly(obj.rotationDeg, dx, dz);
       for (const part of def.parts) {
+        const copy = JSON.parse(JSON.stringify(part)) as PropPart;
+        const at = spin(part.offset.x, part.offset.z);
         parts.push({
-          ...JSON.parse(JSON.stringify(part)) as PropPart,
+          ...copy,
           id: `${obj.id}_${part.id}`,
-          offset: { x: part.offset.x + dx, y: part.offset.y, z: part.offset.z + dz },
+          offset: { x: at.x, y: part.offset.y, z: at.z },
+          ...(obj.rotationDeg ? { rotationDeg: (part.rotationDeg ?? 0) + obj.rotationDeg } : {}),
         });
       }
+      const carry = (list: typeof def.anchors) =>
+        list.map((a) => ({ ...a, ...spin(a.x, a.z),
+          ...(a.facingDeg !== undefined ? { facingDeg: a.facingDeg + obj.rotationDeg } : {}) }));
       if (def.interaction) {
         if (!interaction) {
           interaction = JSON.parse(JSON.stringify(def.interaction)) as PropDefinition["interaction"];
           interactionSource = def;
-          anchors = def.anchors.map((a) => ({ ...a, x: a.x + dx, z: a.z + dz }));
+          anchors = carry(def.anchors);
         } else {
           droppedInteractions.push(def.name);
         }
       } else if (!anchors.length && def.anchors.length) {
-        anchors = def.anchors.map((a) => ({ ...a, x: a.x + dx, z: a.z + dz }));
+        anchors = carry(def.anchors);
       }
     } else {
       const entry = input.entryFor(obj);

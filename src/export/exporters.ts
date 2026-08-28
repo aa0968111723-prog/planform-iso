@@ -9,6 +9,14 @@ function download(filename: string, href: string): void {
   link.remove();
 }
 
+/** Download arbitrary text as a file. Shared by the project and prop writers. */
+export function downloadText(filename: string, text: string): void {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  download(filename, url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function exportProjectJson(project: Project): void {
   const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);

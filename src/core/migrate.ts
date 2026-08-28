@@ -16,6 +16,7 @@
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
 import { BOOTH_STATION_TYPES, BOOTH_ZONE_ROLES, defaultBoothParams } from "./boothCatalog";
 import { templateFromBooth } from "./interactionCompile";
+import { syncPropEntries } from "./propCatalog";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
@@ -333,7 +334,15 @@ function migrateInteractionStation(raw: Partial<InteractionStation>): Interactio
   return {
     id: raw.id,
     name: typeof raw.name === "string" && raw.name ? raw.name : "站台",
-    type: "custom",
+    // NOT hard-coded "custom". `templateFromScenario` copies a classroom
+    // station verbatim, type included, and `zoneParallelServers` expands a
+    // zone-bound station's servers only for shoe/backpack/seating. Writing
+    // "custom" here erased that on the first save, so an E310 plan converted
+    // to a step list silently dropped 鞋子/背包 from 4 servers to 1 on reload —
+    // invisible, because zoneId survived so the station still moved with its
+    // zone. The scenario whitelist (`migrateStation`) always preserved type;
+    // this one is now symmetric with it.
+    type: typeof raw.type === "string" && raw.type ? (raw.type as InteractionStation["type"]) : "custom",
     x: Number.isFinite(raw.x) ? Number(raw.x) : 0,
     z: Number.isFinite(raw.z) ? Number(raw.z) : 0,
     staffCount: Math.max(0, Math.round(raw.staffCount ?? 1)),
@@ -499,6 +508,13 @@ function migratePropAnchor(raw: Partial<PropAnchor>): PropAnchor | null {
 function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | null {
   if (!raw || typeof raw !== "object") return null;
   if (typeof raw.id !== "string" || !raw.id) return null;
+  // `propForAssetId` answers only for ids carrying this prefix, and every
+  // other prop path goes through it. A definition that arrives without one —
+  // from an import, or a hand-edited file — used to get a perfectly valid,
+  // placeable catalog entry and then be invisible to every prop lookup: a grey
+  // box with no faces, no anchors and no validation, with nothing to explain
+  // it. Make the invariant true on the way in instead of hoping.
+  const id = raw.id.startsWith("prop_") ? raw.id : `prop_${raw.id}`;
   if (typeof raw.name !== "string" || !raw.name) return null;
   const parts = (Array.isArray(raw.parts) ? raw.parts : [])
     .map((p, i) => migratePropPart(p as Partial<PropPart>, i))
@@ -538,7 +554,7 @@ function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | n
   }
 
   return {
-    id: raw.id,
+    id,
     name: raw.name,
     category: typeof raw.category === "string" && raw.category ? raw.category : "互動",
     dimensions: {
@@ -558,6 +574,9 @@ function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | n
     ...(typeof raw.icon === "string" ? { icon: raw.icon } : {}),
     version: Number.isFinite(raw.version) ? Math.max(1, Math.round(Number(raw.version))) : 1,
     ...(typeof raw.source === "string" ? { source: raw.source } : {}),
+    ...(typeof raw.visualFrom === "string" && raw.visualFrom
+      ? { visualFrom: raw.visualFrom }
+      : {}),
   };
 }
 
@@ -649,7 +668,13 @@ function migrateCatalogExtra(raw: Partial<ProjectCatalogExtra>): ProjectCatalogE
     planSymbolRef: raw.planSymbolRef,
     thumbnailRef: raw.thumbnailRef,
     tags: Array.isArray(raw.tags) ? raw.tags : ["custom"],
-    createdBy: raw.createdBy === "import" || raw.createdBy === "agent" || raw.createdBy === "builtin" ? raw.createdBy : "photo",
+    // "studio" is what the prop mirror stamps; without it here the loader
+    // rewrote the entry it had just been handed, which is the clearest
+    // possible sign that the entry is a second persisted copy.
+    createdBy: raw.createdBy === "import" || raw.createdBy === "agent"
+      || raw.createdBy === "builtin" || raw.createdBy === "studio"
+      ? raw.createdBy
+      : "photo",
     version: raw.version ?? 1,
     blobIds: raw.blobIds,
     allowCustomSize: raw.allowCustomSize ?? true,
@@ -715,7 +740,18 @@ function migrateScenario(raw: Partial<EventScenario>): EventScenario | null {
 
 /** Resolve spatial bindings against the current project without mutating either input. */
 export function resolveStationPosition(project: Project, station: ServiceStation): { x: number; z: number } {
-  const object = station.objectId && project.objects.find((item) => item.id === station.objectId && !item.hidden);
+  const visible = station.objectId
+    && project.objects.find((item) => item.id === station.objectId && !item.hidden);
+  // A prop station has no authored coordinates to fall back on — it is created
+  // at 0,0 and defined entirely by its object. A pre-prop station's x/z hold
+  // the scenario's own numbers, so falling through for those is correct and
+  // stays byte-identical. For a prop, falling through put every visitor in the
+  // corner of the room the moment someone pressed 隱藏, so a hidden prop still
+  // resolves against its object: hiding is a view toggle, not a demolition.
+  const object = visible
+    || (station.objectId && (station as InteractionStation).anchorOffset
+      ? project.objects.find((item) => item.id === station.objectId)
+      : undefined);
   if (object) {
     // A prop's player anchor: the station stands where PEOPLE stand, not at
     // the object's centre, and it turns with the object. Strictly gated on
@@ -977,6 +1013,20 @@ export function migrateProject(input: Partial<Project>): Project {
   p.props = migrateProps(input.props);
   if (!p.props) delete p.props;
   rebindPropStations(p);
+  // Regenerate the mirrored catalog entries from the definitions on EVERY
+  // load. They are derived data, and nothing guaranteed they were present:
+  // a project whose `catalogExtras` was stripped (an older build, a
+  // hand-edited file, an import) came back with its props intact and no
+  // entries, so every placed prop resolved to a plain grey table — no faces,
+  // no anchors, no plan symbol — and nothing would ever have corrected it.
+  if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+  // Regenerate the mirrored catalog entries from the definitions on EVERY
+  // load. They are derived data, and nothing guaranteed they were present:
+  // a project whose `catalogExtras` was stripped (an older build, a
+  // hand-edited file, an import) came back with its props intact and no
+  // entries, so every placed prop resolved to a plain grey table — no faces,
+  // no anchors, no plan symbol — and nothing would ever have corrected it.
+  if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
 
   return p;
 }

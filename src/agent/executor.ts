@@ -4,6 +4,8 @@
 
 import { eventFlowAdapter } from "../adapters/eventFlow";
 import { createCustomAssetProxy } from "../assets/proxy";
+import { describeRecipe, propFromRecipe } from "../core/propRecipe";
+import { syncPropEntries } from "../core/propCatalog";
 import {
   MockReconstructionWorker,
   ReconstructionQueue,
@@ -181,6 +183,43 @@ export class AgentExecutor {
             p.catalogExtras = [...(p.catalogExtras ?? []), entry as never];
           });
           return { ok: true, tool: call.tool, data: { assetId: entry.id, entry } };
+        }
+
+        case "createPropFromRecipe": {
+          // The agent hands over a RECIPE, never geometry and never project
+          // JSON. propFromRecipe turns it into a definition with the same
+          // builders the Studio uses, so an AI-made prop opens, edits and
+          // rehearses exactly like a hand-made one.
+          const name = str(call.args?.name, "AI 道具");
+          const faces = Array.isArray(call.args?.faces)
+            ? (call.args.faces as unknown[]).slice(0, 12).map((f) => {
+              const o = (f ?? {}) as Record<string, unknown>;
+              return {
+                label: str(o.label, ""),
+                ...(typeof o.color === "string" ? { color: o.color } : {}),
+                ...(typeof o.prompt === "string" ? { prompt: o.prompt } : {}),
+              };
+            })
+            : undefined;
+          const def = propFromRecipe({
+            name,
+            kind: typeof call.args?.kind === "string" ? call.args.kind : undefined,
+            color: typeof call.args?.color === "string" ? call.args.color : undefined,
+            ...(call.args?.width !== undefined ? {
+              dimensions: {
+                width: num(call.args?.width, 0.6),
+                depth: num(call.args?.depth, 0.6),
+                height: num(call.args?.height, 0.6),
+              },
+            } : {}),
+            ...(faces?.length ? { faces } : {}),
+            ...(call.args?.interactive === false ? { interactive: false } : {}),
+          }, uid("prop"));
+          this.tx.mutate((p) => {
+            p.props = [...(p.props ?? []), def];
+            p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+          });
+          return { ok: true, tool: call.tool, data: { propId: def.id, summary: describeRecipe(def) } };
         }
 
         case "createAssetFromCatalog":

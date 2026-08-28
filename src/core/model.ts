@@ -704,6 +704,17 @@ export interface PropDefinition {
   version: number;
   /** Where it came from: builtin preset id, "user", or "import". */
   source?: string;
+  /**
+   * §40 — draw this prop with an imported model instead of its `parts`.
+   *
+   * The upgrade path from a grey box to a real 3D dice: import a GLB, then
+   * point a definition at that entry's visual. Anchors, the game and the
+   * footprint are the prop's own; only the LOOK is borrowed, so the whole
+   * simulation and 場刊 story is unchanged by swapping the model in or out.
+   * `parts` stays as the fallback, which is what renders while the GLB is
+   * still loading and in any build that cannot resolve it.
+   */
+  visualFrom?: string;
 }
 
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
@@ -726,7 +737,11 @@ export interface ProjectCatalogExtra {
   planSymbolRef?: string;
   thumbnailRef?: string;
   tags: string[];
-  createdBy: "photo" | "import" | "agent" | "builtin";
+  // "studio" is what the Prop Studio's one-way mirror stamps. It was
+  // missing here, so the loader rewrote every prop entry to "photo" —
+  // harmless today, but proof that the derived entry is a second
+  // persisted copy the loader can mutate.
+  createdBy: "photo" | "import" | "agent" | "builtin" | "studio";
   version: number;
   blobIds?: { sourceImage?: string; glb?: string; thumbnail?: string };
   allowCustomSize?: boolean;

@@ -138,7 +138,7 @@ test.describe("outdoor booth", () => {
     // One panel for every plan: the booth's own steps, not a check-in desk.
     await expect(page.locator(".left")).toContainText("互動流程");
 
-    await page.locator(".left button", { hasText: "▶ 演練一次" }).click();
+    await page.locator(".left button", { hasText: "▶ 開始彩排" }).click();
     // The numbers land first.
     await expect(page.locator(".left")).toContainText("全部完成");
     await expect
@@ -148,7 +148,7 @@ test.describe("outdoor booth", () => {
       .toBeGreaterThan(0);
 
     // Then the walk-through puts people on the canvas.
-    await page.locator(".left button", { hasText: "▶ 播放走位" }).click();
+    await page.locator(".left button", { hasText: "▶ 看人走一遍" }).click();
     await expect
       .poll(() => page.evaluate(() => (window as unknown as {
         planform: { app: { session: { simPositions: unknown[] } } };
