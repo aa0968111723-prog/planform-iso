@@ -37,6 +37,10 @@ import {
   type InteractionTemplate,
   type MatchBranch,
   type MatchRule,
+  type PropAnchor,
+  type PropDefinition,
+  type PropInteractionSeed,
+  type PropPart,
   type EventScenario,
   type MeasurementAnnotation,
   type ObjectKind,
@@ -242,6 +246,12 @@ function migrateOption(raw: Partial<InteractionOption>, i: number): InteractionO
     ...(Number.isFinite(raw.extraSeconds) ? { extraSeconds: Number(raw.extraSeconds) } : {}),
     ...(typeof raw.value === "string" ? { value: raw.value } : {}),
     ...(raw.next === null || typeof raw.next === "string" ? { next: raw.next } : {}),
+    // Face visuals — a dice face's colour/picture live on the option so there
+    // is exactly one record per face. Same-commit rule: a field and its
+    // whitelist entry always land together, or the field silently dies on the
+    // first save (the objectId lesson).
+    ...(typeof raw.color === "string" ? { color: raw.color } : {}),
+    ...(typeof raw.imageBlobId === "string" ? { imageBlobId: raw.imageBlobId } : {}),
   };
 }
 
@@ -345,6 +355,13 @@ function migrateInteractionStation(raw: Partial<InteractionStation>): Interactio
     ...(typeof raw.objectId === "string" ? { objectId: raw.objectId } : {}),
     ...(typeof raw.zoneId === "string" ? { zoneId: raw.zoneId } : {}),
     ...(Number.isFinite(raw.serviceVariance) ? { serviceVariance: Number(raw.serviceVariance) } : {}),
+    ...(raw.anchorOffset
+      && Number.isFinite(raw.anchorOffset.x) && Number.isFinite(raw.anchorOffset.z)
+      ? { anchorOffset: { x: Number(raw.anchorOffset.x), z: Number(raw.anchorOffset.z) } }
+      : {}),
+    ...(Number.isFinite(raw.queueDirectionDeg)
+      ? { queueDirectionDeg: Number(raw.queueDirectionDeg) }
+      : {}),
   };
 }
 
@@ -426,6 +443,144 @@ export function migrateInteraction(
       speedMetersPerSecond: Math.max(0.2, raw.settings?.speedMetersPerSecond ?? 1.2),
     },
   };
+}
+
+// --- Prop Studio definitions -------------------------------------------------
+//
+// Defensive in the interaction style: repair what can be repaired, drop one
+// broken definition rather than the block, never let a bad prop take the
+// project down (§77 — 「這個道具需要復原」 beats a white screen).
+
+function migratePropPart(raw: Partial<PropPart>, i: number): PropPart | null {
+  if (!raw || typeof raw !== "object") return null;
+  const shape = raw.shape === "cylinder" || raw.shape === "sphere" || raw.shape === "plane"
+    ? raw.shape
+    : "box";
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : `part${i + 1}`,
+    shape,
+    size: {
+      width: Math.max(0.01, raw.size?.width ?? 0.3),
+      depth: Math.max(0.01, raw.size?.depth ?? 0.3),
+      height: Math.max(0.01, raw.size?.height ?? 0.3),
+    },
+    offset: {
+      x: Number.isFinite(raw.offset?.x) ? Number(raw.offset!.x) : 0,
+      y: Number.isFinite(raw.offset?.y) ? Number(raw.offset!.y) : 0,
+      z: Number.isFinite(raw.offset?.z) ? Number(raw.offset!.z) : 0,
+    },
+    ...(Number.isFinite(raw.rotationDeg) ? { rotationDeg: Number(raw.rotationDeg) } : {}),
+    ...(typeof raw.color === "string" ? { color: raw.color } : {}),
+    ...(typeof raw.finish === "string" ? { finish: raw.finish } : {}),
+    ...(typeof raw.text === "string" ? { text: raw.text } : {}),
+    ...(typeof raw.imageBlobId === "string" ? { imageBlobId: raw.imageBlobId } : {}),
+    ...(raw.facesFromOptions === true ? { facesFromOptions: true } : {}),
+  };
+}
+
+function migratePropAnchor(raw: Partial<PropAnchor>): PropAnchor | null {
+  if (!raw || typeof raw !== "object") return null;
+  const role = raw.role === "player" || raw.role === "staff" || raw.role === "queue" || raw.role === "exit"
+    ? raw.role
+    : null;
+  if (!role) return null;
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : role,
+    role,
+    x: Number.isFinite(raw.x) ? Number(raw.x) : 0,
+    z: Number.isFinite(raw.z) ? Number(raw.z) : 0,
+    ...(Number.isFinite(raw.facingDeg) ? { facingDeg: Number(raw.facingDeg) } : {}),
+  };
+}
+
+function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.id !== "string" || !raw.id) return null;
+  if (typeof raw.name !== "string" || !raw.name) return null;
+  const parts = (Array.isArray(raw.parts) ? raw.parts : [])
+    .map((p, i) => migratePropPart(p as Partial<PropPart>, i))
+    .filter((p): p is PropPart => p !== null);
+  const anchors = (Array.isArray(raw.anchors) ? raw.anchors : [])
+    .map((a) => migratePropAnchor(a as Partial<PropAnchor>))
+    .filter((a): a is PropAnchor => a !== null);
+
+  let interaction: PropInteractionSeed | undefined;
+  const seed = raw.interaction;
+  if (seed && typeof seed === "object" && Array.isArray(seed.steps)) {
+    const steps = seed.steps
+      .map((st) => migrateStep(st as Partial<InteractionStep>))
+      .filter((st): st is InteractionStep => st !== null);
+    if (steps.length) {
+      interaction = {
+        steps,
+        station: {
+          meanServiceSeconds: Math.max(0, seed.station?.meanServiceSeconds ?? 30),
+          parallelServers: Math.max(1, Math.round(seed.station?.parallelServers ?? 1)),
+          queueCapacity: Math.max(1, Math.round(seed.station?.queueCapacity ?? 8)),
+          ...(seed.station?.selfService === true ? { selfService: true } : {}),
+        },
+        ...(seed.staffRole && typeof seed.staffRole.name === "string"
+          ? {
+            staffRole: {
+              name: seed.staffRole.name,
+              count: Math.max(0, Math.round(seed.staffRole.count ?? 1)),
+            },
+          }
+          : {}),
+        ...(Number.isFinite(seed.skipRate)
+          ? { skipRate: Math.min(1, Math.max(0, Number(seed.skipRate))) }
+          : {}),
+      };
+    }
+  }
+
+  return {
+    id: raw.id,
+    name: raw.name,
+    category: typeof raw.category === "string" && raw.category ? raw.category : "互動",
+    dimensions: {
+      width: Math.max(0.05, raw.dimensions?.width ?? 0.6),
+      depth: Math.max(0.05, raw.dimensions?.depth ?? 0.6),
+      height: Math.max(0.05, raw.dimensions?.height ?? 0.6),
+    },
+    parts,
+    anchors,
+    ...(interaction ? { interaction } : {}),
+    ...(Number.isFinite(raw.clearance) ? { clearance: Math.max(0, Number(raw.clearance)) } : {}),
+    ...(Number.isFinite(raw.interactionZone)
+      ? { interactionZone: Math.max(0, Number(raw.interactionZone)) }
+      : {}),
+    ...(typeof raw.icon === "string" ? { icon: raw.icon } : {}),
+    version: Number.isFinite(raw.version) ? Math.max(1, Math.round(Number(raw.version))) : 1,
+    ...(typeof raw.source === "string" ? { source: raw.source } : {}),
+  };
+}
+
+export function migrateProps(raw: unknown): PropDefinition[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const defs = raw
+    .map((d) => migratePropDefinition(d as Partial<PropDefinition>))
+    .filter((d): d is PropDefinition => d !== null);
+  return defs.length ? defs : undefined;
+}
+
+/**
+ * Re-attach prop stations that an OLDER build's save stripped.
+ *
+ * Old builds rebuild interaction stations through a whitelist that predates
+ * `objectId`: a file that round-trips through one comes back with its prop
+ * stations unbound — still running, at the coordinates of the day it was
+ * saved, which is worse than losing them. Prop station ids are deterministic
+ * (`prop_<objectId>`) precisely so this pass can put the binding back.
+ */
+function rebindPropStations(p: Project): void {
+  if (!p.interaction) return;
+  const objectIds = new Set(p.objects.map((o) => o.id));
+  for (const station of p.interaction.stations) {
+    if (station.objectId || !station.id.startsWith("prop_")) continue;
+    const objectId = station.id.slice("prop_".length);
+    if (objectIds.has(objectId)) station.objectId = objectId;
+  }
 }
 
 /**
@@ -795,6 +950,11 @@ export function migrateProject(input: Partial<Project>): Project {
   p.interaction = migrateInteraction(input.interaction);
   if (!p.interaction && p.booth) p.interaction = templateFromBooth(p.booth);
   if (!p.interaction) delete p.interaction;
+
+  // Prop Studio definitions — same optional-block contract as `interaction`.
+  p.props = migrateProps(input.props);
+  if (!p.props) delete p.props;
+  rebindPropStations(p);
 
   return p;
 }

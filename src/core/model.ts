@@ -416,6 +416,18 @@ export interface InteractionOption {
   value?: string;
   /** undefined = use the step's own next; null = the visitor leaves here. */
   next?: string | null;
+  /**
+   * How this face LOOKS — a dice face's colour, a spinner segment's fill, the
+   * uploaded picture on the face. Content, never machinery: a prop part with
+   * `facesFromOptions` renders these, and editing them moves no number.
+   *
+   * They live HERE, not on the prop part, so there is exactly one record per
+   * face: the same option drives the 3D face, the panel row, the result
+   * display and any 連動 — the split-brain of editing a face's question in one
+   * place and its picture in another is ruled out structurally.
+   */
+  color?: string;
+  imageBlobId?: string;
 }
 
 /** A random fork. One roll, one rng() draw, and only when there is a real choice. */
@@ -517,6 +529,23 @@ export interface InteractionStation extends ServiceStation {
   selfService?: boolean;
   /** Walk away if the queue is already this long on arrival. Omitted = nobody balks. */
   balkQueueLength?: number;
+  /**
+   * Where people stand relative to the bound object, in the OBJECT's local
+   * frame (metres; rotated by the object's rotationDeg at resolve time).
+   *
+   * Seeded from the prop definition's player anchor when the prop is placed,
+   * then owned by this station — two copies of one dice table can face
+   * different walls. Absent = the station sits at the object's centre, which
+   * is byte-for-byte what every pre-prop plan already does.
+   */
+  anchorOffset?: { x: number; z: number };
+  /**
+   * Which way the queue extends from this station, degrees (0 = +Z, matching
+   * rotationDeg). Absent = the room-side heuristic queuePlacement has always
+   * used — the classroom path never sets this, so the frozen parity runs
+   * cannot see it.
+   */
+  queueDirectionDeg?: number;
 }
 
 export interface StaffRole {
@@ -571,6 +600,102 @@ export interface InteractionTemplate {
   seed: number;
   settings: { speedMetersPerSecond: number };
   spatial?: SimulationSpatial;
+}
+
+// --- Prop Studio (互動道具) ------------------------------------------------
+//
+// A prop is a DEFINITION — "the club's 60 cm six-sided dice" — and a placed
+// prop is a plain SceneObject whose assetId points at the definition's
+// mirrored catalog entry. There is no PropInstance type: position, rotation,
+// size and hidden already live on SceneObject, and adding fields there would
+// be stripped by migrateObject's whitelist anyway.
+//
+// The three payloads are all optional because they answer different questions:
+//   parts        — what it LOOKS like (data-driven geometry; a mat has only this)
+//   anchors      — where PEOPLE stand around it (seeded onto the station)
+//   interaction  — what HAPPENS there (a station + steps fragment, compiled
+//                  into project.interaction on placement; after that the
+//                  project's copy is the live one and this is just the seed —
+//                  the same freeze-the-source rule the booth block follows)
+
+/** One primitive a prop is built from. */
+export interface PropPart {
+  id: string;
+  shape: "box" | "cylinder" | "sphere" | "plane";
+  /** Part size in metres. A cylinder reads width as diameter; a sphere ignores depth. */
+  size: { width: number; depth: number; height: number };
+  /** Offset of the part's floor-centre from the prop's floor-centre, metres. */
+  offset: { x: number; y: number; z: number };
+  rotationDeg?: number;
+  color?: string;
+  /** Material preset name (materialFromPreset vocabulary): 霧面/亮面/木質…. */
+  finish?: string;
+  /** Text painted on the front face (CanvasTexture billboard, not 3D type). */
+  text?: string;
+  /** Image blob painted on the front face. */
+  imageBlobId?: string;
+  /**
+   * Render this part's faces from the bound station's chance options — the
+   * dice's six faces, the spinner's segments. The option list is the ONE
+   * record for face colour/image/label, so the 3D face can never disagree
+   * with the panel.
+   */
+  facesFromOptions?: boolean;
+}
+
+/** A place people stand, in the prop's local frame (metres, +Z = facing). */
+export interface PropAnchor {
+  id: string;
+  role: "player" | "staff" | "queue" | "exit";
+  x: number;
+  z: number;
+  /** For queue anchors: the direction the line extends, degrees. */
+  facingDeg?: number;
+}
+
+/** The interaction a prop brings with it, as a template fragment. */
+export interface PropInteractionSeed {
+  /**
+   * Steps in fragment-local ids. The wiring contract (enforced at
+   * instantiation): the last step carries an explicit `next: null`, and every
+   * internal jump is an explicit id — a fragment must never rely on row order,
+   * because it is spliced into a list it does not control.
+   */
+  steps: InteractionStep[];
+  /** Station parameters; position comes from the placed object + anchors. */
+  station: Pick<
+    InteractionStation,
+    "meanServiceSeconds" | "parallelServers" | "queueCapacity" | "selfService"
+  >;
+  /** Role that staffs it, created on first placement, shared by copies. */
+  staffRole?: { name: string; count: number };
+  /** Probability a passer-by skips this station entirely (the ask-step fork). */
+  skipRate?: number;
+}
+
+export interface PropDefinition {
+  id: string;
+  name: string;
+  /** 素材庫分類：互動 / 家具 / 指示 / 我的道具…. */
+  category: string;
+  /** Overall footprint, metres — the mirrored catalog entry's dimensions. */
+  dimensions: { width: number; depth: number; height: number };
+  parts: PropPart[];
+  anchors: PropAnchor[];
+  interaction?: PropInteractionSeed;
+  /** Suggested operating space in front, metres (§61). */
+  clearance?: number;
+  /** Interaction zone radius, metres (§17) — visual + validation only. */
+  interactionZone?: number;
+  icon?: string;
+  /**
+   * Definition version. Bumped on every edit; the mirrored catalog entry
+   * carries the same number, which is what makes the scene rebuild placed
+   * instances (the rebuild signature includes entry.version).
+   */
+  version: number;
+  /** Where it came from: builtin preset id, "user", or "import". */
+  source?: string;
 }
 
 /** Custom catalog entry metadata stored in project JSON (blobs live in IndexedDB). */
@@ -642,6 +767,18 @@ export interface Project {
    * to the `booth` block still sitting in the same file.
    */
   interaction?: InteractionTemplate;
+  /**
+   * Prop Studio definitions used by this plan (互動道具).
+   *
+   * Same contract as `interaction` and `booth`: an optional block, defensive
+   * migration, PROJECT_VERSION does not move. An older build strips this block
+   * on resave — and the plan still opens there, because every definition also
+   * mirrors a plain catalogExtras entry (kind inside the original eight) that
+   * the old build can place, validate and export as a grey box. What the old
+   * build cannot do is edit the prop or run its interaction; the file is
+   * degraded, not broken.
+   */
+  props?: PropDefinition[];
 }
 
 let idCounter = 0;
@@ -718,6 +855,10 @@ export function planHasContent(project: Project): boolean {
   if (project.measurements.length > 0) return true;
   if ((project.scenarios?.length ?? 0) > 0) return true;
   if ((project.catalogExtras?.length ?? 0) > 0) return true;
+  // A plan whose only work is a custom prop definition is not empty — without
+  // this line, 「取代目前專案」 would judge an afternoon in Prop Studio as
+  // nothing worth an undo checkpoint.
+  if ((project.props?.length ?? 0) > 0) return true;
 
   if ((project.description ?? "").trim() !== "") return true;
   if (project.venuePresetId) return true;

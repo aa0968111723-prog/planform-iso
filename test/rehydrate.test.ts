@@ -64,7 +64,7 @@ function fakeModel(): Group {
 describe("blob-backed visuals reload", () => {
   it("an uncached glb entry is loaded from its blob and cached", async () => {
     const e = entry("machine1");
-    await getAssetBlobStore().putBlob("glb_machine1", new ArrayBuffer(16), { kind: "glb" });
+    await getAssetBlobStore().putBlob("glb_machine1", new ArrayBuffer(16), { kind: "glb", mimeType: "model/gltf-binary" });
     expect(getCachedGlbGroup(e.visualRef)).toBeUndefined();
 
     const loaded: string[] = [];
@@ -79,7 +79,7 @@ describe("blob-backed visuals reload", () => {
 
   it("the reloaded model is normalized to the entry's own dimensions", async () => {
     const e = entry("machine2", { dimensions: { width: 0.8, depth: 0.5, height: 1.6 } });
-    await getAssetBlobStore().putBlob("glb_machine2", new ArrayBuffer(16), { kind: "glb" });
+    await getAssetBlobStore().putBlob("glb_machine2", new ArrayBuffer(16), { kind: "glb", mimeType: "model/gltf-binary" });
     await rehydrateAssetVisuals([e], { loadGlb: async () => fakeModel() });
     const group = getCachedGlbGroup(e.visualRef)!;
     // The fake model is a 2×2×2 cube; after normalization it must measure the
@@ -103,8 +103,8 @@ describe("blob-backed visuals reload", () => {
   it("one corrupt blob does not stop the others", async () => {
     const bad = entry("bad1");
     const good = entry("good1");
-    await getAssetBlobStore().putBlob("glb_bad1", new ArrayBuffer(4), { kind: "glb" });
-    await getAssetBlobStore().putBlob("glb_good1", new ArrayBuffer(16), { kind: "glb" });
+    await getAssetBlobStore().putBlob("glb_bad1", new ArrayBuffer(4), { kind: "glb", mimeType: "model/gltf-binary" });
+    await getAssetBlobStore().putBlob("glb_good1", new ArrayBuffer(16), { kind: "glb", mimeType: "model/gltf-binary" });
     const refs = await rehydrateAssetVisuals([bad, good], {
       loadGlb: async (buf) => {
         if (buf.byteLength === 4) throw new Error("corrupt");

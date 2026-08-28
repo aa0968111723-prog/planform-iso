@@ -43,7 +43,7 @@ export type PlacementType = Surface;
 
 export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
-export type AssetCreatedBy = "builtin" | "photo" | "import" | "agent";
+export type AssetCreatedBy = "builtin" | "photo" | "import" | "agent" | "studio";
 
 export interface CatalogDimensions {
   width: number;
