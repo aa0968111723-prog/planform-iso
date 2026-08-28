@@ -167,10 +167,25 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
     }
   };
 
+  /** Does this draft have content a person would be upset to lose? */
+  const hasTypedContent = (): boolean => {
+    const step = draft.interaction?.steps.find((s) => s.branch?.kind === "chance");
+    const opts = step?.branch?.kind === "chance" ? step.branch.options : [];
+    return opts.some((o) => o.prompt) || draft.parts.some((p) => p.text);
+  };
+
   const setFaceCount = (count: number) => {
     const step = faceStep(draft);
     if (!step || step.branch?.kind !== "chance") return;
     const options = step.branch.options;
+    // Fewer faces means throwing away whatever was written on the ones that
+    // go. Only ask when there is something to lose.
+    if (count < options.length) {
+      const losing = options.slice(count).filter((o) => o.prompt).length;
+      if (losing && !window.confirm(`會刪掉最後 ${options.length - count} 個面，其中 ${losing} 個已經寫了題目。確定？`)) {
+        return;
+      }
+    }
     while (options.length < count) {
       options.push({ id: `o${uid("f")}`, label: `選項 ${options.length + 1}`, weight: 1, color: "#38bdf8" });
     }
@@ -199,8 +214,12 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
       button("左", () => place(-dist, 0), "chip chip--sm"),
       button("右", () => place(dist, 0), "chip chip--sm"),
       num("距離 cm", Math.round(dist * 100), 10, (v) => {
+        // Typing a distance for a position that has not been placed yet used
+        // to return silently — the field accepted the number and threw it
+        // away. Put the person in front of the prop at that distance, which
+        // is what they plainly meant.
         const a = draft.anchors.find((x) => x.role === role);
-        if (!a) return;
+        if (!a) { place(0, Math.max(0.2, v / 100)); return; }
         const len = Math.hypot(a.x, a.z) || 1;
         const target = Math.max(0.2, v / 100);
         a.x = (a.x / len) * target;
@@ -227,6 +246,11 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
       card.append(el("div", { class: "subhead", text: "想做什麼？" }));
       card.append(el("div", { class: "row wrap" }, PROP_PRESETS.map((p) =>
         button(`${p.icon ?? "▦"} ${p.name}`, () => {
+          // Tapping a second chip replaces the whole draft. Someone who has
+          // typed six questions and then taps another chip just to SEE what it
+          // is used to lose all six, with no warning and no undo in here.
+          if (hasTypedContent()
+            && !window.confirm(`換成「${p.name}」會清掉你目前打的內容，確定？`)) return;
           const seed = propPreset(p.id)!;
           draft = { ...seed, id: draft.id, source: "user", version: 1 };
           touch();
@@ -287,6 +311,24 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
             touch();
           }, "chip chip--sm")) : []),
       ]));
+      // A part that can carry the faces says so. Without this, only preset
+      // parts ever had `facesFromOptions`, so the DIY dice this panel invites
+      // people to build came out permanently blank — and nothing on screen
+      // explained why. Offered for the two shapes that can show faces.
+      if (part.shape === "box" || part.shape === "cylinder") {
+        partRows.push(el("div", { class: "row wrap" }, [
+          el("label", { class: "hint" }, [
+            el("input", {
+              type: "checkbox", checked: !!part.facesFromOptions,
+              onchange: (e: Event) => {
+                part.facesFromOptions = (e.target as HTMLInputElement).checked || undefined;
+                touch();
+              },
+            } as never),
+            el("span", { text: part.shape === "box" ? " 這一塊要顯示各個面（骰子）" : " 這一塊要顯示各個面（轉盤）" }),
+          ]),
+        ]));
+      }
       // §32 「這個結果要顯示在哪個道具上？」 — one select, no node editor.
       // Only DISPLAY connections in this version: 「按鈕啟動轉盤」 (a CONTROL
       // connection) is deliberately absent and is listed in the PR body.
@@ -345,11 +387,11 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
               onchange: (e: Event) => { option.color = (e.target as HTMLInputElement).value; touch(); },
             } as never),
             textField("題目", option.prompt ?? "", (v) => { option.prompt = v || undefined; touch(); }),
-            num("多花秒", option.extraSeconds ?? 0, 5, (v) => { option.extraSeconds = v > 0 ? v : undefined; touch(); }, 0),
+            num("多花幾秒", option.extraSeconds ?? 0, 5, (v) => { option.extraSeconds = v > 0 ? v : undefined; touch(); }, 0),
           ]));
         });
       }
-      interactionRows.push(el("div", { class: "subhead", text: "站位（§14）" }));
+      interactionRows.push(el("div", { class: "subhead", text: "大家站哪裡" }));
       interactionRows.push(anchorRow("player", "參加者"));
       interactionRows.push(anchorRow("staff", "工作人員"));
       interactionRows.push(anchorRow("queue", "排隊起點"));

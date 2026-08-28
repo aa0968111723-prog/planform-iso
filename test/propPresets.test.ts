@@ -25,6 +25,7 @@ beforeEach(() => {
       getContext: () => ({
         fillStyle: "", font: "", textAlign: "", textBaseline: "",
         fillRect: () => undefined, fillText: () => undefined,
+        translate: () => undefined, rotate: () => undefined,
         measureText: () => ({ width: 10 }),
       }),
     }),
@@ -49,8 +50,13 @@ describe("all presets", () => {
   it("ship the ten props and four golden assemblies, not fifty", () => {
     expect(PROP_PRESETS.length).toBe(15);
     const names = PROP_PRESETS.map((d) => d.name);
-    for (const golden of ["城市微光骰子站", "祝福箱", "快問快答台", "轉盤遊戲站"]) {
-      expect(names).toContain(golden);
+    // Names carry what is INSIDE the assembly, because a poetic name told a
+    // reviewer nothing: given 「請建立一個大型骰子遊戲站」 they picked the bare
+    // 大型骰子 and started building a table out of numbered boxes, never
+    // realising a ready-made one existed. Substring, so the parenthetical can
+    // be reworded without breaking the test.
+    for (const golden of ["骰子遊戲站", "祝福箱", "快問快答台", "轉盤遊戲站"]) {
+      expect(names.some((n) => n.includes(golden)), golden).toBe(true);
     }
     // §50: the club's mat exists as a formal definition.
     expect(names).toContain("巧拼地墊");

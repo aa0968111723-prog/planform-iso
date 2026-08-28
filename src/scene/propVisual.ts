@@ -64,8 +64,13 @@ const faceTextureCache = new Map<string, CanvasTexture>();
  * A canvas texture carrying text over a colour. One per distinct content
  * string; the scene shares them across parts and props.
  */
-function paintedTexture(text: string, background: string, color = "#1f2937"): CanvasTexture {
-  const key = `${text}|${background}|${color}`;
+function paintedTexture(
+  text: string,
+  background: string,
+  color = "#1f2937",
+  halfTurn = false,
+): CanvasTexture {
+  const key = `${text}|${background}|${color}|${halfTurn ? "r" : ""}`;
   const cached = faceTextureCache.get(key);
   if (cached) return cached;
   const canvas = document.createElement("canvas");
@@ -85,6 +90,11 @@ function paintedTexture(text: string, background: string, color = "#1f2937"): Ca
       size -= 6;
       ctx.font = `700 ${size}px system-ui, 'Noto Sans TC', sans-serif`;
     }
+    if (halfTurn) {
+      ctx.translate(128, 128);
+      ctx.rotate(Math.PI);
+      ctx.translate(-128, -128);
+    }
     ctx.fillText(text, 128, 128);
   }
   const texture = new CanvasTexture(canvas);
@@ -93,9 +103,9 @@ function paintedTexture(text: string, background: string, color = "#1f2937"): Ca
   return texture;
 }
 
-function paintedMaterial(text: string, background: string): MeshStandardMaterial {
+function paintedMaterial(text: string, background: string, halfTurn = false): MeshStandardMaterial {
   return new MeshStandardMaterial({
-    map: paintedTexture(text, background),
+    map: paintedTexture(text, background, undefined, halfTurn),
     roughness: 0.85,
     metalness: 0.02,
   });
@@ -120,9 +130,13 @@ function diceMaterials(part: PropPart, options: readonly InteractionOption[]): M
   const faceOrder = [4, 5, 0, 1, 2, 3]; // fill +z first, then -z, ±x, ±y
   const mats: MeshStandardMaterial[] = new Array(6).fill(fallback);
   for (let i = 0; i < 6; i++) {
+    const slot = faceOrder[i];
     const option = options[i % options.length];
     const background = option.color ?? part.color ?? "#f4f4f5";
-    mats[faceOrder[i]] = paintedMaterial(option.label ?? "", background);
+    // BoxGeometry's +y and -y faces carry their UVs turned a half turn from
+    // the sides, so an unrotated label printed upside down on the top of the
+    // dice. Turn those two textures to match.
+    mats[slot] = paintedMaterial(option.label ?? "", background, slot === 2 || slot === 3);
   }
   return mats;
 }

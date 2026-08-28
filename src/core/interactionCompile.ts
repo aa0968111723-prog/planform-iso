@@ -429,13 +429,22 @@ export function reseedPropInteraction(
   return { ...template, steps, stations, staff };
 }
 
+/** Drop keys whose value is undefined, so a fresh station carries no empty fields. */
+function stripUndefined<T extends object>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
 /** The station fields a definition's anchors dictate. Shared by splice and reseed. */
 function anchorFields(def: PropDefinition): Partial<InteractionStation> {
   const player = def.anchors.find((a) => a.role === "player");
   const queue = def.anchors.find((a) => a.role === "queue");
+  // `undefined` rather than an absent key: a spread cannot DELETE, so an
+  // anchor removed from the definition used to leave the station standing at
+  // the offset it no longer has — with §63 validation and the §85 partner
+  // sentences reading the definition and giving the other answer.
   return {
-    ...(player ? { anchorOffset: { x: player.x, z: player.z } } : {}),
-    ...(queue?.facingDeg !== undefined ? { queueDirectionDeg: queue.facingDeg } : {}),
+    anchorOffset: player ? { x: player.x, z: player.z } : undefined,
+    queueDirectionDeg: queue?.facingDeg,
   };
 }
 
@@ -576,7 +585,7 @@ export function instantiatePropInteraction(
     ...(seed.station.selfService ? { selfService: true } : {}),
     ...(staffRoleId ? { staffRoleId } : {}),
     objectId,
-    ...anchorFields(def),
+    ...stripUndefined(anchorFields(def)),
   };
 
   const skipRate = Math.min(1, Math.max(0, seed.skipRate ?? 0));

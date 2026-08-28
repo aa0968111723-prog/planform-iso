@@ -637,6 +637,26 @@ export class App {
     this.openPropStudioHook?.(defId);
   }
 
+  /**
+   * The definition as it is ACTUALLY RUNNING, for the Studio to open.
+   *
+   * Editing wrote through to the live splice, but opening still read the
+   * frozen seed — so renaming six faces in the flow panel, then reopening
+   * 編輯道具 to change a colour, showed the old names and saved them back over
+   * the new ones. Silent, and on the most ordinary sequence in the product.
+   * With one placed copy we can show exactly what is on the floor; with
+   * several there is no single truth, so the seed stands and the Studio's own
+   * copy says to use 只改這一個.
+   */
+  propDefinitionForEdit(defId: string): PropDefinition | undefined {
+    const def = this.propDefinitions().find((d) => d.id === defId);
+    if (!def) return undefined;
+    const placed = this.state.objects.filter((o) => o.assetId === propEntryId(def));
+    if (placed.length !== 1) return def;
+    const live = liveSeedFromInstance(this.state.interaction, def, placed[0].id);
+    return live ? { ...def, interaction: live } : def;
+  }
+
   /** Write one definition out as a `.planform-prop.json`. */
   exportProp(defId: string): void {
     const def = this.propDefinitions().find((d) => d.id === defId);

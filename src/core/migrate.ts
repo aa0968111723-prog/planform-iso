@@ -16,6 +16,7 @@
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
 import { BOOTH_STATION_TYPES, BOOTH_ZONE_ROLES, defaultBoothParams } from "./boothCatalog";
 import { templateFromBooth } from "./interactionCompile";
+import { syncPropEntries } from "./propCatalog";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
@@ -507,6 +508,13 @@ function migratePropAnchor(raw: Partial<PropAnchor>): PropAnchor | null {
 function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | null {
   if (!raw || typeof raw !== "object") return null;
   if (typeof raw.id !== "string" || !raw.id) return null;
+  // `propForAssetId` answers only for ids carrying this prefix, and every
+  // other prop path goes through it. A definition that arrives without one —
+  // from an import, or a hand-edited file — used to get a perfectly valid,
+  // placeable catalog entry and then be invisible to every prop lookup: a grey
+  // box with no faces, no anchors and no validation, with nothing to explain
+  // it. Make the invariant true on the way in instead of hoping.
+  const id = raw.id.startsWith("prop_") ? raw.id : `prop_${raw.id}`;
   if (typeof raw.name !== "string" || !raw.name) return null;
   const parts = (Array.isArray(raw.parts) ? raw.parts : [])
     .map((p, i) => migratePropPart(p as Partial<PropPart>, i))
@@ -546,7 +554,7 @@ function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | n
   }
 
   return {
-    id: raw.id,
+    id,
     name: raw.name,
     category: typeof raw.category === "string" && raw.category ? raw.category : "互動",
     dimensions: {
@@ -660,7 +668,13 @@ function migrateCatalogExtra(raw: Partial<ProjectCatalogExtra>): ProjectCatalogE
     planSymbolRef: raw.planSymbolRef,
     thumbnailRef: raw.thumbnailRef,
     tags: Array.isArray(raw.tags) ? raw.tags : ["custom"],
-    createdBy: raw.createdBy === "import" || raw.createdBy === "agent" || raw.createdBy === "builtin" ? raw.createdBy : "photo",
+    // "studio" is what the prop mirror stamps; without it here the loader
+    // rewrote the entry it had just been handed, which is the clearest
+    // possible sign that the entry is a second persisted copy.
+    createdBy: raw.createdBy === "import" || raw.createdBy === "agent"
+      || raw.createdBy === "builtin" || raw.createdBy === "studio"
+      ? raw.createdBy
+      : "photo",
     version: raw.version ?? 1,
     blobIds: raw.blobIds,
     allowCustomSize: raw.allowCustomSize ?? true,
@@ -999,6 +1013,20 @@ export function migrateProject(input: Partial<Project>): Project {
   p.props = migrateProps(input.props);
   if (!p.props) delete p.props;
   rebindPropStations(p);
+  // Regenerate the mirrored catalog entries from the definitions on EVERY
+  // load. They are derived data, and nothing guaranteed they were present:
+  // a project whose `catalogExtras` was stripped (an older build, a
+  // hand-edited file, an import) came back with its props intact and no
+  // entries, so every placed prop resolved to a plain grey table — no faces,
+  // no anchors, no plan symbol — and nothing would ever have corrected it.
+  if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+  // Regenerate the mirrored catalog entries from the definitions on EVERY
+  // load. They are derived data, and nothing guaranteed they were present:
+  // a project whose `catalogExtras` was stripped (an older build, a
+  // hand-edited file, an import) came back with its props intact and no
+  // entries, so every placed prop resolved to a plain grey table — no faces,
+  // no anchors, no plan symbol — and nothing would ever have corrected it.
+  if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
 
   return p;
 }

@@ -78,18 +78,27 @@ function dice(): PropDefinition {
   };
 }
 
-/** 🎡 桌上轉盤 — base, pole, flat disc, pointer. */
+/**
+ * 🎡 桌上轉盤 — the kind that sits ON a table, not a fairground wheel.
+ *
+ * It used to stand 1.1 m on a slim pole with a flat disc on top, and a
+ * reviewer shown only the render called it 「a colourful round bistro table
+ * with a brick glued to the edge」. Same parts, honest height: a low stand you
+ * put on a table, with the pointer reading as a pointer.
+ */
 function spinner(): PropDefinition {
   return {
     id: "prop_spinner",
-    name: "轉盤",
+    name: "桌上轉盤",
     category: "互動",
-    dimensions: { width: 0.8, depth: 0.8, height: 1.1 },
+    dimensions: { width: 0.8, depth: 0.8, height: 0.3 },
     parts: [
-      { id: "base", shape: "cylinder", size: { width: 0.5, depth: 0.5, height: 0.08 }, offset: { x: 0, y: 0, z: 0 }, color: "#475569", finish: "painted-metal" },
-      { id: "pole", shape: "cylinder", size: { width: 0.06, depth: 0.06, height: 0.85 }, offset: { x: 0, y: 0.08, z: 0 }, color: "#64748b", finish: "brushed-metal" },
-      { id: "disc", shape: "cylinder", size: { width: 0.8, depth: 0.8, height: 0.05 }, offset: { x: 0, y: 0.93, z: 0 }, color: "#fbbf24", finish: "plastic-gloss", facesFromOptions: true },
-      { id: "pointer", shape: "box", size: { width: 0.05, depth: 0.16, height: 0.04 }, offset: { x: 0, y: 0.99, z: 0.42 }, color: "#ef4444", finish: "plastic-gloss" },
+      { id: "base", shape: "cylinder", size: { width: 0.5, depth: 0.5, height: 0.06 }, offset: { x: 0, y: 0, z: 0 }, color: "#334155", finish: "painted-metal" },
+      { id: "pole", shape: "cylinder", size: { width: 0.06, depth: 0.06, height: 0.14 }, offset: { x: 0, y: 0.06, z: 0 }, color: "#64748b", finish: "brushed-metal" },
+      // Rim recoloured off gold: one wedge shared the rim's colour, so the
+      // wheel looked like it had five segments instead of six.
+      { id: "disc", shape: "cylinder", size: { width: 0.8, depth: 0.8, height: 0.05 }, offset: { x: 0, y: 0.2, z: 0 }, color: "#e2e8f0", finish: "plastic-gloss", facesFromOptions: true },
+      { id: "pointer", shape: "box", size: { width: 0.06, depth: 0.22, height: 0.05 }, offset: { x: 0, y: 0.25, z: 0.36 }, color: "#ef4444", finish: "plastic-gloss" },
     ],
     anchors: [
       { id: "player", role: "player", x: 0, z: 0.8 },
@@ -222,7 +231,10 @@ function screen(): PropDefinition {
     parts: [
       { id: "base", shape: "box", size: { width: 0.6, depth: 0.5, height: 0.06 }, offset: { x: 0, y: 0, z: 0 }, color: "#334155", finish: "painted-metal" },
       { id: "pole", shape: "cylinder", size: { width: 0.06, depth: 0.06, height: 0.7 }, offset: { x: 0, y: 0.06, z: 0 }, color: "#475569", finish: "brushed-metal" },
-      { id: "panel", shape: "box", size: { width: 0.9, depth: 0.05, height: 0.6 }, offset: { x: 0, y: 0.76, z: 0 }, color: "#0f172a", finish: "screen-glass", text: "題目" },
+      // Bezel dark, FACE pale: the label used to be painted dark-on-dark at
+      // about 1.3:1 contrast, so the screen read as a black board on a stick.
+      { id: "bezel", shape: "box", size: { width: 0.9, depth: 0.05, height: 0.6 }, offset: { x: 0, y: 0.76, z: 0 }, color: "#0f172a", finish: "painted-metal" },
+      { id: "panel", shape: "box", size: { width: 0.82, depth: 0.03, height: 0.52 }, offset: { x: 0, y: 0.8, z: 0.02 }, color: "#e2e8f0", finish: "screen-glass", text: "題目" },
     ],
     anchors: [],
     icon: "🖥",
@@ -240,7 +252,8 @@ function cardBox(): PropDefinition {
     dimensions: { width: 0.45, depth: 0.35, height: 0.5 },
     parts: [
       { id: "body", shape: "box", size: { width: 0.45, depth: 0.35, height: 0.42 }, offset: { x: 0, y: 0, z: 0 }, color: "#a78bfa", finish: "paper", text: "抽一張" },
-      { id: "slot", shape: "box", size: { width: 0.3, depth: 0.02, height: 0.04 }, offset: { x: 0, y: 0.42, z: 0.1 }, color: "#1f2937", finish: "plastic-matte" },
+      // Recessed, not perched: it is an opening in the lid.
+      { id: "slot", shape: "box", size: { width: 0.3, depth: 0.02, height: 0.03 }, offset: { x: 0, y: 0.385, z: 0.06 }, color: "#1f2937", finish: "plastic-matte" },
     ],
     anchors: [
       { id: "player", role: "player", x: 0, z: 0.6 },
@@ -294,12 +307,15 @@ function photoFrame(): PropDefinition {
     category: "互動",
     dimensions: { width: 1.4, depth: 0.5, height: 1.9 },
     parts: [
-      { id: "baseL", shape: "box", size: { width: 0.4, depth: 0.5, height: 0.05 }, offset: { x: -0.55, y: 0, z: 0 }, color: "#475569", finish: "painted-metal" },
-      { id: "baseR", shape: "box", size: { width: 0.4, depth: 0.5, height: 0.05 }, offset: { x: 0.55, y: 0, z: 0 }, color: "#475569", finish: "painted-metal" },
-      bar("left", 0.08, 1.5, -0.66, 0.35),
-      bar("right", 0.08, 1.5, 0.66, 0.35),
-      bar("bottom", 1.4, 0.08, 0, 0.35),
-      bar("top", 1.4, 0.08, 0, 1.77),
+      // Feet directly under the uprights, uprights standing ON the feet. They
+      // used to be 11 cm inboard and 30 cm below, so the frame hovered with
+      // both feet detached — the clearest "this cannot stand up" in the set.
+      { id: "baseL", shape: "box", size: { width: 0.4, depth: 0.5, height: 0.05 }, offset: { x: -0.66, y: 0, z: 0 }, color: "#475569", finish: "painted-metal" },
+      { id: "baseR", shape: "box", size: { width: 0.4, depth: 0.5, height: 0.05 }, offset: { x: 0.66, y: 0, z: 0 }, color: "#475569", finish: "painted-metal" },
+      bar("left", 0.08, 1.5, -0.66, 0.05),
+      bar("right", 0.08, 1.5, 0.66, 0.05),
+      bar("bottom", 1.4, 0.08, 0, 0.05),
+      bar("top", 1.4, 0.08, 0, 1.47),
     ],
     anchors: [
       { id: "player", role: "player", x: 0, z: -0.3 },
@@ -326,8 +342,13 @@ function pickup(): PropDefinition {
     category: "互動",
     dimensions: { width: 1.2, depth: 0.6, height: 1.0 },
     parts: [
-      { id: "counter", shape: "box", size: { width: 1.2, depth: 0.6, height: 0.9 }, offset: { x: 0, y: 0, z: 0 }, color: "#c8b6a6", finish: "light-wood" },
-      { id: "sign", shape: "plane", size: { width: 0.8, depth: 0.02, height: 0.25 }, offset: { x: 0, y: 0.95, z: 0.29 }, color: "#f8fafc", text: "領取處" },
+      // A counter, not a carton: pale body, an overhanging top slab, and the
+      // label on the face a visitor actually walks up to. It used to be the
+      // 物資 box in the same kraft brown at a different size, which in a floor
+      // plan is indistinguishable from it.
+      { id: "body", shape: "box", size: { width: 1.14, depth: 0.56, height: 0.86 }, offset: { x: 0, y: 0, z: 0 }, color: "#e7e5e4", finish: "plastic-matte", text: "領取處" },
+      { id: "top", shape: "box", size: { width: 1.24, depth: 0.66, height: 0.05 }, offset: { x: 0, y: 0.86, z: 0 }, color: "#94a3b8", finish: "brushed-metal" },
+      { id: "sign", shape: "plane", size: { width: 0.7, depth: 0.02, height: 0.22 }, offset: { x: 0, y: 0.91, z: 0.2 }, color: "#f8fafc", text: "領取處" },
     ],
     anchors: [
       { id: "player", role: "player", x: 0, z: 0.6 },
@@ -363,6 +384,9 @@ function mat(): PropDefinition {
       // InstancedMesh for seventy mats will always beat seventy groups, so the
       // prop form is for assemblies and singles, and says so here.
       { id: "slab", shape: "box", size: { width: 0.56, depth: 0.56, height: 0.04 }, offset: { x: 0, y: 0, z: 0 }, finish: "mat-soft" },
+      // Two seam lines make it read as interlocking tile rather than a slab.
+      { id: "seamX", shape: "box", size: { width: 0.56, depth: 0.012, height: 0.042 }, offset: { x: 0, y: 0, z: 0 }, color: "#3fbfae", finish: "mat-soft" },
+      { id: "seamZ", shape: "box", size: { width: 0.012, depth: 0.56, height: 0.042 }, offset: { x: 0, y: 0, z: 0 }, color: "#3fbfae", finish: "mat-soft" },
       { id: "rimN", shape: "box", size: { width: 0.6, depth: 0.02, height: 0.036 }, offset: { x: 0, y: 0, z: 0.29 }, color: "#1d9e8e", finish: "mat-soft" },
       { id: "rimS", shape: "box", size: { width: 0.6, depth: 0.02, height: 0.036 }, offset: { x: 0, y: 0, z: -0.29 }, color: "#1d9e8e", finish: "mat-soft" },
       { id: "rimE", shape: "box", size: { width: 0.02, depth: 0.6, height: 0.036 }, offset: { x: 0.29, y: 0, z: 0 }, color: "#1d9e8e", finish: "mat-soft" },
@@ -383,7 +407,7 @@ function diceStation(): PropDefinition {
   const d = dice();
   return {
     id: "prop_dicestation",
-    name: "城市微光骰子站",
+    name: "骰子遊戲站（桌子＋骰子＋題目板）",
     category: "互動",
     dimensions: { width: 2.2, depth: 1.2, height: 1.8 },
     parts: [
@@ -392,6 +416,8 @@ function diceStation(): PropDefinition {
       // §31: during a rehearsal this board shows the face this station just
       // rolled — the whole point of 骰子結果 → 題目螢幕, wired by default so
       // the golden prop demonstrates it without anyone configuring anything.
+      // A stand under it, or it is a card standing on its edge unaided.
+      { id: "boardfoot", shape: "box", size: { width: 0.36, depth: 0.16, height: 0.04 }, offset: { x: -0.5, y: 0.74, z: -0.1 }, color: "#475569", finish: "painted-metal" },
       { id: "board", shape: "plane", size: { width: 0.7, depth: 0.02, height: 0.5 }, offset: { x: -0.5, y: 0.78, z: -0.1 }, color: "#f8fafc", text: "題目板", showsResultOf: "self" },
       { id: "sign", shape: "plane", size: { width: 0.5, depth: 0.02, height: 1.2 }, offset: { x: 1.35, y: 0.05, z: 0.2 }, color: "#fde68a", text: "城市微光" },
       { id: "signbase", shape: "box", size: { width: 0.4, depth: 0.3, height: 0.05 }, offset: { x: 1.35, y: 0, z: 0.2 }, color: "#475569", finish: "painted-metal" },
@@ -429,7 +455,7 @@ function diceStation(): PropDefinition {
 function blessingBox(): PropDefinition {
   return {
     id: "prop_blessingbox",
-    name: "祝福箱",
+    name: "祝福箱（箱子＋桌子＋立牌）",
     category: "互動",
     dimensions: { width: 1.6, depth: 0.8, height: 1.2 },
     parts: [
@@ -470,15 +496,17 @@ function quizStation(): PropDefinition {
   const b = button();
   return {
     id: "prop_quizstation",
-    name: "快問快答台",
+    name: "快問快答台（桌子＋螢幕＋按鈕）",
     category: "互動",
     dimensions: { width: 2.2, depth: 1.0, height: 1.6 },
     parts: [
       ...t.parts.map((p) => ({ ...p, id: `t_${p.id}` })),
+      // +0.74 puts the screen's own base ON the tabletop. Without it the base
+      // plate floated under the table and the pole pierced the top.
       ...s.parts.map((p) => ({
         ...p,
         id: `s_${p.id}`,
-        offset: { ...p.offset, x: p.offset.x - 0.6, z: p.offset.z - 0.3 },
+        offset: { ...p.offset, x: p.offset.x - 0.6, y: p.offset.y + 0.74, z: p.offset.z - 0.3 },
         // §31: the screen shows 答對／答錯 as each question is answered.
         ...(p.id === "panel" ? { showsResultOf: "self" } : {}),
       })),
@@ -523,7 +551,7 @@ function spinnerStation(): PropDefinition {
   const s = spinner();
   return {
     id: "prop_spinnerstation",
-    name: "轉盤遊戲站",
+    name: "轉盤遊戲站（桌子＋轉盤＋立牌）",
     category: "互動",
     dimensions: { width: 1.8, depth: 1.0, height: 1.6 },
     parts: [

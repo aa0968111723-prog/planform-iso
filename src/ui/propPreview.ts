@@ -92,6 +92,11 @@ export function createPropPreview(size = 260): PropPreview {
       if (current) { scene.remove(current); disposePropGroup(current); }
       current = null;
       renderer.dispose();
+      // dispose() frees three's own objects but leaves the GL context alive;
+      // the Studio makes a fresh renderer on every open, and browsers evict
+      // the oldest context after about sixteen — which would be the main
+      // scene's.
+      renderer.forceContextLoss();
     },
   };
 }

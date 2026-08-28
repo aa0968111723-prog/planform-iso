@@ -84,7 +84,7 @@ function propStationPanel(root: HTMLElement, app: App, objectId: string): void {
       if (now.doing) box.append(el("div", { text: `目前：${now.doing}` }));
       if (now.since) box.append(el("div", { text: `已互動：${now.since}` }));
     } else {
-      box.append(el("div", { text: "還沒有人玩過（按 ▶ 播放走位看現場）" }));
+      box.append(el("div", { text: "還沒有人玩過（按 ▶ 開始彩排看現場）" }));
     }
     box.append(el("div", { text: `現在：${now.serving} 人在玩、${now.queued} 人在排` }));
     root.append(box);

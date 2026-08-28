@@ -42,6 +42,7 @@ beforeEach(() => {
       getContext: () => ({
         fillStyle: "", font: "", textAlign: "", textBaseline: "",
         fillRect: () => undefined, fillText: () => undefined,
+        translate: () => undefined, rotate: () => undefined,
         measureText: () => ({ width: 10 }),
       }),
     }),

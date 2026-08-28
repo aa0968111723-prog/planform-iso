@@ -118,7 +118,7 @@ function renderQuickSetup(app: App): HTMLElement {
   const scenario = app.activeScenario();
 
   const setup = section("模擬活動", [
-    el("p", { class: "hint", text: "填人數與人力，按「▶ 模擬」看會不會塞車。不用網路、不用 AI。" }),
+    el("p", { class: "hint", text: "填人數與人力，按「▶ 開始彩排」看會不會塞車。不用網路、不用 AI。" }),
     el("div", { class: "row wrap" }, [
       num("人數", q.participants, 5, (v) => app.updateSimQuick({ participants: Math.max(1, Math.round(v)) }), 1),
       num("其中現場繳費", onsiteCount, 1, (v) => {
@@ -148,7 +148,7 @@ function renderQuickSetup(app: App): HTMLElement {
     ]));
 
   const flowPreview = section("這一場的流程（照著跑）", [
-    ...(rows.length ? rows : [el("span", { class: "hint", text: "還沒有站點。按「▶ 模擬」會依現在的場佈自動排一組。" })]),
+    ...(rows.length ? rows : [el("span", { class: "hint", text: "還沒有站點。按「▶ 開始彩排」會依現在的場佈自動排一組。" })]),
     el("p", { class: "hint", text: "這是從上面的設定自動排出來的。想改順序、加步驟、加分岔，按下面。" }),
     button("改成我自己的流程", () => app.convertScenarioToFlow(), "btn btn--ghost"),
   ]);
@@ -343,7 +343,9 @@ function chanceRows(
   const rows: HTMLElement[] = [
     el("div", { class: "row wrap" }, [
       el("span", { class: "readout__label", text: "這一步會分岔　面數：" }),
-      ...[2, 4, 6, 8].map((n) => button(String(n), () => app.setFlowOptionCount(step.id, n),
+      // Same set as the Studio's: a 10- or 12-face prop used to show no
+      // highlighted chip here at all, which reads as "broken".
+      ...[2, 4, 6, 8, 10, 12].map((n) => button(String(n), () => app.setFlowOptionCount(step.id, n),
         options.length === n ? "chip chip--sm chip--primary" : "chip chip--sm")),
     ]),
   ];
@@ -358,10 +360,15 @@ function chanceRows(
         type: "color", class: "propstudio__color", value: option.color ?? "#38bdf8",
         onchange: (e: Event) => app.updateFlow((t) => patchOption(t, step.id, i, { color: (e.target as HTMLInputElement).value })),
       } as never),
+      // The face's own question. It lives on the same option record the Studio
+      // edits, and after placement THIS is the live copy — without the field
+      // here, a question typed in the Studio could never be corrected again.
+      textField("題目", option.prompt ?? "",
+        (v) => app.updateFlow((t) => patchOption(t, step.id, i, { prompt: v || undefined }))),
       el("span", { class: "hint", text: `機會 ${Math.round((Math.max(0, option.weight) / total) * 100)} %` }),
       num("權重", option.weight, 1,
         (v) => app.updateFlow((t) => patchOption(t, step.id, i, { weight: Math.max(0, v) })), 0),
-      num("多花秒", option.extraSeconds ?? 0, 5,
+      num("多花幾秒", option.extraSeconds ?? 0, 5,
         (v) => app.updateFlow((t) => patchOption(t, step.id, i, { extraSeconds: v || undefined })), 0),
       el("span", { class: "hint", text: option.next === null ? "選了就離開" : option.next ? "會跳到別步" : "接著下一項" }),
     ]));
@@ -500,7 +507,12 @@ function transport(app: App): HTMLElement {
   const row = el("div", { class: "row wrap sim-transport" }, [
     playing
       ? button(s.simPaused ? "繼續" : "⏸ 暫停", () => app.pauseSimulation(), "btn")
-      : button(s.simResult ? "▶ 再跑一次" : (app.hasFlow() ? "▶ 演練一次" : "▶ 模擬"),
+      // ONE word. The panel used to offer 模擬 / 演練一次 / 再跑一次 and, only
+      // after a run finished, 播放走位 — four names for one idea, while the
+      // 互動道具 panel promised 「放進場地就能彩排」 and no button anywhere said
+      // 彩排. Two independent reviewers, given the task 「按開始彩排」, both got
+      // this far and stopped.
+      : button(s.simResult ? "▶ 再彩排一次" : "▶ 開始彩排",
         () => app.startSimulation(), "btn btn--primary"),
     button("重來", () => app.restartSimulation(), "chip chip--sm"),
     button("停止", () => app.stopSimulation(), "chip chip--sm"),
@@ -559,7 +571,7 @@ function resultBlocks(app: App): HTMLElement[] {
   }
 
   out.push(el("div", { class: "row wrap" }, [
-    button("▶ 播放走位", () => app.replaySimulation(), "btn btn--ghost"),
+    button("▶ 看人走一遍", () => app.replaySimulation(), "btn btn--ghost"),
     button("✦ 幫我改善", () => app.onImprove?.(), "btn btn--ghost"),
   ]));
   return out;

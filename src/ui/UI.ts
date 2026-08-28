@@ -182,7 +182,7 @@ export class UI {
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
     this.app.openPropStudioHook = (defId) => {
-      const def = this.app.propDefinitions().find((d) => d.id === defId);
+      const def = this.app.propDefinitionForEdit(defId);
       if (!def) return;
       const placed = this.app.store.getState().objects
         .filter((o) => o.assetId === `custom:${defId}`).length;
@@ -943,7 +943,8 @@ export class UI {
       rows.push(el("div", { class: "list__row" }, [
         el("span", { class: "list__grow", text: `${def.icon ?? "▦"} ${def.name}${instances ? `（場上 ${instances}）` : ""}` }),
         button("放置", () => this.app.beginPlacementByAssetId(`custom:${def.id}`), "chip chip--sm"),
-        button("編輯", () => this.openPropStudio(def, instances), "chip chip--sm"),
+        // Opened from what is RUNNING, not from the frozen seed.
+        button("編輯", () => this.openPropStudio(this.app.propDefinitionForEdit(def.id) ?? def, instances), "chip chip--sm"),
         button("匯出", () => this.app.exportProp(def.id), "chip chip--sm"),
         button("刪除", () => {
           if (!window.confirm(`刪除「${def.name}」？場上的 ${instances} 份和它的互動也會一起移除。`)) return;
@@ -987,8 +988,12 @@ export class UI {
                 : `用裝置上的「${meta.name}」覆蓋專案裡的版本？場上的每一份都會換新。`;
               if (!window.confirm(warning)) return;
             }
-            this.app.addPropToProject(def, { place: !inProject });
-            if (inProject) this.showToast(`已用裝置上的「${meta.name}」覆蓋專案版本`);
+            // updatePropDefinition, not addPropToProject: the latter swaps the
+            // definition and regenerates the entry but never reseeds the live
+            // splices, so the confirm's promise 「場上的每一份都會換新」 was
+            // only true of the geometry.
+            if (inProject) this.app.updatePropDefinition({ ...def, version: inProject.version });
+            else this.app.addPropToProject(def, { place: true });
           }, "chip chip--sm"),
           button("刪除", () => {
             if (!window.confirm(`從我的道具刪除「${meta.name}」？（不影響已加入專案的）`)) return;
@@ -1194,7 +1199,7 @@ export class UI {
       el("div", { class: "subhead", text: "模擬摘要" }),
       el("p", { class: "hint", text: this.app.session.simResult
         ? this.app.session.simResult.summaryLines.join(" ")
-        : "先到「動線」跑一次 ▶ 模擬，再回來匯出摘要。" }),
+        : "先到「動線」按一次 ▶ 開始彩排，再回來匯出摘要。" }),
       button("匯出模擬摘要圖", () => {
         const r = this.app.session.simResult ?? this.app.runEventSimulation();
         share("route", null, "模擬摘要", { simplify: true, titleSuffix: "模擬摘要", extraNotes: r.summaryLines });

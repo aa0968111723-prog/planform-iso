@@ -737,7 +737,11 @@ export interface ProjectCatalogExtra {
   planSymbolRef?: string;
   thumbnailRef?: string;
   tags: string[];
-  createdBy: "photo" | "import" | "agent" | "builtin";
+  // "studio" is what the Prop Studio's one-way mirror stamps. It was
+  // missing here, so the loader rewrote every prop entry to "photo" —
+  // harmless today, but proof that the derived entry is a second
+  // persisted copy the loader can mutate.
+  createdBy: "photo" | "import" | "agent" | "builtin" | "studio";
   version: number;
   blobIds?: { sourceImage?: string; glb?: string; thumbnail?: string };
   allowCustomSize?: boolean;
