@@ -933,6 +933,47 @@ export function runInteraction(
   }
   summaryLines.push(`平均全程 ${Math.round(avgJourney)} 秒。`);
 
+  /**
+   * How hard each role actually worked, in words.
+   *
+   * The panel has always read this line and the engine never wrote it, so the
+   * one readout that answers 「兩個主持夠不夠」 was silently empty. A fraction is
+   * not the answer either — 0.9 means nothing to somebody deciding whether to
+   * ask a third person to come — so the phrase is the product and the number
+   * rides along for the 進階 readout.
+   *
+   * Only emitted when the flow declares roles. A classroom has none, so its
+   * result is byte-identical to what it always was.
+   */
+  const staffLoad: StaffLoadLine[] | undefined = template.staff.length
+    ? template.staff.map((role) => {
+      const mine = template.stations.filter((st) => st.staffRoleId === role.id);
+      const names = mine.map((st) => st.name);
+      let busy = 0;
+      let capacity = 0;
+      let shortage = false;
+      for (const st of mine) {
+        const runtime = stations[st.id];
+        const servers = runtime ? runtime.busyUntil.length : 0;
+        if (servers <= 0) shortage = true;
+        busy += runtime?.busyServerSeconds ?? 0;
+        capacity += servers * horizon;
+      }
+      const busyFraction = capacity > 0 ? Math.min(1, busy / capacity) : 0;
+      const where = names.length ? `（${names.join("、")}）` : "";
+      const phrase = !mine.length
+        ? `${role.name} 沒有被指派到任何一關`
+        : shortage
+          ? `${role.name} 分不到人，${names.join("、")} 會卡住，大家排在那裡不會前進`
+          : busyFraction >= 0.85
+            ? `${role.name} 幾乎沒停過${where}——再多一個人會差很多`
+            : busyFraction >= 0.5
+              ? `${role.name} 大約一半的時間在忙${where}`
+              : `${role.name} 大部分時間在等人${where}`;
+      return { roleId: role.id, roleName: role.name, phrase, busyFraction, stationNames: names, shortage };
+    })
+    : undefined;
+
   // Steps the visitors actually walked, with how often each option came up.
   // Only emitted when the flow has something a scenario could not express, so
   // a classroom result is byte-identical to what it always was.
@@ -958,6 +999,7 @@ export function runInteraction(
     participantCount: joinerCount,
     leftEarly,
     steps: stepStats,
+    staffLoad,
     funnel: funnel.passed !== funnel.joined
       ? { ...funnel, completed: completedAgents.length, leftEarly }
       : undefined,

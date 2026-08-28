@@ -14,6 +14,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { runInteraction } from "../src/core/eventFlow";
 import { setStationPositions, templateFromScenario } from "../src/core/interactionCompile";
+import { interactionPreset } from "../src/core/interactionPresets";
 import { buildE310GoldenProject } from "../src/core/quickStart";
 import { venuePresetById } from "../src/core/venues";
 import type { InteractionTemplate } from "../src/core/model";
@@ -87,5 +88,46 @@ describe("「同時幾人」 opens service positions", () => {
     // Nobody is staffing it, so no headcount is implied by the positions.
     expect(station.staffCount).toBe(base.stations.find((s) => s.name === "鞋子")!.staffCount);
     expect(rowFor(bumped, "鞋子").servers).toBe(6);
+  });
+});
+
+describe("人力讀數 says how hard each role worked, in words", () => {
+  const okBandage = () => interactionPreset("preset:ok-bandage")!;
+
+  it("names every role, and says something a person can act on", () => {
+    const r = runInteraction(okBandage(), { sampleDt: 30 });
+    expect(r.staffLoad, "the panel reads this line; the engine must write it").toBeDefined();
+    expect(r.staffLoad!.map((l) => l.roleName)).toEqual(["招呼", "主持", "發卡"]);
+    for (const line of r.staffLoad!) {
+      expect(line.phrase).toContain(line.roleName);
+      expect(line.busyFraction).toBeGreaterThanOrEqual(0);
+      expect(line.busyFraction).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("the two hosts at the table are the ones who never stop", () => {
+    const r = runInteraction(okBandage(), { sampleDt: 30 });
+    const host = r.staffLoad!.find((l) => l.roleName === "主持")!;
+    const greeter = r.staffLoad!.find((l) => l.roleName === "招呼")!;
+    // Five of the nine steps happen 桌前, so this is the constraint of the
+    // whole activity — and the readout has to be the thing that says so.
+    expect(host.busyFraction).toBeGreaterThan(greeter.busyFraction);
+    expect(host.phrase).toContain("幾乎沒停過");
+    expect(host.stationNames).toEqual(["桌前"]);
+  });
+
+  it("a role with nobody in it is called out, not averaged away", () => {
+    const t = okBandage();
+    const unstaffed = { ...t, staff: t.staff.map((r) => (r.id === "host" ? { ...r, count: 0 } : r)) };
+    const r = runInteraction(unstaffed, { sampleDt: 30 });
+    const host = r.staffLoad!.find((l) => l.roleId === "host")!;
+    expect(host.shortage).toBe(true);
+    expect(host.phrase).toContain("卡住");
+    // And it really does stop the activity, rather than just reading badly.
+    expect(r.completed).toBe(0);
+  });
+
+  it("a classroom, which declares no roles, reports no staff line at all", () => {
+    expect(runInteraction(golden(), { sampleDt: 5 }).staffLoad).toBeUndefined();
   });
 });
