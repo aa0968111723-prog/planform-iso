@@ -14,8 +14,8 @@
  */
 
 import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog";
-import { BOOTH_ZONE_ROLES } from "./boothCatalog";
-import { BOOTH_STATION_TYPES, defaultBoothParams } from "./boothFlow";
+import { BOOTH_STATION_TYPES, BOOTH_ZONE_ROLES, defaultBoothParams } from "./boothCatalog";
+import { templateFromBooth } from "./interactionCompile";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
@@ -28,6 +28,15 @@ import {
   type BoothStation,
   type BoothStationType,
   type BoothZoneRole,
+  type ChanceBranch,
+  type InteractionAudience,
+  type InteractionBranch,
+  type InteractionOption,
+  type InteractionStation,
+  type InteractionStep,
+  type InteractionTemplate,
+  type MatchBranch,
+  type MatchRule,
   type EventScenario,
   type MeasurementAnnotation,
   type ObjectKind,
@@ -214,6 +223,219 @@ function migrateBooth(raw: Partial<BoothConfig> | undefined): BoothConfig | unde
       gameDwell: Math.max(0, p.gameDwell ?? base.gameDwell),
       balk: p.balk !== false,
     },
+  };
+}
+
+// --- interaction flow -------------------------------------------------------
+//
+// Defensive in the same style as `migrateBoothStation`: repair, never reject.
+// A half-edited flow is still most of an afternoon's work, and losing the rest
+// of it because one field went bad is the failure mode this layer exists for.
+
+function migrateOption(raw: Partial<InteractionOption>, i: number): InteractionOption | null {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : `opt${i + 1}`,
+    label: typeof raw.label === "string" ? raw.label : "",
+    ...(typeof raw.prompt === "string" ? { prompt: raw.prompt } : {}),
+    weight: Number.isFinite(raw.weight) ? Math.max(0, Number(raw.weight)) : 1,
+    ...(Number.isFinite(raw.extraSeconds) ? { extraSeconds: Number(raw.extraSeconds) } : {}),
+    ...(typeof raw.value === "string" ? { value: raw.value } : {}),
+    ...(raw.next === null || typeof raw.next === "string" ? { next: raw.next } : {}),
+  };
+}
+
+/**
+ * An unknown `branch.kind` costs the step its fork, never its existence.
+ *
+ * This is the rule that keeps the step vocabulary open. A step is whatever the
+ * organiser typed, so a file written by a build that grew a fourth kind of
+ * fork must still open here with its names, its seconds and its order intact.
+ */
+function migrateBranch(raw: unknown): InteractionBranch | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  // Not `Partial<ChanceBranch & MatchBranch>`: two different literal `kind`s
+  // intersect to `never`, and every field below would vanish with them.
+  const branch = raw as { kind?: unknown }
+    & Partial<Omit<ChanceBranch, "kind">>
+    & Partial<Omit<MatchBranch, "kind">>;
+  if (branch.kind === "chance") {
+    const options = (Array.isArray(branch.options) ? branch.options : [])
+      .map((o, i) => migrateOption(o as Partial<InteractionOption>, i))
+      .filter((o): o is InteractionOption => o !== null);
+    // No options, or every weight zero, is not a fork — it is a plain step.
+    if (!options.length || options.every((o) => o.weight <= 0)) return undefined;
+    return {
+      kind: "chance",
+      options,
+      ...(typeof branch.record === "string" ? { record: branch.record } : {}),
+    };
+  }
+  if (branch.kind === "match") {
+    const on = (Array.isArray(branch.on) ? branch.on : []).filter((k) => typeof k === "string");
+    const rules: MatchRule[] = (Array.isArray(branch.rules) ? branch.rules : [])
+      .map((r) => r as Partial<MatchRule>)
+      .filter((r) => Array.isArray(r.when) && typeof r.label === "string")
+      .map((r) => ({
+        when: (r.when as string[]).map((w) => String(w)),
+        label: String(r.label),
+        ...(typeof r.prompt === "string" ? { prompt: r.prompt } : {}),
+        ...(Number.isFinite(r.extraSeconds) ? { extraSeconds: Number(r.extraSeconds) } : {}),
+        ...(r.next === null || typeof r.next === "string" ? { next: r.next } : {}),
+      }));
+    if (!on.length || !rules.length) return undefined;
+    const fallback = branch.otherwise;
+    const otherwise = fallback && typeof fallback.label === "string"
+      ? {
+        label: fallback.label,
+        ...(typeof fallback.prompt === "string" ? { prompt: fallback.prompt } : {}),
+      }
+      : undefined;
+    return { kind: "match", on, rules, ...(otherwise ? { otherwise } : {}) };
+  }
+  return undefined;
+}
+
+function migrateStep(raw: Partial<InteractionStep>): InteractionStep | null {
+  // No id and no name is not a half-edited step, it is noise.
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.id !== "string" || !raw.id) return null;
+  if (typeof raw.name !== "string" || !raw.name) return null;
+  const branch = migrateBranch(raw.branch);
+  return {
+    id: raw.id,
+    name: raw.name,
+    ...(typeof raw.stationId === "string" ? { stationId: raw.stationId } : {}),
+    avgSeconds: Number.isFinite(raw.avgSeconds) ? Math.max(0, Number(raw.avgSeconds)) : 30,
+    ...(Number.isFinite(raw.serviceVariance) ? { serviceVariance: Number(raw.serviceVariance) } : {}),
+    ...(typeof raw.prompt === "string" ? { prompt: raw.prompt } : {}),
+    ...(branch ? { branch } : {}),
+    ...(Array.isArray(raw.supplies)
+      ? { supplies: raw.supplies.filter((x) => typeof x === "string") }
+      : {}),
+    ...(raw.next === null || typeof raw.next === "string" ? { next: raw.next } : {}),
+  };
+}
+
+function migrateInteractionStation(raw: Partial<InteractionStation>): InteractionStation | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.id !== "string" || !raw.id) return null;
+  return {
+    id: raw.id,
+    name: typeof raw.name === "string" && raw.name ? raw.name : "站台",
+    type: "custom",
+    x: Number.isFinite(raw.x) ? Number(raw.x) : 0,
+    z: Number.isFinite(raw.z) ? Number(raw.z) : 0,
+    staffCount: Math.max(0, Math.round(raw.staffCount ?? 1)),
+    parallelServers: Math.max(1, Math.round(raw.parallelServers ?? 1)),
+    meanServiceSeconds: Math.max(0, raw.meanServiceSeconds ?? 30),
+    queueCapacity: Math.max(1, Math.round(raw.queueCapacity ?? 8)),
+    ...(typeof raw.staffRoleId === "string" ? { staffRoleId: raw.staffRoleId } : {}),
+    ...(raw.selfService === true ? { selfService: true } : {}),
+    ...(Number.isFinite(raw.balkQueueLength)
+      ? { balkQueueLength: Math.max(1, Math.round(Number(raw.balkQueueLength))) }
+      : {}),
+  };
+}
+
+function clampRate(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(1, Math.max(0, n));
+}
+
+export function migrateInteraction(
+  raw: Partial<InteractionTemplate> | undefined,
+): InteractionTemplate | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const stations = (Array.isArray(raw.stations) ? raw.stations : [])
+    .map((s) => migrateInteractionStation(s as Partial<InteractionStation>))
+    .filter((s): s is InteractionStation => s !== null);
+  const steps = (Array.isArray(raw.steps) ? raw.steps : [])
+    .map((s) => migrateStep(s as Partial<InteractionStep>))
+    .filter((s): s is InteractionStep => s !== null);
+  if (!steps.length || !stations.length) return undefined;
+
+  const stepIds = new Set(steps.map((s) => s.id));
+  const stationIds = new Set(stations.map((s) => s.id));
+  const repaired: InteractionStep[] = steps.map((step) => ({
+    ...step,
+    // A jump to a step that no longer exists means the visitor leaves there.
+    // It does NOT mean this step is deleted.
+    ...(typeof step.next === "string" && !stepIds.has(step.next) ? { next: null } : {}),
+    ...(step.stationId && !stationIds.has(step.stationId) ? { stationId: stations[0].id } : {}),
+    ...(step.branch?.kind === "chance"
+      ? {
+        branch: {
+          ...step.branch,
+          options: step.branch.options.map((o) => (
+            typeof o.next === "string" && !stepIds.has(o.next) ? { ...o, next: null } : o
+          )),
+        },
+      }
+      : {}),
+  }));
+
+  const staff = (Array.isArray(raw.staff) ? raw.staff : [])
+    .filter((r) => r && typeof r.id === "string" && typeof r.name === "string")
+    .map((r) => ({ id: r.id, name: r.name, count: Math.max(0, Math.round(r.count ?? 0)) }));
+
+  const a = raw.audience ?? ({} as Partial<InteractionAudience>);
+  const audience: InteractionAudience = {
+    count: Math.max(0, Math.round(a.count ?? 60)),
+    windowSeconds: Math.max(60, Math.round(a.windowSeconds ?? 3600)),
+    profile: a.profile === "front-loaded" ? "front-loaded" : "uniform",
+    stopRate: clampRate(a.stopRate),
+    joinRate: clampRate(a.joinRate),
+    patienceSeconds: Math.max(0, a.patienceSeconds ?? 0),
+  };
+
+  const segments = (Array.isArray(raw.segments) ? raw.segments : [])
+    .filter((sg) => sg && typeof sg.id === "string" && typeof sg.name === "string")
+    .map((sg) => ({
+      id: sg.id,
+      name: sg.name,
+      share: Number.isFinite(sg.share) ? Math.max(0, Number(sg.share)) : 1,
+      startStepId: stepIds.has(String(sg.startStepId)) ? String(sg.startStepId) : repaired[0].id,
+    }));
+
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : uid("flow"),
+    name: typeof raw.name === "string" && raw.name ? raw.name : "互動流程",
+    ...(typeof raw.note === "string" ? { note: raw.note } : {}),
+    steps: repaired,
+    startStepId: stepIds.has(String(raw.startStepId)) ? String(raw.startStepId) : repaired[0].id,
+    stations,
+    staff,
+    audience,
+    segments: segments.length
+      ? segments
+      : [{ id: "all", name: "參加者", share: 1, startStepId: repaired[0].id }],
+    seed: Number.isFinite(raw.seed) ? Number(raw.seed) : 1,
+    settings: {
+      speedMetersPerSecond: Math.max(0.2, raw.settings?.speedMetersPerSecond ?? 1.2),
+    },
+  };
+}
+
+/**
+ * The binding pass `resolveScenarioBindings` does, for a template: a station
+ * bound to an object or a zone takes that thing's real position and capacity,
+ * and the run gets the plan's own walls, doors and corridor.
+ */
+export function resolveTemplateBindings(
+  project: Project,
+  template: InteractionTemplate,
+): InteractionTemplate {
+  return {
+    ...template,
+    stations: template.stations.map((station) => ({
+      ...station,
+      ...resolveStationPosition(project, station),
+      parallelServers: zoneParallelServers(project, station),
+    })),
+    settings: { ...template.settings },
+    spatial: buildSimulationSpatial(project),
   };
 }
 
@@ -554,6 +776,15 @@ export function migrateProject(input: Partial<Project>): Project {
   // Outdoor booth (optional; absent on every classroom project).
   p.booth = migrateBooth(input.booth);
   if (!p.booth) delete p.booth;
+
+  // The interaction flow. A saved booth plan that predates the step list gets
+  // one compiled from its booth block, so it opens with its own activity
+  // already written out rather than with an empty panel. The booth block stays
+  // in the file, frozen and no longer read: an older build opening this plan
+  // still draws the tent and still runs the flow it knows.
+  p.interaction = migrateInteraction(input.interaction);
+  if (!p.interaction && p.booth) p.interaction = templateFromBooth(p.booth);
+  if (!p.interaction) delete p.interaction;
 
   return p;
 }

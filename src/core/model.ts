@@ -429,8 +429,15 @@ export interface ChanceBranch {
 /** One cell of an outcome table. `when` is matched in `MatchBranch.on` order; "*" is any. */
 export interface MatchRule {
   when: string[];
-  /** What the visitor gets — a quote, a prize, the name of a route. */
+  /** The cell, short enough for a readout line: 「疲憊 × 未來」. */
   label: string;
+  /**
+   * What is actually printed or said — the quote on the card, the wording of
+   * the prize. Same split as `InteractionOption.label` / `.prompt`: one is the
+   * name a count is reported under, the other is content, and editing content
+   * never moves a number.
+   */
+  prompt?: string;
   extraSeconds?: number;
   next?: string | null;
 }

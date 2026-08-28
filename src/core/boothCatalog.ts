@@ -16,7 +16,16 @@
  */
 
 import type { AssetCatalogEntry } from "./catalog";
-import type { BoothZoneRole, ProjectCatalogExtra } from "./model";
+import {
+  uid,
+  type BoothParams,
+  type BoothScenarioId,
+  type BoothStation,
+  type BoothStationType,
+  type BoothZoneRole,
+  type Project,
+  type ProjectCatalogExtra,
+} from "./model";
 
 export const BOOTH_TAG = "booth";
 
@@ -304,3 +313,124 @@ export const BOOTH_OVERLAP_EXEMPT: ReadonlySet<string> = new Set<string>([
   "custom:banner",
   "builtin:mat",
 ]);
+
+// --- 攤位活動的既有設定值 ---------------------------------------------------
+//
+// These moved here from `boothFlow.ts` verbatim. `boothFlow.ts` is a second
+// simulation engine and is going away; these are DATA about the club's booth
+// activity, and data outlives the engine that first read it. The numbers below
+// are exactly the ones the booth simulation has been running with — this was a
+// move, not a re-tune.
+
+/** Walking speed at the booth, metres per second. */
+export const BOOTH_WALK_SPEED = 1.15;
+
+/** The booth plan's seed. Same plan, same seed, same answer. */
+export const BOOTH_DEFAULT_SEED = 20260302;
+
+/**
+ * The eight things a visitor can do at the booth, with the dwell times and
+ * server counts the booth simulation has always used.
+ */
+export const BOOTH_STATION_TYPES: Record<
+  BoothStationType,
+  { label: string; icon: string; dwell: number; servers: number; queueCapacity: number }
+> = {
+  board: { label: "看展示板", icon: "🪧", dwell: 20, servers: 3, queueCapacity: 4 },
+  queue: { label: "排隊等待", icon: "⏳", dwell: 0, servers: 99, queueCapacity: 8 },
+  talk: { label: "與工作人員對談", icon: "💬", dwell: 75, servers: 3, queueCapacity: 8 },
+  flyer: { label: "拿傳單／DM", icon: "📄", dwell: 12, servers: 4, queueCapacity: 4 },
+  game: { label: "互動小活動", icon: "🎲", dwell: 60, servers: 2, queueCapacity: 5 },
+  form: { label: "填報名表／問卷", icon: "📝", dwell: 45, servers: 2, queueCapacity: 4 },
+  cushion: { label: "體驗坐墊靜心", icon: "🧘", dwell: 120, servers: 3, queueCapacity: 3 },
+  photo: { label: "拍照", icon: "📷", dwell: 25, servers: 1, queueCapacity: 3 },
+};
+
+/**
+ * Order visitors attempt the stations in. 排隊 is the waiting area, not a stop.
+ *
+ * This used to be a module constant no organiser could reach. It is exported
+ * now for one reason: `templateFromBooth` copies it into the STEP LIST, where
+ * the order is a row order the user can drag. Nothing else should read it.
+ */
+export const BOOTH_JOURNEY_ORDER: readonly BoothStationType[] = [
+  "board", "queue", "talk", "flyer", "game", "form", "cushion", "photo",
+];
+
+/** Probability a visitor skips each station entirely. */
+export const BOOTH_SKIP_RATE: Record<BoothStationType, number> = {
+  board: 0.15, queue: 0, talk: 0.05, flyer: 0.25,
+  game: 0.35, form: 0.45, cushion: 0.75, photo: 0.6,
+};
+
+export const BOOTH_SIM_PRESETS: Record<BoothScenarioId, { label: string } & BoothParams> = {
+  normal: {
+    label: "正常人流",
+    arrivalPerMin: 1.6, visitorCount: 40, talkSeconds: 75, queueCapacity: 8,
+    deskStaff: 3, boardDwell: 20, gameDwell: 60, balk: true,
+  },
+  peak: {
+    label: "尖峰人流",
+    arrivalPerMin: 6, visitorCount: 90, talkSeconds: 60, queueCapacity: 8,
+    deskStaff: 3, boardDwell: 16, gameDwell: 50, balk: true,
+  },
+};
+
+/** The parameter block for a scenario, without its display label. */
+export function defaultBoothParams(scenarioId: BoothScenarioId = "normal"): BoothParams {
+  const p = BOOTH_SIM_PRESETS[scenarioId];
+  return {
+    visitorCount: p.visitorCount,
+    arrivalPerMin: p.arrivalPerMin,
+    talkSeconds: p.talkSeconds,
+    queueCapacity: p.queueCapacity,
+    deskStaff: p.deskStaff,
+    boardDwell: p.boardDwell,
+    gameDwell: p.gameDwell,
+    balk: p.balk,
+  };
+}
+
+/** Default station positions, in metres, for the 戶外攤位 venue template. */
+const DEFAULT_STATION_LAYOUT: { type: BoothStationType; x: number; z: number; servers?: number; dwell?: number }[] = [
+  { type: "board", x: 5.5, z: 5.1 },
+  { type: "queue", x: 3.5, z: 6.1 },
+  { type: "talk", x: 3.5, z: 4.85, servers: 3, dwell: 75 },
+  { type: "flyer", x: 2.45, z: 4.85 },
+  { type: "game", x: 5.95, z: 5.85 },
+  { type: "form", x: 2.15, z: 5.65 },
+  { type: "cushion", x: 2.62, z: 2.5 },
+  { type: "photo", x: 4.75, z: 6.45 },
+];
+
+export function createBoothStation(
+  type: BoothStationType,
+  x: number,
+  z: number,
+  over: { servers?: number; dwell?: number; staffCount?: number; queueCapacity?: number } = {},
+): BoothStation {
+  const t = BOOTH_STATION_TYPES[type];
+  return {
+    id: uid("st"),
+    name: t.label,
+    type: "custom",
+    boothType: type,
+    x, z,
+    staffCount: over.staffCount ?? 1,
+    parallelServers: over.servers ?? t.servers,
+    meanServiceSeconds: over.dwell ?? t.dwell,
+    queueCapacity: over.queueCapacity ?? t.queueCapacity,
+    enabled: true,
+  };
+}
+
+export function createBoothStations(): BoothStation[] {
+  return DEFAULT_STATION_LAYOUT.map((s) =>
+    createBoothStation(s.type, s.x, s.z, { servers: s.servers, dwell: s.dwell }),
+  );
+}
+
+/** Does this project carry booth data (and therefore a 模擬 tab)? */
+export function isBoothProject(project: Project): boolean {
+  return !!project.booth && project.booth.stations.length > 0;
+}

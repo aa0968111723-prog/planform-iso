@@ -7,7 +7,7 @@
 
 import { assetDef } from "./assets";
 import { BOOTH_OVERLAP_EXEMPT, boothCatalogEntry } from "./boothCatalog";
-import { isBoothProject } from "./boothFlow";
+import { isBoothProject } from "./boothCatalog";
 import {
   DEFAULT_VALIDATION_SETTINGS,
   type ObjectKind,

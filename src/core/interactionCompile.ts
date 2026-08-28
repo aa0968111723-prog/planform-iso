@@ -13,8 +13,16 @@
  *      test.
  */
 
+import {
+  BOOTH_DEFAULT_SEED,
+  BOOTH_JOURNEY_ORDER,
+  BOOTH_SKIP_RATE,
+  BOOTH_WALK_SPEED,
+} from "./boothCatalog";
 import type {
   AudienceSegment,
+  BoothConfig,
+  BoothStation,
   EventScenario,
   InteractionAudience,
   InteractionOption,
@@ -99,6 +107,141 @@ export function templateFromScenario(scenario: EventScenario): InteractionTempla
     seed: scenario.seed,
     settings: { ...scenario.settings },
     spatial: scenario.spatial,
+  };
+}
+
+/**
+ * The booth plan as a template.
+ *
+ * A one-time, faithful copy of everything `boothFlow.ts` had hard-coded, into
+ * data the organiser can actually see and change. Same eight stations, same
+ * order, same dwell times, same skip rates, same balk rule — the plan still
+ * rehearses the activity it has always rehearsed. What changes is that none of
+ * it is a module constant any more:
+ *
+ * - `JOURNEY_ORDER` becomes the ROW ORDER, which is draggable, and a second
+ *   station of the same type finally gets into the flow (the old
+ *   `.find(byType)` lookup could only ever see the first one);
+ * - each `SKIP_RATE` becomes a two-option fork the organiser can re-weight;
+ * - the `params` layer that used to override per-station edits is baked in
+ *   once and then gone, so editing a station is no longer silently undone.
+ *
+ * The numbers are not bit-identical to the old engine's — that one integrated
+ * at a fixed 0.1 s with its own queue rules — and nothing here pretends
+ * otherwise. What is preserved is the activity and every setting of it.
+ */
+export function templateFromBooth(booth: BoothConfig, name = "攤位人流"): InteractionTemplate {
+  const params = booth.params;
+  const dwellOf = (s: BoothStation): number =>
+    s.boothType === "talk" ? params.talkSeconds
+      : s.boothType === "board" ? params.boardDwell
+        : s.boothType === "game" ? params.gameDwell
+          : s.meanServiceSeconds;
+  // 排隊區容量 is the booth's waiting area, and the line that forms in it is
+  // the one for the table — the same two stations the old engine capped.
+  const capacityOf = (s: BoothStation): number =>
+    s.boothType === "queue" || s.boothType === "talk" ? params.queueCapacity : s.queueCapacity;
+
+  const stations: InteractionStation[] = booth.stations.map((s) => ({
+    id: s.id,
+    name: s.name,
+    type: s.type,
+    x: s.x,
+    z: s.z,
+    staffCount: s.staffCount,
+    // Only the table has people behind it. Everywhere else the old engine
+    // opened `parallelServers` positions and never looked at `staffCount`, so
+    // `selfService` — which does exactly that — is the honest translation.
+    // Reading those stations as staffed instead would quietly cut a 3-slot
+    // display board down to one.
+    ...(s.boothType === "talk"
+      ? { staffRoleId: "talker", parallelServers: Math.max(1, params.deskStaff) }
+      : { selfService: true, parallelServers: Math.max(1, s.parallelServers) }),
+    meanServiceSeconds: dwellOf(s),
+    queueCapacity: capacityOf(s),
+    // Walk away rather than join a line that is already longer than the space
+    // holds — the old engine's "balk on arrival", and the ONE place where a
+    // queue capacity doubles as a threshold, because that is what it did.
+    ...(params.balk ? { balkQueueLength: capacityOf(s) } : {}),
+  }));
+
+  const order = booth.stations
+    .filter((s) => s.enabled !== false)
+    .map((s, i) => ({ s, i, rank: BOOTH_JOURNEY_ORDER.indexOf(s.boothType) }))
+    .filter((r) => r.rank >= 0)
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map((r) => r.s);
+
+  // Where the NEXT station's block starts — its own "shall I?" step when it
+  // has one. Jumping straight to the next visit instead would skip that
+  // question, and every station after a skipped one would become compulsory.
+  const entryRow = (station: BoothStation | undefined): string | null =>
+    !station ? null
+      : (BOOTH_SKIP_RATE[station.boothType] ?? 0) > 0 ? `ask__${station.id}` : `do__${station.id}`;
+
+  const steps: InteractionStep[] = [];
+  order.forEach((station, i) => {
+    const skip = BOOTH_SKIP_RATE[station.boothType] ?? 0;
+    const after = order[i + 1];
+    if (skip > 0) {
+      steps.push({
+        id: `ask__${station.id}`,
+        name: `要不要${station.name}`,
+        stationId: station.id,
+        // A decision costs no time and takes no server: you decide as you walk
+        // up, exactly as the old engine did before joining any queue.
+        avgSeconds: 0,
+        branch: {
+          kind: "chance",
+          options: [
+            { id: "join", label: station.name, weight: 1 - skip },
+            {
+              id: "skip",
+              label: "路過",
+              weight: skip,
+              next: entryRow(after),
+            },
+          ],
+        },
+      });
+    }
+    steps.push({
+      id: `do__${station.id}`,
+      name: station.name,
+      stationId: station.id,
+      avgSeconds: dwellOf(station),
+    });
+  });
+
+  const windowSeconds = Math.max(
+    60,
+    Math.round((params.visitorCount / Math.max(0.1, params.arrivalPerMin)) * 60),
+  );
+
+  return {
+    id: `booth__${booth.scenarioId}`,
+    name,
+    steps,
+    startStepId: steps[0]?.id ?? "",
+    stations,
+    staff: [{ id: "talker", name: "顧攤位的人", count: Math.max(0, Math.floor(params.deskStaff)) }],
+    audience: {
+      count: params.visitorCount,
+      windowSeconds,
+      profile: "uniform",
+      // `visitorCount` always meant "people who come in", never "people who
+      // walk past", so there is no funnel to invent here.
+      stopRate: 1,
+      joinRate: 1,
+      // The old engine gave each visitor `18 + rand*40` seconds of patience and
+      // compared three times that against their wait: a median of 114 s. One
+      // fixed number instead of a per-person draw, so the same plan does not
+      // answer differently twice.
+      patienceSeconds: params.balk ? 114 : 0,
+    },
+    segments: [{ id: "visitor", name: "訪客", share: 1, startStepId: steps[0]?.id ?? "" }],
+    seed: BOOTH_DEFAULT_SEED,
+    settings: { speedMetersPerSecond: BOOTH_WALK_SPEED },
   };
 }
 

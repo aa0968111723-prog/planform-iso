@@ -30,7 +30,7 @@ import {
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { AssetCatalog } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
-import { isBoothProject } from "../core/boothFlow";
+import { isBoothProject } from "../core/boothCatalog";
 import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
 import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";

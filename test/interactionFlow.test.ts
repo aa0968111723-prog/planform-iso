@@ -231,3 +231,101 @@ describe("the funnel is people who took part, not people who walked past", () =>
     expect(r.funnel).toBeUndefined();
   });
 });
+
+describe("人力：幾個人顧幾個關", () => {
+  const threeStations = (roleCount: number) => flow([
+    { id: "a", name: "第一關", avgSeconds: 30, stationId: "s1" },
+    { id: "b", name: "第二關", avgSeconds: 30, stationId: "s2" },
+    { id: "c", name: "第三關", avgSeconds: 30, stationId: "s3", next: null },
+  ], {
+    stations: ["s1", "s2", "s3"].map((id) =>
+      station(id, { staffRoleId: "host", parallelServers: 2, queueCapacity: 30 })),
+    staff: [{ id: "host", name: "主持", count: roleCount }],
+  });
+
+  it("two people over three stations really does leave one with nobody", () => {
+    const r = runInteraction(threeStations(2), { sampleDt: 10 });
+    expect(r.stations.map((s) => s.servers)).toEqual([1, 1, 0]);
+    // And it bites: the unstaffed step never serves anyone, so the visit stops
+    // there. Rounding that 0 up to 1 is exactly how a shortage goes invisible.
+    expect(r.stations[2].served).toBe(0);
+    expect(r.completed).toBe(0);
+  });
+
+  it("the readout reports the servers the run actually opened", () => {
+    const r = runInteraction(threeStations(6), { sampleDt: 10 });
+    // Six people, three stations, two positions each — everywhere is covered.
+    expect(r.stations.map((s) => s.servers)).toEqual([2, 2, 2]);
+    expect(r.completed).toBe(30);
+  });
+
+  it("a station nobody staffs reports 0 servers, not 0% busy", () => {
+    const r = runInteraction(threeStations(2), { sampleDt: 10 });
+    const empty = r.stations[2];
+    expect(empty.servers).toBe(0);
+    expect(empty.utilization).toBe(0);
+  });
+});
+
+describe("兩種離開：不排了，和排到不想排了", () => {
+  const busyBooth = (over: Partial<InteractionStation>, patienceSeconds: number) => flow([
+    { id: "play", name: "玩一輪", avgSeconds: 120, next: null },
+  ], {
+    stations: [station("st", { parallelServers: 1, staffCount: 1, queueCapacity: 30, ...over })],
+    audience: { count: 30, windowSeconds: 300, profile: "uniform", stopRate: 1, joinRate: 1, patienceSeconds },
+  });
+
+  it("walks away rather than joining a line that is already too long", () => {
+    const patient = runInteraction(busyBooth({}, 0), { sampleDt: 10 });
+    const balks = runInteraction(busyBooth({ balkQueueLength: 3 }, 0), { sampleDt: 10 });
+    expect(patient.leftEarly).toBe(0);
+    expect(balks.leftEarly).toBeGreaterThan(10);
+    expect(balks.maxQueue).toBeLessThanOrEqual(3);
+  });
+
+  it("gives up after waiting longer than anyone would", () => {
+    const forever = runInteraction(busyBooth({}, 0), { sampleDt: 10 });
+    const impatient = runInteraction(busyBooth({}, 60), { sampleDt: 10 });
+    expect(forever.leftEarly).toBe(0);
+    expect(impatient.leftEarly).toBeGreaterThan(0);
+    expect(impatient.completed).toBeLessThan(forever.completed);
+  });
+
+  it("everyone is accounted for exactly once", () => {
+    const r = runInteraction(busyBooth({ balkQueueLength: 4 }, 60), { sampleDt: 10 });
+    // Someone who gave up did not "not finish yet" — counting them as both
+    // would tell an organiser people are still queueing at an empty table.
+    expect(r.completed + r.leftEarly + r.unfinished).toBe(r.participantCount);
+    expect(r.leftEarly).toBeGreaterThan(0);
+    expect(r.unfinished).toBe(0);
+  });
+});
+
+describe("零秒的步驟是一個決定，不是一次服務", () => {
+  const withDecision = (avgSeconds: number) => flow([
+    { id: "ask", name: "要不要玩", avgSeconds, stationId: "st", branch: {
+      kind: "chance",
+      options: [
+        { id: "yes", label: "要", weight: 1 },
+        { id: "no", label: "不要", weight: 1, next: null },
+      ],
+    } },
+    { id: "play", name: "玩", avgSeconds: 90, stationId: "st", next: null },
+  ], {
+    stations: [station("st", { parallelServers: 1, staffCount: 1, queueCapacity: 30 })],
+    audience: { count: 30, windowSeconds: 600, profile: "uniform", stopRate: 1, joinRate: 1, patienceSeconds: 0 },
+  });
+
+  it("someone deciding NOT to join never waits for a free server to say so", () => {
+    const free = runInteraction(withDecision(0), { sampleDt: 10 });
+    const charged = runInteraction(withDecision(1), { sampleDt: 10 });
+    // Same flow, same fork; the only difference is whether the decision takes
+    // a server. A queue for the privilege of walking past is not a queue.
+    expect(free.maxQueue).toBeLessThan(charged.maxQueue);
+    expect(free.avgWaitSeconds).toBeLessThan(charged.avgWaitSeconds);
+    const played = free.steps!.find((s) => s.stepId === "play")!;
+    const asked = free.steps!.find((s) => s.stepId === "ask")!;
+    expect(asked.entered).toBe(30);
+    expect(played.entered).toBeLessThan(30);
+  });
+});

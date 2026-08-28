@@ -8,7 +8,8 @@
  */
 
 import type { App } from "../app/App";
-import { BOOTH_SIM_PRESETS, BOOTH_STATION_TYPES, type BoothStats } from "../core/boothFlow";
+import { BOOTH_SIM_PRESETS, BOOTH_STATION_TYPES } from "../core/boothCatalog";
+import type { BoothStats } from "../core/boothFlow";
 import type { BoothScenarioId } from "../core/model";
 import { button, el, num, section } from "./dom";
 

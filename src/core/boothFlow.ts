@@ -23,111 +23,39 @@
 
 import { createRng } from "./eventFlow";
 import {
-  uid,
-  type BoothParams,
-  type BoothScenarioId,
-  type BoothStation,
-  type BoothStationType,
-  type Project,
+  BOOTH_JOURNEY_ORDER,
+  BOOTH_SKIP_RATE,
+  BOOTH_DEFAULT_SEED,
+  BOOTH_WALK_SPEED,
+  defaultBoothParams,
+} from "./boothCatalog";
+import type {
+  BoothParams,
+  BoothStation,
+  BoothStationType,
+  Project,
 } from "./model";
-
-/** Walking speed, metres per second. */
-export const BOOTH_WALK_SPEED = 1.15;
 
 /** Fixed integration step. Small enough that a 1.15 m/s walker never skips a slot. */
 export const BOOTH_STEP_SECONDS = 0.1;
 
-export const BOOTH_DEFAULT_SEED = 20260302;
-
-export const BOOTH_STATION_TYPES: Record<
-  BoothStationType,
-  { label: string; icon: string; dwell: number; servers: number; queueCapacity: number }
-> = {
-  board: { label: "看展示板", icon: "🪧", dwell: 20, servers: 3, queueCapacity: 4 },
-  queue: { label: "排隊等待", icon: "⏳", dwell: 0, servers: 99, queueCapacity: 8 },
-  talk: { label: "與工作人員對談", icon: "💬", dwell: 75, servers: 3, queueCapacity: 8 },
-  flyer: { label: "拿傳單／DM", icon: "📄", dwell: 12, servers: 4, queueCapacity: 4 },
-  game: { label: "互動小活動", icon: "🎲", dwell: 60, servers: 2, queueCapacity: 5 },
-  form: { label: "填報名表／問卷", icon: "📝", dwell: 45, servers: 2, queueCapacity: 4 },
-  cushion: { label: "體驗坐墊靜心", icon: "🧘", dwell: 120, servers: 3, queueCapacity: 3 },
-  photo: { label: "拍照", icon: "📷", dwell: 25, servers: 1, queueCapacity: 3 },
-};
-
-/** Order visitors attempt the stations in. 排隊 is the waiting area, not a stop. */
-const JOURNEY_ORDER: BoothStationType[] = [
-  "board", "queue", "talk", "flyer", "game", "form", "cushion", "photo",
-];
-
-/** Probability a visitor skips each station entirely. */
-const SKIP_RATE: Record<BoothStationType, number> = {
-  board: 0.15, queue: 0, talk: 0.05, flyer: 0.25,
-  game: 0.35, form: 0.45, cushion: 0.75, photo: 0.6,
-};
-
-export const BOOTH_SIM_PRESETS: Record<BoothScenarioId, { label: string } & BoothParams> = {
-  normal: {
-    label: "正常人流",
-    arrivalPerMin: 1.6, visitorCount: 40, talkSeconds: 75, queueCapacity: 8,
-    deskStaff: 3, boardDwell: 20, gameDwell: 60, balk: true,
-  },
-  peak: {
-    label: "尖峰人流",
-    arrivalPerMin: 6, visitorCount: 90, talkSeconds: 60, queueCapacity: 8,
-    deskStaff: 3, boardDwell: 16, gameDwell: 50, balk: true,
-  },
-};
-
-/** The parameter block for a scenario, without its display label. */
-export function defaultBoothParams(scenarioId: BoothScenarioId = "normal"): BoothParams {
-  const p = BOOTH_SIM_PRESETS[scenarioId];
-  return {
-    visitorCount: p.visitorCount,
-    arrivalPerMin: p.arrivalPerMin,
-    talkSeconds: p.talkSeconds,
-    queueCapacity: p.queueCapacity,
-    deskStaff: p.deskStaff,
-    boardDwell: p.boardDwell,
-    gameDwell: p.gameDwell,
-    balk: p.balk,
-  };
-}
-
-/** Default station positions, in metres, for the 戶外攤位 venue template. */
-const DEFAULT_STATION_LAYOUT: { type: BoothStationType; x: number; z: number; servers?: number; dwell?: number }[] = [
-  { type: "board", x: 5.5, z: 5.1 },
-  { type: "queue", x: 3.5, z: 6.1 },
-  { type: "talk", x: 3.5, z: 4.85, servers: 3, dwell: 75 },
-  { type: "flyer", x: 2.45, z: 4.85 },
-  { type: "game", x: 5.95, z: 5.85 },
-  { type: "form", x: 2.15, z: 5.65 },
-  { type: "cushion", x: 2.62, z: 2.5 },
-  { type: "photo", x: 4.75, z: 6.45 },
-];
-
-export function createBoothStation(
-  type: BoothStationType,
-  x: number,
-  z: number,
-  over: { servers?: number; dwell?: number; staffCount?: number; queueCapacity?: number } = {},
-): BoothStation {
-  const t = BOOTH_STATION_TYPES[type];
-  return {
-    id: uid("st"),
-    name: t.label,
-    type: "custom",
-    boothType: type,
-    x, z,
-    staffCount: over.staffCount ?? 1,
-    parallelServers: over.servers ?? t.servers,
-    meanServiceSeconds: over.dwell ?? t.dwell,
-    queueCapacity: over.queueCapacity ?? t.queueCapacity,
-    enabled: true,
-  };
-}
-
-export function createBoothStations(): BoothStation[] {
-  return DEFAULT_STATION_LAYOUT.map((s) => createBoothStation(s.type, s.x, s.z, { servers: s.servers, dwell: s.dwell }));
-}
+/**
+ * The booth activity's own settings now live in `boothCatalog.ts` — they are
+ * data about the club's booth, and this engine is on its way out. Re-exported
+ * so the existing importers keep working while the step list takes over.
+ */
+export {
+  BOOTH_WALK_SPEED,
+  BOOTH_DEFAULT_SEED,
+  BOOTH_STATION_TYPES,
+  BOOTH_SIM_PRESETS,
+  BOOTH_JOURNEY_ORDER,
+  BOOTH_SKIP_RATE,
+  defaultBoothParams,
+  createBoothStation,
+  createBoothStations,
+  isBoothProject,
+} from "./boothCatalog";
 
 // --- results ---------------------------------------------------------------
 
@@ -272,7 +200,7 @@ export class BoothSim {
     this.params = { ...(project.booth?.params ?? defaultBoothParams()) };
     this.stations = runtimeStations(project, this.params);
     this.byId = new Map(this.stations.map((s) => [s.id, s]));
-    this.journey = JOURNEY_ORDER
+    this.journey = BOOTH_JOURNEY_ORDER
       .map((t) => this.stations.find((s) => s.boothType === t))
       .filter((s): s is RuntimeStation => !!s)
       // 排隊 is the physical waiting area; the wait is modelled at each station.
@@ -346,7 +274,7 @@ export class BoothSim {
     a.leg += 1;
     while (a.leg < this.journey.length) {
       const st = this.journey[a.leg];
-      if (this.rand() > (SKIP_RATE[st.boothType] ?? 0.3)) break;
+      if (this.rand() > (BOOTH_SKIP_RATE[st.boothType] ?? 0.3)) break;
       a.leg += 1;
     }
     if (a.leg >= this.journey.length) {
@@ -550,7 +478,3 @@ export function runBoothHeadless(
   return sim.stats();
 }
 
-/** Does this project carry booth data (and therefore a 模擬 tab)? */
-export function isBoothProject(project: Project): boolean {
-  return !!project.booth && project.booth.stations.length > 0;
-}

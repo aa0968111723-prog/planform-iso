@@ -10,7 +10,8 @@
 
 import { BUILTIN_CATALOG } from "./catalog";
 import { BOOTH_ZONE_ROLES, boothCatalogEntry, boothCatalogExtras } from "./boothCatalog";
-import { createBoothStations, defaultBoothParams } from "./boothFlow";
+import { createBoothStations, defaultBoothParams } from "./boothCatalog";
+import { interactionPreset } from "./interactionPresets";
 import {
   createDefaultProject,
   uid,
@@ -474,6 +475,12 @@ function applyBoothTemplate(project: Project, spec: VenueBoothSpec): void {
       scenarioId: spec.scenarioId,
       params: defaultBoothParams(spec.scenarioId),
     };
+  }
+  // Two blocks on purpose. `booth` keeps a build that predates the step list
+  // able to open this plan and run the flow it knows; `interaction` is the
+  // club's actual activity, and it wins wherever both exist.
+  if (!project.interaction) {
+    project.interaction = interactionPreset("preset:ok-bandage") ?? undefined;
   }
 }
 

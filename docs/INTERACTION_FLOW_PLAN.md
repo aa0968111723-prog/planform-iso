@@ -818,7 +818,7 @@ if (!p.interaction) delete p.interaction;
 - 模組常數 `JOURNEY_ORDER` → **步驟的列表順序**。這正是重點：它從常數變成使用者可以重排的資料，而且**同一種型別的第二個站台終於進得了流程**（`.find(byType)` 的 bug 沒有繼任者）
 - 寫死的 `SKIP_RATE` → 每一步一個兩選項 `chance`：`{做, weight: 1-r} / {跳過, weight: r, next: <下一步>}`。數字原樣保留，而且從此可編輯
 - `params.deskStaff` → 一個 `talker` 角色，掛在對談站；`talkSeconds` / `boardDwell` / `gameDwell` → 那三步的 `avgSeconds`。**這一步結束稽核第 5 項**：不再有一個 params 層可以蓋掉每站的編輯
-- `params.visitorCount` / `arrivalPerMin` → `audience.count` / `windowSeconds`（`stopRate = joinRate = 1`，因為 boothFlow 的 visitorCount 本來就是「會進來的人」）；`balk: true` → `patienceSeconds = 54`（boothFlow 的 `patience*3` 中位數；`balk: false` → 0）與各站 `balkQueueLength = queueCapacity`（**這是唯一一處把 queueCapacity 當放棄門檻，因為 boothFlow 本來就是那樣，而且只發生在攤位轉換路徑上**）
+- `params.visitorCount` / `arrivalPerMin` → `audience.count` / `windowSeconds`（`stopRate = joinRate = 1`，因為 boothFlow 的 visitorCount 本來就是「會進來的人」）；`balk: true` → `patienceSeconds = 114`（boothFlow 的 `patience*3` 中位數。**這份計畫原本寫 54，那是算錯的**：`patience = 18 + rand*40` 的中位數是 38，不是 18；乘 3 是 114。實作用 114）與各站 `balkQueueLength = queueCapacity`（**這是唯一一處把 queueCapacity 當放棄門檻，因為 boothFlow 本來就是那樣，而且只發生在攤位轉換路徑上**）
 - `enabled: false` 的站台：該步驟不進 `steps`，站台保留（重新啟用只要加回一步）
 
 `booth` 區塊**留在檔案裡，凍結、不再被讀**。這保住 repo 既有的契約：舊版 build 打開攤位計畫，帳篷、區域、動線照樣畫，流程照樣跑它認得的那一套。`interaction` 一旦存在就永遠勝出。
@@ -915,7 +915,7 @@ if (!p.interaction) delete p.interaction;
 |---|---|---|---|
 | 1 | **Step 4 的 parity 沒過。** 迴圈重寫牽涉 `seq` 順序、事件推入時機、RNG 呼叫點三件事，任一處錯位就是 59 次呼叫的偏移。 | 高 | fixture 先於重構進版（Step 1），失敗訊息會直接指出是哪個欄位先分歧。若真的收斂不了，退路是 `runDiscreteEvent` **保留今天的迴圈**、`runInteraction` 獨立存在——兩個函式共用 `sampleDuration` 與所有 helper 但不共用主迴圈。那會留下約 120 行重複，違反「一個引擎」的精神，但仍然刪掉 boothFlow、仍然只有一個模型一個面板。**這個退路只在 fixture 連續兩天過不了時才啟用，而且要在 commit 裡寫明。** |
 | 2 | **一次接待的合併會讓「每站等待」在攤位上看起來偏低**：五題合併成一次服務，中間四次「等待」變成 0。 | 中 | 這是正確的建模（那四題本來就沒有排隊），但面板的措辭要跟上：桌前顯示的是「一輪要 2 分 25 秒」而不是五個各自的等待。`StepStats.avgSeconds` 保留每一步的秒數，所以資訊沒有消失。 |
-| 3 | **`templateFromBooth` 的 `patienceSeconds = 54` 是換算出來的，不是量測的。** boothFlow 是 `18 + rand*40`，再乘 3。 | 中 | 遷移時在 `template.note` 寫一行「這個數字是從舊版設定換算的估計，請依現場調整」，面板顯示 note。**不假裝它是量到的**（`noFabricatedData.test.ts` 的精神）。 |
+| 3 | **`templateFromBooth` 的 `patienceSeconds = 114` 是換算出來的，不是量測的。** boothFlow 是 `18 + rand*40`，再乘 3。 | 中 | 遷移時在 `template.note` 寫一行「這個數字是從舊版設定換算的估計，請依現場調整」，面板顯示 note。**不假裝它是量到的**（`noFabricatedData.test.ts` 的精神）。 |
 | 4 | **面板規模。** 460 行是這個 repo 單一 UI 檔的上緣（`UI.ts` 1430 行是例外）。 | 中 | 所有邏輯（重排、正規化、矩陣格、選項增刪）都在 `interactionCompile.ts` 當純函式並單獨測試，面板只負責畫。若仍然過大，先切出 `flowStepList.ts`。 |
 | 5 | **模板套用到別的場地時站台對不上。** 用名字比對是啟發式的。 | 低 | 對不上的站台放在場地中央，並明確告訴使用者「這 2 個站點我放在中間，請拖到位」。不靜默、不猜座標。 |
 | 6 | **`ParticipantProfileId` 放寬會讓拼錯的 profile id 不再被編譯器擋。** | 低 | 目前全 repo 只有 `eventFlow.ts` 與 `model.ts` 提到它（已 grep 確認），而 `migrateProfile` 本來就接受任意字串。把四個教室慣用值留成 `CLASSROOM_PROFILE` 常數供 `buildCheckinPaymentVariants` 使用。 |
@@ -948,11 +948,25 @@ if (!p.interaction) delete p.interaction;
 | 1. 先立守門員（parity fixture） | ✅ | `test/eventFlowParity.test.ts` + `test/fixtures/e310-des.json`；順手抓到 `utilization` 在無人力站台是 `NaN` |
 | 2. 型別落地（無行為） | ✅ | `model.ts` 的互動型別、`SimulationSpatial.zones?`、`Project.interaction?`、`StationStats.servers`、`SimulationResult.leftEarly` |
 | 3. 編譯器（純函式） | ✅ | `src/core/interactionCompile.ts` + 16 個測試 |
-| 4. 引擎（`runDiscreteEvent` 變包裝） | ⬜ 未開始 | 最大的一步，也是唯一一步 parity fixture 有話要說 |
-| 5. 遷移與 preset | ⬜ | |
+| 4. 引擎（`runDiscreteEvent` 變包裝） | ✅ | `7c8b42c`；parity fixture 零改動通過，`test/interactionFlow.test.ts` 13 條 |
+| 5. 遷移與 preset | ✅ | 常數搬家、`templateFromBooth`、`migrateInteraction`、`resolveTemplateBindings`、`interactionPresets.ts`；10 個變異全部被擋下 |
 | 6. 面板（一個取代兩個） | ⬜ | |
 | 7. 匯出與模板庫 | ⬜ | |
 | 8. 教室的選擇性升級 | ⬜ | |
+
+### Step 5 做到一半才發現、計畫裡沒寫的三件事
+
+1. **零秒步驟必須真的不佔服務位。** 型別註解寫著「0 是合法的——純分岔不花時間」，
+   但引擎照樣讓它排隊、並吃掉 `sampleDuration` 的一秒下限。攤位的「要不要坐坐墊」
+   因此會變成「先排隊等一個空坐墊，才能說我不坐」。引擎多了 `isDecision`：
+   `avgSeconds <= 0` 的步驟到場即決定、不排隊、不佔位，選項的 extraSeconds 變成
+   站著想的時間。教室沒有任何零秒步驟，parity fixture 零改動。
+2. **跳過要跳到下一站的第一列，不是下一站的服務。** 計畫寫的
+   `next: do__<下一站>` 會略過下一站自己的「要不要」，於是被跳過的那一站之後
+   每一站都變成必經。實測跳過率因此整個歪掉（坐墊實得 23/40，應為 10/40）。
+3. **攤位站台要標 `selfService`。** boothFlow 從來沒讀過 `staffCount`，每站就開
+   `parallelServers` 個位置；照抄成有人顧的站台會讓 `effectiveServers` 取
+   `min(staffCount=1, 3)`，三格展示板悄悄縮成一格。
 
 **Step 2 是唯一一次允許動 parity fixture 的步驟**（新增兩個欄位，逐鍵正規化比對
 證明其餘六組跑法完全相同）。Step 4 之後每一步都必須零改動通過。
