@@ -36,7 +36,7 @@ import { buildSummaryLines } from "../core/summary";
 import { inventoryLines } from "../export/constructionPlan";
 import { groupMembers } from "../core/arrays";
 import { measure, objectGap } from "../core/measure";
-import { areaBounds, doorSweep, footprintBounds, pointInDoorSweep, wallClearances, type Rect } from "../core/placement";
+import { areaBounds, doorSweep, footprintBounds, pointInDoorSweep, pointToRectDist, wallClearances, type Rect } from "../core/placement";
 import {
   buildScheme,
   compareSchemes,
@@ -1010,14 +1010,33 @@ export class AgentExecutor {
             targetId: null,
           });
         }
+        // A real turning circle, not "is anything within half the diameter".
+        // The old test measured edge-to-edge distance from the DOOR, which is
+        // neither the right shape nor the right centre: the space a wheelchair
+        // needs is a circle just inside the doorway, and an object beside the
+        // door counted while one squarely in the circle two metres in did not.
+        const roomCentre = {
+          x: draft.classroom.x + draft.classroom.length / 2,
+          z: draft.classroom.z + draft.classroom.width / 2,
+        };
         for (const door of draft.objects.filter((o) => o.kind === "door" && !o.hidden)) {
-          const nearby = draft.objects.filter(
-            (o) => o.id !== door.id && o.kind !== "door" && !o.hidden && objectGap(door, o) < turning / 2,
-          );
-          if (nearby.length) {
+          const toRoom = { x: roomCentre.x - door.x, z: roomCentre.z - door.z };
+          const len = Math.hypot(toRoom.x, toRoom.z) || 1;
+          const radius = turning / 2;
+          // Centre the circle one radius inside the room from the doorway.
+          const cx = door.x + (toRoom.x / len) * radius;
+          const cz = door.z + (toRoom.z / len) * radius;
+          const intruders = draft.objects.filter((o) => {
+            if (o.id === door.id || o.kind === "door" || o.hidden) return false;
+            if (o.surface === "wall") return false; // a wall fitting is not floor obstruction
+            return pointToRectDist(cx, cz, rectOf(o)) < radius;
+          });
+          if (intruders.length) {
             warnings.push({
               code: "turning-space",
-              message: `門「${door.id}」前方 ${(turning * 100).toFixed(0)} 公分迴轉範圍內有 ${nearby.length} 件物件。`,
+              message:
+                `門「${door.id}」內側直徑 ${(turning * 100).toFixed(0)} 公分的迴轉空間裡有 ` +
+                `${intruders.length} 件物件（${intruders.map((o) => o.id).join("、")}）。`,
               targetId: door.id,
             });
           }

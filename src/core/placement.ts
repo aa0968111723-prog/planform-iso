@@ -313,6 +313,25 @@ export function wallClearances(r: Rect, classroom: AreaConfig): WallClearances {
   return { west, east, north, south, nearest: Math.min(west, east, north, south) };
 }
 
+/**
+ * Shortest distance from a point to a rotated rectangle. 0 when inside.
+ *
+ * `obbGap` answers rect-to-rect; a wheelchair turning circle is a point and a
+ * radius, and approximating it as a square over-reports by up to 41% on the
+ * diagonal — on a 1.5 m circle that is half a metre of imaginary obstruction.
+ */
+export function pointToRectDist(px: number, pz: number, r: Rect): number {
+  if (pointInRect(px, pz, r.cx, r.cz, r.w, r.d, r.rot)) return 0;
+  const c = rectCorners(r.cx, r.cz, r.w, r.d, r.rot);
+  let best = Infinity;
+  for (let i = 0; i < c.length; i += 1) {
+    const a = c[i];
+    const b = c[(i + 1) % c.length];
+    best = Math.min(best, pointToSegmentDist(px, pz, a.x, a.z, b.x, b.z));
+  }
+  return best;
+}
+
 /** Find the top-most table/regTable whose footprint contains a point. */
 export function findParentTable(
   px: number,

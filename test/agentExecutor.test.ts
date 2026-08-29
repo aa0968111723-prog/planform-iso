@@ -495,6 +495,43 @@ describe("spatial design tools", () => {
     expect(d.explanation.citations.length).toBeGreaterThan(0);
   });
 
+  it("measures a real turning circle, not a distance from the door", async () => {
+    // The old test asked "is anything within half the diameter of the DOOR",
+    // which is the wrong shape at the wrong centre: something beside the door
+    // counted, and something squarely inside the circle further in did not.
+    const project = fixture();
+    // Squarely inside the 1.5 m circle centred 0.75 m inside the south door.
+    project.objects.push(obj({ id: "blocker", kind: "table", x: 5, z: 7.3 }));
+    const { run } = makeExecutor(project);
+    const r = await run("checkAccessibilityWarnings", { turningSpace: 1.5 });
+    expect(r.ok).toBe(true);
+    const d = r.data as { warnings: { code: string; message: string }[] };
+    const turning = d.warnings.filter((w) => w.code === "turning-space");
+    expect(turning.length).toBe(1);
+    expect(turning[0].message).toContain("blocker");
+  });
+
+  it("does not count a wall fitting as floor obstruction in the turning circle", async () => {
+    const project = fixture();
+    project.objects.push(obj({
+      id: "sw", kind: "switch", x: 5, z: 8, width: 0.1, depth: 0.05, height: 0.1,
+      surface: "wall", elevation: 1.2, assetId: "builtin:switch",
+    }));
+    const { run } = makeExecutor(project);
+    const r = await run("checkAccessibilityWarnings", { turningSpace: 1.5 });
+    const d = r.data as { warnings: { code: string; message: string }[] };
+    expect(d.warnings.filter((w) => w.message.includes("sw"))).toEqual([]);
+  });
+
+  it("reports a clear doorway as clear", async () => {
+    const project = fixture();
+    // Nothing near the door: t1..t3 sit at z≈2, the door is at z=8.
+    const { run } = makeExecutor(project);
+    const r = await run("checkAccessibilityWarnings", { turningSpace: 1.5 });
+    const d = r.data as { warnings: { code: string }[] };
+    expect(d.warnings.filter((w) => w.code === "turning-space")).toEqual([]);
+  });
+
   it("checkSightlines admits when the check is switched off", async () => {
     const project = fixture();
     project.validationSettings = { ...project.validationSettings, checkScreenView: false };
