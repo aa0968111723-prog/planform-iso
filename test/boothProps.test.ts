@@ -183,6 +183,29 @@ describe("recipes for collateral", () => {
     expect(after.dimensions).toEqual(before.dimensions);
   });
 
+  it("keeps the print run when only the quantity is named", () => {
+    // 「做 500 張雙面傳單」 used to throw both numbers away because there was
+    // no paper size in the print block, and the order sheet said 1 份 單面.
+    const d = make({ name: "傳單", kind: "海報", print: { quantity: 500, sides: 2 } });
+    expect(d.print!.quantity).toBe(500);
+    expect(d.print!.sides).toBe(2);
+    expect(d.dimensions.width).toBeCloseTo(0.42, 3);
+  });
+
+  it("moves the order with a typed size, and drops the old standard name", () => {
+    const d = make({ name: "海報", kind: "海報", dimensions: { width: 1.2, depth: 0.02, height: 1.7 } });
+    expect(d.print!.widthMm).toBe(1200);
+    expect(d.print!.standard).toBeUndefined();
+  });
+
+  it("does not grow a 32-metre truss when a backdrop is printed smaller", () => {
+    const d = make({ name: "背景", kind: "背景牆", print: { standard: "A2" } });
+    expect(d.dimensions.width).toBeLessThan(3);
+    for (const part of d.parts) {
+      expect(part.size.width, part.id).toBeLessThan(3);
+    }
+  });
+
   it("rejects a material it does not recognise instead of passing it to a printer", () => {
     const d = make({ name: "海報", kind: "海報", print: { standard: "A3", material: "黃金" } });
     expect(d.print!.material).not.toBe("黃金");

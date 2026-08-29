@@ -18,7 +18,7 @@
  *   describes the old plan.
  */
 
-import type { Project, SceneObject, ZoneType } from "../core/model";
+import type { Project, PropDefinition, SceneObject, ZoneType } from "../core/model";
 import { areaBounds } from "../core/placement";
 import { RECOMMENDED_SCHEME, type EventType } from "../core/spatialPlanner";
 import type { ObjectReference, ParsedRequest, SpatialRelation } from "./intent";
@@ -256,7 +256,14 @@ export function planFromRequest(parsed: ParsedRequest, project: Project): PlanRe
   }
 
   // --- assets and props
-  if (types.has("create-prop")) {
+  //
+  // 「剛剛匯入的那張圖」 scores create-prop as well, because 「匯入」 counts as a
+  // make-verb in that rule. It leaves no propRequest slot behind, though, so
+  // the only branch it can reach is the generic fallback — which quietly built
+  // a second backdrop next to the one the user was pointing at. A sentence that
+  // really does ask for both (「做一個背景牆，然後把那張圖貼上去」) fills the
+  // slot, takes the real branch, and is pasted onto below.
+  if (types.has("create-prop") && (s.propRequest || !types.has("attach-artwork"))) {
     const req = s.propRequest?.value;
     if (req) {
       // A named prop or piece of collateral: the recipe layer owns the
@@ -309,6 +316,40 @@ export function planFromRequest(parsed: ParsedRequest, project: Project): PlanRe
       { tool: "placeAsset", args: { assetId: "<from:createCustomAssetProxy>", target: targetZone ? "near-entrance" : "classroom-center" } },
       targetZone ? `放到${zoneLabel(targetZone)}附近。` : "放到教室中央。",
     );
+  }
+
+  // --- pasting an imported picture onto a prop
+  //
+  // After the create block on purpose: 「做一個背景牆，然後把那張圖貼上去」 makes
+  // the backdrop first and pastes onto that one, via the placeholder the runner
+  // fills in with the id the recipe actually returned.
+  if (types.has("attach-artwork")) {
+    const want = s.artworkTarget?.value.kind;
+    const madeItNow = steps.some((st) => st.call.tool === "createPropFromRecipe");
+    const prop = madeItNow ? null : findPropByKind(project, want);
+    // The most recently imported picture is what 「那張圖」 means; anything
+    // cleverer would be guessing on the user's behalf.
+    const photo = [...(project.catalogExtras ?? [])]
+      .reverse()
+      .find((e) => e.blobIds?.sourceImage);
+
+    if (!madeItNow && !prop) {
+      unresolved.push(
+        want
+          ? `場上找不到${want}，沒有貼圖。請先建立一個，再把圖貼上去。`
+          : "沒有說要貼到哪一個道具上，沒有貼圖。",
+      );
+    } else if (!photo) {
+      unresolved.push("目前沒有匯入過任何圖片，沒有東西可以貼。請先用「匯入素材」加一張圖。");
+    } else {
+      const propId = madeItNow ? "<from:createPropFromRecipe>" : prop!.id;
+      add(
+        { tool: "setPropArtwork", args: { propId, assetId: photo.id } },
+        madeItNow
+          ? `把「${photo.name}」貼到剛做好的${want ?? "道具"}印刷面上。`
+          : `把「${photo.name}」貼到「${prop!.name}」的印刷面上。`,
+      );
+    }
   }
 
   // --- simulation and comparison (diagnosis already ran above, if asked for)
@@ -418,6 +459,36 @@ function zoneLabel(z: ZoneType): string {
     meditation: "禪坐區", shoe: "鞋子區", backpack: "背包區", custom: "自訂區",
   };
   return map[z] ?? "指定區域";
+}
+
+/**
+ * The prop a kind word refers to, out of the ones the plan already has.
+ *
+ * Matched on the definition's own name and category, newest first — 「背景牆」
+ * means the backdrop you just made, not the first one you ever made.
+ */
+function findPropByKind(project: Project, kind: string | undefined): PropDefinition | null {
+  if (!kind) return null;
+  // Newest first — 「背景牆」 means the backdrop you just made.
+  const props = [...(project.props ?? [])].reverse();
+
+  // Recipe names ARE the kind words (背景牆, 海報, x展架…), so this is the
+  // normal path and it is exact.
+  const named = props.find((d) => d.name.includes(kind));
+  if (named) return named;
+
+  // Only then fall back to the category, and only when it cannot be
+  // ambiguous — this is what lets 「貼到背景牆上」 find a 大背景. Matching the
+  // category alone would happily paste onto an 易拉寶 when you asked for a
+  // 海報, because both are 文宣.
+  const category = /背景/.test(kind)
+    ? "背景"
+    : /海報|傳單|展架|布條|立牌|易拉寶/.test(kind)
+      ? "文宣"
+      : null;
+  if (!category) return null;
+  const inCategory = props.filter((d) => d.category === category);
+  return inCategory.length === 1 ? inCategory[0] : null;
 }
 
 /** Kinds whose recipe produces a print spec, for the step's reason line. */
