@@ -2,6 +2,23 @@
 
 更新：2026-08-29
 
+## 擺攤小物、文宣與背景圖（分支 `feat/booth-props-and-print`）
+
+`src/core/printSpec.ts` 是印刷規格的唯一來源；`src/core/boothPropPresets.ts`
+是 19 個 preset（文宣／背景／擺攤小物）。三件事接手前要知道：
+
+1. **印刷品的公尺是從公釐推導的**，不是各自維護。改尺寸只改 `PrintSpec`，
+   3D 面板會跟著變。`test/boothProps.test.ts` 斷言兩者一致。
+2. **方向只在 `specFromStandard` 轉一次。** `metersFromTrim` 不轉。
+   兩邊都轉的話 180×60 的桌前布條會變成 60×180——轉兩次等於沒轉，
+   只是數字互相打架。
+3. **`test/boothProps.test.ts` 有一條控制字元守衛。** 產生程式碼時寫的
+   `` 曾經在原始碼裡變成真的 backspace（0x08），regex 因此永遠不 match
+   而且完全不報錯（A5 讀不到）。那條測試掃描整個 `src`，任何低於 0x20 的
+   字元（tab 與行尾 CR 除外）直接失敗。**不要為了方便把它關掉。**
+
+送印清單在 `printOrderLines()`，只算實際放進場的道具。
+
 ## 最新一輪：完整空間規劃 Agent（分支 `feat/full-planform-spatial-agent`，未 merge）
 
 從 `origin/main` 開的分支。四件事：
