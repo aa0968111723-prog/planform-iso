@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "3D 等角實尺場佈工具 — Vite + TypeScript + Three.js PWA",
+  "description": "PLANFORM — 活動空間設計、3D 道具、互動彩排與場刊輸出工具",
   "engines": {
     "node": ">=22"
   },
