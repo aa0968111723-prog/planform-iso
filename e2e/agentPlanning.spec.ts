@@ -56,6 +56,24 @@ async function openAgent(page: Page): Promise<void> {
   await expect(page.locator(".agent-sheet")).toBeVisible();
 }
 
+/**
+ * Open the share/export workflow.
+ *
+ * Desktop puts it in the top bar as 「分享」; phone and tablet use the bottom
+ * nav. `.navbtn[data-nav="export"]` exists in the DOM on every viewport but is
+ * only VISIBLE on the small ones, so hard-coding it times out on desktop
+ * against an element that is right there.
+ */
+async function openExport(page: Page): Promise<void> {
+  const topbar = page.locator(".topbar button", { hasText: "分享" }).first();
+  if (await topbar.isVisible().catch(() => false)) {
+    await topbar.click();
+  } else {
+    await page.locator('.navbtn[data-nav="export"]').click();
+  }
+  await settle(page);
+}
+
 async function ask(page: Page, text: string): Promise<void> {
   await page.locator(".agent-sheet__input").fill(text);
   await page.locator(".agent-sheet button", { hasText: "執行" }).first().click();
@@ -323,8 +341,7 @@ test.describe("export still works after the agent has run", () => {
     await page.locator(".agent-preview-bar button", { hasText: "套用" }).click();
     await page.locator(".agent-sheet button", { hasText: "關閉" }).click();
 
-    await page.locator('.navbtn[data-nav="export"]').click();
-    await settle(page);
+    await openExport(page);
     const dl = page.waitForEvent("download");
     await page.locator(".left button", { hasText: "動線圖" }).first().click();
     expect((await dl).suggestedFilename()).toContain("動線圖");
