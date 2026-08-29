@@ -259,6 +259,25 @@ describe("array tools", () => {
     expect(t1.x - 0.6).toBeCloseTo(rot.x - 0.25, 5);
   });
 
+  it("refuses to distribute a set containing a locked object", async () => {
+    // Quietly distributing only the unlocked subset is the same failure as the
+    // old `{ ok: true, skipped: true }`: the caller named five objects and is
+    // told it worked.
+    const { run, draft } = makeExecutor();
+    const before = draft().objects.find((o) => o.id === "t1")!.x;
+    const r = await run("distributeObjects", { objectIds: ["t1", "t2", "locked1"], axis: "x" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("locked1");
+    expect(draft().objects.find((o) => o.id === "t1")!.x).toBe(before);
+  });
+
+  it("refuses to align a set containing a locked object", async () => {
+    const { run } = makeExecutor();
+    const r = await run("alignObjects", { objectIds: ["t1", "locked1"], edge: "left" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("locked1");
+  });
+
   it("reports missing ids rather than aligning whatever it found", async () => {
     const { run } = makeExecutor();
     const r = await run("alignObjects", { objectIds: ["t1", "ghost"], edge: "left" });

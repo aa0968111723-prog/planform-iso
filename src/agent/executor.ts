@@ -540,7 +540,14 @@ export class AgentExecutor {
         const found = ids.map((id) => draft.objects.find((o) => o.id === id));
         const missing = ids.filter((_, i) => !found[i]);
         if (missing.length) return fail(`找不到物件：${missing.join("、")}`);
+        const locked = found.filter((o): o is SceneObject => !!o && o.locked).map((o) => o.id);
         const movable = found.filter((o): o is SceneObject => !!o && !o.locked);
+        // Silently distributing the subset that happened to be unlocked is the
+        // same failure as the old `{ ok: true, skipped: true }`: the caller
+        // asked for five objects and is told it worked.
+        if (locked.length) {
+          return fail(`這些物件已鎖定，請先解鎖：${locked.join("、")}`);
+        }
         if (movable.length < 3 && args.spacing === undefined) {
           return fail("distributeObjects 需要至少 3 件未鎖定的物件，或指定 spacing");
         }
@@ -567,7 +574,11 @@ export class AgentExecutor {
         const found = ids.map((id) => draft.objects.find((o) => o.id === id));
         const missing = ids.filter((_, i) => !found[i]);
         if (missing.length) return fail(`找不到物件：${missing.join("、")}`);
+        const lockedIds = found.filter((o): o is SceneObject => !!o && o.locked).map((o) => o.id);
         const movable = found.filter((o): o is SceneObject => !!o && !o.locked);
+        if (lockedIds.length) {
+          return fail(`這些物件已鎖定，請先解鎖：${lockedIds.join("、")}`);
+        }
         if (movable.length < 2) return fail("alignObjects 需要至少 2 件未鎖定的物件");
 
         // Alignment uses the ROTATED footprint, not the raw width. Aligning a

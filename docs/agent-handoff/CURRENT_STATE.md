@@ -1,6 +1,46 @@
 # CURRENT_STATE（Claude Lead checkpoint）
 
-更新：2026-08-28
+更新：2026-08-29
+
+## 最新一輪：完整空間規劃 Agent（分支 `feat/full-planform-spatial-agent`，未 merge）
+
+從 `origin/main` 開的分支。四件事：
+
+1. **Perplexity 研究 15 題、310 個來源** → `docs/research/spatial-design/`。
+   `sources.json` 記錄每題實際讀到的網址與來源分級；`knowledge.json` 由
+   `src/core/spatialKnowledge.ts` 產生（不要手改）。研究**沒查到**什麼寫在
+   README 裡，那部分比查到的重要。
+2. **`src/core/spatialPlanner.ts`** — A/B/C 三種策略的排版引擎。每個方案都用
+   `validateProject` 與 `runDiscreteEvent` 量測，跟手動編輯同一套。
+3. **Agent 工具層從 33 個名字變成 76 個實作**。原本六個工具回 `ok: true`
+   卻什麼都沒做（`updateZone` / `updateRoute` / `updateArray` /
+   `updateAssetMetadata` / `createArray` / `measureGap`）。
+4. **自然語言拆成四段**：normalize → extractSlots → classify →
+   planFromRequest。前三段不需要專案，可獨立測試。
+
+### 接手的人要知道的四件事
+
+1. **明講的要求是限制條件，不是權重。** 使用者說「收費另外分流」時，
+   共用桌方案 `eligible: false`，不能被推薦也不能被 `RECOMMENDED_SCHEME`
+   選中。加權只能在都符合要求的選項之間排序。這一條是自我審查抓到的——
+   在那之前引擎會推薦一張共用桌給剛說要分流的人。
+2. **只有一個地方決定要套用哪個方案。** planner 曾經有自己的
+   「目標→方案」對照表，跟引擎的實測推薦打架，使用者會同時讀到
+   「推薦 C」和被套用的 B。那張表已經刪掉。
+3. **cue regex 跑的是正規化後的文字。** 寫「推薦一個」永遠配不到，因為
+   「一」已經變成「1」。`test/agentIntent.test.ts` 會把每條 cue 的字面選項
+   抽出來斷言 `normalize(literal) === literal`。
+4. **`test/agentExecutor.test.ts` 最後一條斷言是覆蓋率檢查**：
+   TOOL_SPECS 裡任何沒被測試呼叫過的工具都會讓測試失敗。加工具就要加測試。
+
+### 這一輪的 gate 狀態
+
+| Gate | 結果 |
+|---|---|
+| lint / typecheck / build | PASS |
+| `npm run test` | 932 tests / 77 files PASS（連跑三次穩定） |
+| 既有 723 個測試 | 零回歸，未修改任何既有 fixture |
+
 
 ## 最新一輪：通用互動流程系統（PR #19，未 merge）
 
