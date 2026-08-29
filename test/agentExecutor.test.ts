@@ -229,6 +229,25 @@ describe("array tools", () => {
     expect(draft().groups.length).toBe(0);
   });
 
+  it("uses each kind's real dimensions, not a mat's, when only a kind is given", async () => {
+    // Falling back to 0.6 x 0.6 x 0.03 for every kind produced a 40-chair
+    // array of 3 cm high floor tiles.
+    const { run, draft } = makeExecutor();
+    const chairs = await run("createArray", { kind: "chair", rows: 2, cols: 3 });
+    expect(chairs.ok).toBe(true);
+    const g = draft().groups.at(-1)!;
+    expect(g.sourceKind).toBe("chair");
+    expect(g.itemHeight).toBeGreaterThan(0.2);
+    expect(g.itemWidth).not.toBe(0.6);
+  });
+
+  it("refuses an unknown kind rather than inventing a size", async () => {
+    const { run } = makeExecutor();
+    const r = await run("createArray", { kind: "spaceship", rows: 1, cols: 1 });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("spaceship");
+  });
+
   it("distributes objects evenly along an axis", async () => {
     const { run, draft } = makeExecutor();
     const r = await run("distributeObjects", { objectIds: ["t1", "t2", "t3"], axis: "x" });

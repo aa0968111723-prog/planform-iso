@@ -21,6 +21,7 @@
  */
 
 import { eventFlowAdapter } from "../adapters/eventFlow";
+import { ALL_KINDS, assetDef } from "../core/assets";
 import { createCustomAssetProxy } from "../assets/proxy";
 import { describeRecipe, propFromRecipe } from "../core/propRecipe";
 import { syncPropEntries } from "../core/propCatalog";
@@ -462,9 +463,14 @@ export class AgentExecutor {
         const entry = assetId ? catalogFromProject(draft).get(assetId) : undefined;
         if (assetId && !entry) return fail(`找不到素材 ${assetId}`);
         const kind = entry?.kind ?? (str(args.kind, "mat") as SceneObject["kind"]);
-        const w = entry?.dimensions.width ?? 0.6;
-        const d = entry?.dimensions.depth ?? 0.6;
-        const h = entry?.dimensions.height ?? 0.03;
+        // Falling back to a mat's 0.6 x 0.6 x 0.03 for every kind produced a
+        // 40-chair array of 3 cm high floor tiles. The builtin definition knows
+        // each kind's real size; use it.
+        const fallback = ALL_KINDS.includes(kind) ? assetDef(kind).defaultDimensions : null;
+        if (!entry && !fallback) return fail(`不認得的物件種類：${kind}`);
+        const w = entry?.dimensions.width ?? fallback!.width;
+        const d = entry?.dimensions.depth ?? fallback!.depth;
+        const h = entry?.dimensions.height ?? fallback!.height;
         const rows = num(args.rows, 1);
         const cols = num(args.cols, 1);
         const b = areaBounds(draft.classroom);
