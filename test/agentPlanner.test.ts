@@ -406,3 +406,115 @@ describe("orchestration", () => {
     expect(r.previewActive).toBe(true);
   });
 });
+
+describe("pasting an imported picture onto a prop", () => {
+  /** A catalog entry that carries an imported picture, as importAsset writes it. */
+  function photo(id: string, name: string) {
+    return {
+      id, name, semanticType: "other", sourceType: "photo", category: "custom",
+      placementType: "floor", dimensions: { width: 1, depth: 1, height: 1 },
+      defaultFacingDeg: 0, clearanceFront: 0, blocksFlow: false, kind: "table",
+      icon: "圖", color: "#ffffff", visualRef: "proxy:box", tags: [],
+      createdBy: "photo", version: 1, blobIds: { sourceImage: `img_${id}` },
+    };
+  }
+
+  async function withBackdrop(extras: unknown[] = []) {
+    const p = staffedRoom();
+    p.catalogExtras = extras as never;
+    const store = new Store(p);
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    await agent.run({ text: "做一個合照背景牆" });
+    agent.commit();
+    return { store, agent };
+  }
+
+  it("puts the picture on the prop's printed face", async () => {
+    const { agent } = await withBackdrop([photo("custom:a", "舊圖"), photo("custom:b", "社團合照")]);
+    const r = await agent.run({ text: "把剛剛匯入的那張圖貼到背景牆上" });
+
+    expect(r.plan.map((s) => s.tool)).toEqual(["setPropArtwork"]);
+    expect(r.toolResults.every((t) => t.ok)).toBe(true);
+    expect(r.unresolved).toEqual([]);
+
+    const prop = agent.getDraftProject()!.props!.at(-1)!;
+    // The most recent import is what 「那張圖」 means, not the first one.
+    expect(prop.parts.some((part) => part.imageBlobId === "img_custom:b")).toBe(true);
+    expect(prop.parts.some((part) => part.imageBlobId === "img_custom:a")).toBe(false);
+  });
+
+  it("names the picture and the prop in the change note", async () => {
+    const { agent } = await withBackdrop([photo("custom:b", "社團合照")]);
+    const r = await agent.run({ text: "把那張圖貼到背景牆上" });
+    expect(r.plan[0].because).toContain("社團合照");
+    expect(r.plan[0].because).toContain("背景牆");
+  });
+
+  it("does not build a second backdrop next to the one being decorated", async () => {
+    const { store, agent } = await withBackdrop([photo("custom:b", "社團合照")]);
+    const before = store.getState().props!.length;
+    await agent.run({ text: "把剛剛匯入的那張圖貼到背景牆上" });
+    expect(agent.getDraftProject()!.props!.length).toBe(before);
+  });
+
+  it("says there is nothing to paste rather than pasting nothing", async () => {
+    const { agent } = await withBackdrop([]);
+    const r = await agent.run({ text: "把那張圖貼到背景牆上" });
+    expect(r.plan.map((s) => s.tool)).not.toContain("setPropArtwork");
+    expect(r.unresolved.join(" ")).toContain("匯入");
+  });
+
+  it("makes it first, then pastes onto the one it just made", async () => {
+    const p = staffedRoom();
+    p.catalogExtras = [photo("custom:b", "社團合照")] as never;
+    const agent = new QuickAgent(new Store(p), new LocalPlannerProvider());
+    const r = await agent.run({ text: "做一個合照背景牆，然後把那張圖貼上去" });
+
+    expect(r.plan.map((st) => st.tool)).toEqual(["createPropFromRecipe", "setPropArtwork"]);
+    expect(r.toolResults.every((t) => t.ok), JSON.stringify(r.toolResults)).toBe(true);
+
+    const props = agent.getDraftProject()!.props!;
+    expect(props.length).toBe(1);
+    expect(props[0].parts.some((part) => part.imageBlobId === "img_custom:b")).toBe(true);
+  });
+
+  it("will not paste onto a different piece of collateral in the same category", async () => {
+    const p = staffedRoom();
+    p.catalogExtras = [photo("custom:b", "社團合照")] as never;
+    const store = new Store(p);
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    await agent.run({ text: "做一個 x 展架" });
+    agent.commit();
+    await agent.run({ text: "做一個易拉寶" });
+    agent.commit();
+    expect(store.getState().props!.length).toBe(2);
+
+    const r = await agent.run({ text: "把那張圖貼到海報上" });
+    expect(r.plan.map((st) => st.tool)).not.toContain("setPropArtwork");
+    expect(r.unresolved.join(" ")).toContain("找不到");
+  });
+
+  it("finds a 大背景 when asked for the 背景牆, because there is only one", async () => {
+    const p = staffedRoom();
+    p.catalogExtras = [photo("custom:b", "社團合照")] as never;
+    const store = new Store(p);
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    await agent.run({ text: "做一個大型背景牆" });
+    agent.commit();
+    expect(store.getState().props![0].name).toBe("大背景");
+
+    const r = await agent.run({ text: "把那張圖貼到背景牆上" });
+    expect(r.plan.map((st) => st.tool)).toEqual(["setPropArtwork"]);
+    expect(agent.getDraftProject()!.props![0].parts.some((x) => x.imageBlobId === "img_custom:b")).toBe(true);
+  });
+
+  it("says the prop is not there rather than picking a different one", async () => {
+    const p = staffedRoom();
+    p.catalogExtras = [photo("custom:b", "社團合照")] as never;
+    const agent = new QuickAgent(new Store(p), new LocalPlannerProvider());
+    const r = await agent.run({ text: "把那張圖貼到海報上" });
+    expect(r.plan.map((s) => s.tool)).not.toContain("setPropArtwork");
+    expect(r.unresolved.join(" ")).toContain("找不到");
+    expect(r.unresolved.join(" ")).toContain("海報");
+  });
+});

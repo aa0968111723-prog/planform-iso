@@ -195,6 +195,31 @@ export function propFromRecipe(recipe: PropRecipe, id: string): PropDefinition {
       depth: clamp(recipe.dimensions.depth, 0.05, 6),
       height: clamp(recipe.dimensions.height, 0.05, 4),
     });
+    // A resize has to move the order with it. `scaleTo` spreads `...def`, so a
+    // preset's print spec used to survive untouched: 「做一個 120 公分寬的海報」
+    // produced a 1.2 m poster on the plan and an A2 line on the order sheet —
+    // the exact disagreement this module's header says it exists to prevent.
+    //
+    // The panel is the last part, and it has just been scaled, so the trim size
+    // is read back off it. The standard's NAME is dropped on purpose: a
+    // 1200 mm sheet is not A2 any more, and keeping the label would be a
+    // second, worse lie.
+    if (def.print && !recipe.print) {
+      const panel = def.parts[def.parts.length - 1];
+      if (panel) {
+        const rest = { ...def.print };
+        delete rest.standard;
+        def = {
+          ...def,
+          print: {
+            ...rest,
+            widthMm: Math.round(Math.min(5000, Math.max(10, panel.size.width * 1000))),
+            heightMm: Math.round(Math.min(5000, Math.max(10, panel.size.height * 1000))),
+            orientation: panel.size.width > panel.size.height ? "landscape" : "portrait",
+          },
+        };
+      }
+    }
   }
 
   if (recipe.color) {
@@ -272,8 +297,13 @@ const PRINT_MATERIALS = new Set([
  */
 function applyPrint(def: PropDefinition, want: NonNullable<PropRecipe["print"]>): PropDefinition {
   const fromStandard = want.standard ? specFromStandard(want.standard) : null;
-  const widthMm = want.widthMm ?? fromStandard?.widthMm;
-  const heightMm = want.heightMm ?? fromStandard?.heightMm;
+  // Falling back to the preset's own trim size matters: 「做 500 張雙面傳單」
+  // names a quantity and a side count but no paper size, and without this the
+  // guard below returned early and threw BOTH of them away — the order sheet
+  // then said 1 份 單面, which is not what anybody asked for. Every other
+  // field here already falls back to `def.print`; these two were forgotten.
+  const widthMm = want.widthMm ?? fromStandard?.widthMm ?? def.print?.widthMm;
+  const heightMm = want.heightMm ?? fromStandard?.heightMm ?? def.print?.heightMm;
   // Nothing usable to print at: leave the definition exactly as it was rather
   // than inventing a size.
   if (!widthMm || !heightMm || widthMm <= 0 || heightMm <= 0) return def;
@@ -296,35 +326,56 @@ function applyPrint(def: PropDefinition, want: NonNullable<PropRecipe["print"]>)
 
   const panel = metersFromTrim(spec);
   const lastIndex = def.parts.length - 1;
-  const foot = lastIndex > 0 ? def.parts[0] : null;
-  // The foot scales with the panel: an A5 card on an A1 poster's foot is not a
-  // thing you can buy, and leaving the old foot behind is what made an A5
-  // flyer report a 46 cm footprint — the A2 preset's width, kept by a max().
-  // The foot keeps its 6 cm overhang at the new panel width, rather than being
-  // scaled by a ratio that compounds every time the size changes.
-  const footScale = foot ? (panel.width + 0.06) / foot.size.width : 1;
+  const oldPanel = def.parts[lastIndex];
+
+  // How the rest of the prop follows the panel depends on what the rest of the
+  // prop IS, and there are exactly two shapes here:
+  //
+  // - **foot + panel** (the `printedOnStand` presets): the foot is a base the
+  //   panel stands on. It keeps a 6 cm overhang at the new panel width, rather
+  //   than a ratio that compounds every time the size changes. Leaving the old
+  //   foot behind is what made an A5 flyer report a 46 cm footprint.
+  // - **a frame** (the backdrops: two legs, a crossbar, then the panel): the
+  //   structure is proportional to the panel, so it scales with it.
+  //
+  // Treating the second as the first is what produced a 32-metre crossbar:
+  // `(panel.width + 0.06) / 0.06` is ~41 when `parts[0]` is a 6 cm truss leg
+  // rather than a wide base, and that factor was applied to EVERY other part.
+  const footAndPanel = def.parts.length === 2;
+  const sx = oldPanel.size.width > 0 ? panel.width / oldPanel.size.width : 1;
+  const sy = oldPanel.size.height > 0 ? panel.height / oldPanel.size.height : 1;
+  const footScale = footAndPanel ? (panel.width + 0.06) / def.parts[0].size.width : 1;
+
   const parts = def.parts.map((p, i) => {
     if (i === lastIndex) {
       return { ...p, size: { ...p.size, width: panel.width, height: panel.height } };
     }
+    if (footAndPanel) return { ...p, size: { ...p.size, width: p.size.width * footScale } };
     return {
       ...p,
-      size: { ...p.size, width: p.size.width * footScale },
+      size: { ...p.size, width: p.size.width * sx, height: p.size.height * sy },
+      offset: { ...p.offset, x: p.offset.x * sx, y: p.offset.y * sy },
     };
   });
 
-  // The footprint is DERIVED, never maxed with the value it is replacing:
-  // taking the larger of old and new means a smaller print can never shrink
-  // the object, and the plan then reserves space for a poster nobody ordered.
-  const footHeight = foot ? def.parts[lastIndex].offset.y : 0;
-  const width = foot ? Math.max(panel.width, foot.size.width * footScale) : panel.width;
+  // The footprint is DERIVED from the parts that now exist, never maxed with
+  // the value it is replacing: taking the larger of old and new means a smaller
+  // print can never shrink the object, and the plan then reserves space for a
+  // poster nobody ordered. Reading it back off `parts` also means a frame
+  // cannot end up declaring a footprint its own legs stick out of.
+  const panelOffsetY = footAndPanel ? oldPanel.offset.y : oldPanel.offset.y * sy;
+  const width = parts.reduce((m, p) => Math.max(m, Math.abs(p.offset.x) * 2 + p.size.width), 0);
+  const height = parts.reduce(
+    (m, p) => Math.max(m, (p === parts[lastIndex] ? panelOffsetY : p.offset.y) + p.size.height),
+    0,
+  );
   return {
     ...def,
-    parts,
+    parts: parts.map((p, i) => (i === lastIndex ? { ...p, offset: { ...p.offset, y: panelOffsetY } } : p)),
     dimensions: {
       width,
       depth: def.dimensions.depth,
-      height: footHeight + panel.height,
+      height,
     },
     print: spec,
   };

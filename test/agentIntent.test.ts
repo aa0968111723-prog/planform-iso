@@ -249,6 +249,11 @@ describe("slot extraction", () => {
     expect(v.printStandard).toBe("A5");
   });
 
+  it("does not take 「做一張」 as the print run when another number is there", () => {
+    const v = slots("做一張 500 份的海報").propRequest!.value;
+    expect(v.quantity).toBe(500);
+  });
+
   it("recognises stall items that are not printed", () => {
     for (const [text, kind] of [
       ["做一個抽獎箱", "抽獎箱"],
@@ -361,5 +366,49 @@ describe("parseRequest", () => {
   it("keeps the raw text untouched", () => {
     const raw = "幫我排一個 ６０ 人的茶會";
     expect(parseRequest(raw).raw).toBe(raw);
+  });
+});
+
+describe("pasting an imported picture onto a prop", () => {
+  const top = (t: string) => parseRequest(t).intents[0]?.type;
+  const types = (t: string) => parseRequest(t).intents.map((i) => i.type);
+
+  it("reads the target prop out of the sentence", () => {
+    const s = parseRequest("把那張圖貼到背景牆上").slots;
+    expect(s.artworkTarget?.value.kind).toBe("背景牆");
+    expect(s.artworkTarget?.evidence).toContain("背景");
+  });
+
+  it("accepts the other ways of saying it", () => {
+    for (const t of [
+      "把這張圖貼在海報上",
+      "海報換成剛剛匯入的照片",
+      "把主視覺套用到易拉寶",
+      "桌前布條放上那張圖檔",
+    ]) {
+      expect(parseRequest(t).slots.artworkTarget, t).toBeDefined();
+    }
+  });
+
+  it("outranks create-prop, which the word 匯入 would otherwise trigger", () => {
+    // 「剛剛匯入的」 contains a make-verb. Without the ordering this sentence
+    // built a second backdrop instead of decorating the one being pointed at.
+    expect(top("把剛剛匯入的那張圖貼到背景牆上")).toBe("attach-artwork");
+    expect(parseRequest("把剛剛匯入的那張圖貼到背景牆上").slots.propRequest).toBeUndefined();
+  });
+
+  it("still hears a real request to build one", () => {
+    expect(types("做一個合照背景牆")).toContain("create-prop");
+    expect(types("做一個合照背景牆")).not.toContain("attach-artwork");
+  });
+
+  it("needs both a paste verb and a picture word", () => {
+    expect(parseRequest("背景牆往左移一點").slots.artworkTarget).toBeUndefined();
+    expect(parseRequest("把桌子貼到牆邊").slots.artworkTarget).toBeUndefined();
+    expect(parseRequest("那張圖很好看").slots.artworkTarget).toBeUndefined();
+  });
+
+  it("says what it understood", () => {
+    expect(describeParse(parseRequest("把那張圖貼到背景牆上")).join("\n")).toContain("貼圖");
   });
 });

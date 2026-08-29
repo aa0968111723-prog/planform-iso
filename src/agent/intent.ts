@@ -178,6 +178,14 @@ export interface ExtractedSlots {
   audience?: Slot<string>;
   /** Furniture asked for by name and count: 「三張長桌」「兩個架子」. */
   requiredAssets: Slot<{ assetId: string; count: number; zone?: ZoneType }>[];
+  /**
+   * Which prop a picture should be pasted onto: 「把那張圖貼到背景牆上」.
+   *
+   * Only the KIND is read here. Which backdrop, and which imported image, are
+   * questions about the plan — resolved in `planner.ts`, like every other
+   * reference.
+   */
+  artworkTarget?: Slot<{ kind: string }>;
   /** A prop or piece of collateral to make: 「做一個 A2 海報」「桌前布條」. */
   propRequest?: Slot<{
     kind: string;
@@ -451,6 +459,23 @@ export function extractSlots(normalized: string): ExtractedSlots {
     }
   }
 
+  // --- pasting an imported picture onto a prop
+  //
+  // Checked BEFORE the "make one" block: 「把那張圖貼到背景牆上」 names a
+  // backdrop, and without this it reads as a request to build a second one.
+  {
+    const pasteVerb = /貼(?:到|上|在)|放(?:到|上)|換(?:成|上)|套(?:用|到)/;
+    const picture = /圖片|照片|圖檔|主視覺|那張圖|這張圖|圖稿|美編/;
+    if (pasteVerb.test(t) && picture.test(t)) {
+      for (const cue of PROP_KIND_CUES) {
+        const m = t.match(cue.re);
+        if (!m) continue;
+        slots.artworkTarget = { value: { kind: cue.kind }, evidence: m[0] };
+        break;
+      }
+    }
+  }
+
   // --- a prop or piece of collateral to make
   {
     const makeVerb = /做|製作|建立|新增|設計|來(?:一|1)?[張個面塊]|生成|弄/;
@@ -459,6 +484,9 @@ export function extractSlots(normalized: string): ExtractedSlots {
       if (!m) continue;
       // Only treat it as a request to MAKE something when the sentence says so;
       // 「海報放右邊」 is a placement instruction about a poster that exists.
+      //
+      // Deliberately NOT suppressed by `artworkTarget`: 「做一個背景牆，然後把
+      // 那張圖貼上去」 is both, and the planner makes it before pasting onto it.
       if (!makeVerb.test(t)) break;
       const value: NonNullable<ExtractedSlots["propRequest"]>["value"] = { kind: cue.kind };
       // Word boundaries written as an explicit class: a literal \b in a
@@ -466,7 +494,20 @@ export function extractSlots(normalized: string): ExtractedSlots {
       // requiring two of them before an A5 would be recognised.
       const std = t.match(/(?:^|[^A-Za-z0-9])(A[1-6]|B2)(?![A-Za-z0-9])/i);
       if (std) value.printStandard = std[1].toUpperCase();
-      const qty = t.match(new RegExp(`${NUM}\\s*(?:張|份|個|面|塊)`));
+      // 「做一張 500 份的海報」 normalises to 「做1張 500 份的海報」, and a
+      // non-global match took the FIRST 數字+量詞 — the 「一張」 belonging to
+      // 「做一張」, not the print run. The order sheet then said 1 份.
+      //
+      // So: collect every candidate, and drop a leading 「做/來/弄…一X」 when
+      // the sentence offers another number. 「做 500 張雙面傳單」 keeps its 500
+      // because that number is not 1, and 「做一個抽獎箱」 keeps its 1 because
+      // there is nothing else it could mean.
+      const qtyAll = [...t.matchAll(new RegExp(`${NUM}\\s*(?:張|份|個|面|塊)`, "g"))];
+      const madeOne = (mm: RegExpMatchArray): boolean =>
+        Number(mm[1]) === 1
+        && /(?:做|製作|建立|新增|設計|來|生成|弄)\s*$/.test(t.slice(0, mm.index ?? 0));
+      const qtyPool = qtyAll.length > 1 ? qtyAll.filter((mm) => !madeOne(mm)) : qtyAll;
+      const qty = qtyPool[0] ?? qtyAll[0];
       if (qty) value.quantity = Math.max(1, Math.round(Number(qty[1])));
       if (/雙面/.test(t)) value.sides = 2;
       const quoted = t.match(/[「"']([^」"']{1,40})[」"']/);
@@ -495,6 +536,7 @@ export type PlanIntentType =
   | "compare"
   | "create-asset"
   | "create-prop"
+  | "attach-artwork"
   | "export-deliverables"
   | "inspect"
   | "unknown";
@@ -581,6 +623,15 @@ export const INTENT_RULES: IntentRule[] = [
     ],
     slotBonus: [{ name: "dimensions", has: (s) => !!s.dimensions, weight: 2 }],
     threshold: 4,
+  },
+  {
+    type: "attach-artwork",
+    groups: [
+      { name: "action", re: /貼(?:到|上|在)|放(?:到|上)|換(?:成|上)|套(?:用|到)/, weight: 3 },
+      { name: "subject", re: /圖片|照片|圖檔|主視覺|那張圖|這張圖|圖稿|美編/, weight: 3 },
+    ],
+    slotBonus: [{ name: "artworkTarget", has: (s) => !!s.artworkTarget, weight: 2 }],
+    threshold: 6,
   },
   {
     type: "create-prop",
@@ -707,6 +758,9 @@ export function describeParse(parsed: ParsedRequest): string[] {
   if (s.requiredZones.length) lines.push(`區域：${s.requiredZones.map((z) => z.value).join("、")}`);
   if (s.objectives.length) lines.push(`目標：${s.objectives.map((o) => o.value).join("、")}`);
   if (s.schemeCount) lines.push(`方案數：${s.schemeCount.value}`);
+  if (s.artworkTarget) {
+    lines.push(`貼圖到：${s.artworkTarget.value.kind}（讀自「${s.artworkTarget.evidence}」）`);
+  }
   if (s.propRequest) {
     const v = s.propRequest.value;
     lines.push(
