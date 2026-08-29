@@ -29,7 +29,15 @@ import { createDefaultScenario, resolveScenarioBindings } from "./migrate";
 import { buildCheckinPaymentVariants, runDiscreteEvent, type SimulationResult } from "./eventFlow";
 import { areaBounds, nearestWallSnap, rectsOverlap, type Bounds, type Rect } from "./placement";
 import { generateLayouts, type GroupSpec } from "./smartLayout";
+import {
+  buildBoothExperience,
+  buildBoothFrontOpen,
+  buildBoothSideEntry,
+  type BoothFrame,
+  type BoothParts,
+} from "./boothLayout";
 import { issueCounts, validateProject, type Issue } from "./validation";
+import { knowledgeValue } from "./spatialKnowledge";
 import {
   DEFAULT_VALIDATION_SETTINGS,
   uid,
@@ -37,6 +45,7 @@ import {
   type ArrayGroup,
   type ObjectKind,
   type Project,
+  type ProjectCatalogExtra,
   type Route,
   type SceneObject,
   type ServiceStation,
@@ -59,7 +68,9 @@ export type LayoutObjective =
   | "reduce-crowding"
   | "increase-interaction"
   | "easy-to-staff"
-  | "maximise-capacity";
+  | "maximise-capacity"
+  /** 「不能阻擋主要通道」 — a stall's queue must stay inside its own module. */
+  | "keep-aisle-clear";
 
 /**
  * A piece of furniture the organiser said they need, over and above the seats.
@@ -141,6 +152,8 @@ export interface LayoutScheme {
   score: SchemeScore;
   /** Knowledge-base entry ids the rationale draws on. */
   knowledgeRefs: string[];
+  /** Catalog entries the scheme needs the project to have. */
+  catalogExtras?: ProjectCatalogExtra[];
   /**
    * Whether this scheme satisfies the brief's HARD requirements.
    *
@@ -166,6 +179,8 @@ export interface PlannerResult {
 }
 
 export interface NormalizedBrief extends LayoutBrief {
+  /** The plan the brief was normalised against; booth framing needs it. */
+  project: Project;
   usable: Bounds;
   entrance: { x: number; z: number; source: "door" | "corridor-midpoint" };
   exits: { x: number; z: number }[];
@@ -252,6 +267,7 @@ function normalizeBrief(project: Project, input: Partial<LayoutBrief>): Normaliz
 
   return {
     ...brief,
+    project,
     participants: Math.max(1, Math.floor(brief.participants)),
     staffCount: Math.max(0, Math.floor(brief.staffCount)),
     usable,
@@ -525,6 +541,20 @@ interface SchemeParts {
    * "split" = two desks, two queues, staff divided between them.
    */
   serviceModel: "combined" | "split";
+  /**
+   * False when the layout's queue forms outside its own footprint — a stall
+   * whose desk spans the frontage has nowhere else to put the line.
+   */
+  queueContained?: boolean;
+  /**
+   * Catalog entries this scheme needs that the project may not have yet.
+   *
+   * A booth plan uses the tent / booth table / display board from
+   * `boothCatalog.ts`; a classroom project has never seen them. Declaring them
+   * here lets a scheme carry its own furniture without every project shipping
+   * the whole catalogue.
+   */
+  catalogExtras?: ProjectCatalogExtra[];
 }
 
 type SchemeBuilder = (b: NormalizedBrief) => SchemeParts;
@@ -815,11 +845,70 @@ const buildCirculation: SchemeBuilder = (b) => {
   };
 };
 
-const BUILDERS: { id: string; name: string; build: SchemeBuilder }[] = [
+const ROOM_BUILDERS: { id: string; name: string; build: SchemeBuilder }[] = [
   { id: "scheme-a", name: "A 集中服務", build: buildCombined },
   { id: "scheme-b", name: "B 報到收費分流", build: buildSplit },
   { id: "scheme-c", name: "C 走道優先", build: buildCirculation },
 ];
+
+/**
+ * Where the stall sits inside the plan.
+ *
+ * A booth is not a room you walk into: it is a module beside an aisle. The
+ * frame is taken from the plan's own area, capped at the 3 m module the
+ * research found, and the frontage is the side the corridor is on — that is
+ * the edge people walk past.
+ */
+function boothFrame(b: NormalizedBrief, project: Project): BoothFrame {
+  const u = b.usable;
+  const width = Math.min(3, Math.max(1.5, u.maxX - u.minX));
+  const depth = Math.min(3, Math.max(1.5, u.maxZ - u.minZ));
+  const midZ = (u.minZ + u.maxZ) / 2;
+  const corridorZ = project.corridor.z + project.corridor.width / 2;
+  return {
+    cx: (u.minX + u.maxX) / 2,
+    cz: midZ,
+    width,
+    depth,
+    frontage: corridorZ >= midZ ? "south" : "north",
+  };
+}
+
+/** Wrap a booth layout in the SchemeParts shape the measuring pipeline expects. */
+function boothScheme(
+  build: (frame: BoothFrame) => BoothParts,
+  serviceModel: "combined" | "split",
+): SchemeBuilder {
+  return (b) => {
+    const parts = build(boothFrame(b, b.project));
+    return {
+      objects: parts.objects,
+      zones: parts.zones,
+      routes: parts.routes,
+      // A stall seats nobody: the visitors stand, and the two stools are staff
+      // furniture, not a seating plan. Producing a mat field here would be a
+      // layout for a different kind of event entirely.
+      groups: [],
+      rationale: parts.rationale,
+      risks: parts.risks,
+      knowledgeRefs: parts.knowledgeRefs,
+      serviceBand: 1.2,
+      serviceModel,
+      queueContained: parts.queueContained,
+      catalogExtras: parts.catalogExtras,
+    };
+  };
+}
+
+const BOOTH_BUILDERS: { id: string; name: string; build: SchemeBuilder }[] = [
+  { id: "scheme-a", name: "A 正面開放", build: boothScheme(buildBoothFrontOpen, "combined") },
+  { id: "scheme-b", name: "B 側面入口", build: boothScheme(buildBoothSideEntry, "combined") },
+  { id: "scheme-c", name: "C 體驗優先", build: boothScheme(buildBoothExperience, "combined") },
+];
+
+function buildersFor(b: NormalizedBrief): { id: string; name: string; build: SchemeBuilder }[] {
+  return b.eventType === "booth" ? BOOTH_BUILDERS : ROOM_BUILDERS;
+}
 
 /* ------------------------------------------------------------------ */
 /* Measuring a scheme                                                  */
@@ -841,7 +930,35 @@ export function projectWithScheme(base: Project, parts: SchemeParts): Project {
   next.groups = [...next.groups.filter((g) => g.locked), ...parts.groups];
   next.zones = [...next.zones.filter((z) => z.locked), ...parts.zones];
   next.routes = [...next.routes.filter((r) => !r.visible), ...parts.routes];
+  // A booth scheme brings its own furniture. Without merging the catalogue the
+  // objects reference asset ids the project has never heard of, and every
+  // lookup silently falls back to a grey box of the wrong size.
+  if (parts.catalogExtras?.length) {
+    const have = new Set((next.catalogExtras ?? []).map((e) => e.id));
+    next.catalogExtras = [
+      ...(next.catalogExtras ?? []),
+      ...parts.catalogExtras.filter((e) => !have.has(e.id)),
+    ];
+  }
   return next;
+}
+
+/** Zones a visitor may actually stand in, for a stall's standing capacity. */
+const STANDING_ZONE_NAMES = ["訪客站立區", "互動體驗區", "排隊區", "入口"];
+
+/**
+ * How many people a stall holds at once.
+ *
+ * Uses the sourced standing figure (`event-area-per-person`, 0.65 m²/person)
+ * over the zones visitors can occupy — the same number `calculateCapacity`
+ * reports for a standing reception, so the two tools cannot disagree.
+ */
+function standingCapacity(zones: Zone[]): number {
+  const perPerson = knowledgeValue("calculateCapacity:standing")?.value ?? 0.65;
+  const area = zones
+    .filter((z) => STANDING_ZONE_NAMES.some((n) => z.name.includes(n)))
+    .reduce((sum, z) => sum + z.width * z.depth, 0);
+  return Math.floor(area / perPerson);
 }
 
 function seatCountOf(groups: ArrayGroup[]): number {
@@ -945,14 +1062,25 @@ const BASE_WEIGHTS: SchemeScoreBreakdown = {
   staffing: 0.10,
 };
 
-function weightsFor(objectives: LayoutObjective[]): SchemeScoreBreakdown {
+function weightsFor(objectives: LayoutObjective[], eventType: EventType): SchemeScoreBreakdown {
   const w = { ...BASE_WEIGHTS };
+  // A stall's simultaneous standing capacity is not comparable to the number
+  // of people who will visit it over an afternoon — scoring 6-against-40 is a
+  // category error that dragged every booth scheme down for a reason unrelated
+  // to how good it is. What decides a stall is throughput and circulation, and
+  // the simulation already measures both.
+  if (eventType === "booth") {
+    w.waiting += w.capacity * 0.6;
+    w.circulation += w.capacity * 0.4;
+    w.capacity = 0;
+  }
   for (const o of objectives) {
     switch (o) {
       case "reduce-crowding": w.waiting += 0.15; w.circulation += 0.10; break;
       case "separate-checkin-payment": w.waiting += 0.15; break;
       case "clear-doors": w.validation += 0.15; break;
       case "increase-interaction": w.circulation += 0.15; w.capacity -= 0.05; break;
+      case "keep-aisle-clear": w.circulation += 0.15; w.validation += 0.05; break;
       case "easy-to-staff": w.staffing += 0.20; break;
       case "maximise-capacity": w.capacity += 0.20; break;
     }
@@ -975,8 +1103,10 @@ function scoreScheme(
   deskCount: number,
   aisle: number,
 ): SchemeScore {
-  const weights = weightsFor(b.objectives);
-  const capacityScore = Math.min(1, capacity / Math.max(1, b.participants));
+  const weights = weightsFor(b.objectives, b.eventType);
+  const capacityScore = b.eventType === "booth"
+    ? 0 // weight is zero for a stall; the value is reported, not scored
+    : Math.min(1, capacity / Math.max(1, b.participants));
   // 5 minutes of average wait is the point at which a check-in line stops
   // feeling like a queue and starts feeling like a problem.
   const waitingScore = sim ? Math.max(0, 1 - sim.avgWaitSeconds / 300) : 0.5;
@@ -1029,11 +1159,14 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
     if (b.objectives.includes("separate-checkin-payment") && parts.serviceModel === "combined") {
       return { eligible: false, reason: "你指定要報到與收費分流，這個方案是共用一張桌子。" };
     }
+    if (b.objectives.includes("keep-aisle-clear") && parts.queueContained === false) {
+      return { eligible: false, reason: "你指定不能阻擋主要通道，但這個方案的排隊區會排到通道上。" };
+    }
     return { eligible: true };
   };
 
   const schemes: LayoutScheme[] = [];
-  for (const { id: schemeId, name, build } of BUILDERS) {
+  for (const { id: schemeId, name, build } of buildersFor(b)) {
     const parts = build(b);
     // The brief's extra furniture goes in AFTER the scheme has claimed its own
     // space, so a requested table lands in a gap rather than on the seats.
@@ -1046,16 +1179,23 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
     const { sim, stations, note } = simulate(candidate, b.participants, b.staffCount, parts.serviceModel);
     if (note) parts.risks.push(note);
 
-    const capacity = seatCountOf(parts.groups) > 0
-      ? (parts.zones.find((z) => z.capacity != null)?.capacity ?? seatCountOf(parts.groups))
-      : 0;
+    // A stall seats nobody. Reporting 「可坐 0 人」 is not just cosmetic: it
+    // zeroes the capacity term and makes every booth scheme score ~60 for a
+    // reason that has nothing to do with how good the layout is. What a stall
+    // holds is people STANDING, so it is measured from the visitor floor area
+    // using the same sourced standing figure `calculateCapacity` uses.
+    const capacity = b.eventType === "booth"
+      ? standingCapacity(parts.zones)
+      : seatCountOf(parts.groups) > 0
+        ? (parts.zones.find((z) => z.capacity != null)?.capacity ?? seatCountOf(parts.groups))
+        : 0;
     const aisle = schemeId === "scheme-c" ? Math.max(b.minAisleWidth, 1.2) : b.minAisleWidth;
     const deskCount = parts.objects.filter((o) => o.serviceRole === "checkin" || o.serviceRole === "payment").length;
 
     const eligibility = eligibilityOf(parts);
     const risks = [...parts.risks];
     if (!eligibility.eligible && eligibility.reason) risks.push(eligibility.reason);
-    if (capacity < b.participants) {
+    if (capacity < b.participants && b.eventType !== "booth") {
       risks.push(`估算只能坐 ${capacity} 人，少於 ${b.participants} 人。`);
     }
     if (counts.error > 0) {
@@ -1077,6 +1217,7 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
       validation: { errors: counts.error, warnings: counts.warning, issues },
       score: scoreScheme(b, capacity, sim, counts, deskCount, aisle),
       knowledgeRefs: parts.knowledgeRefs,
+      ...(parts.catalogExtras?.length ? { catalogExtras: parts.catalogExtras } : {}),
       ...eligibility,
       ...(eligibility.reason ? { ineligibleReason: eligibility.reason } : {}),
     });
@@ -1093,7 +1234,9 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
   const recommendation = best
     ? `推薦「${best.name}」（${best.score.total} 分）：` +
       [
-        `可坐 ${best.estimatedCapacity} 人`,
+        b.eventType === "booth"
+          ? `可同時容納 ${best.estimatedCapacity} 人`
+          : `可坐 ${best.estimatedCapacity} 人`,
         best.simulation ? `平均等待 ${Math.round(best.simulation.avgWaitSeconds)} 秒` : "未能模擬",
         `檢查 ${best.validation.errors} 錯誤 / ${best.validation.warnings} 警告`,
       ].join("、")
@@ -1134,6 +1277,13 @@ export function buildScheme(project: Project, schemeId: string, input: Partial<L
       draft.groups = [...draft.groups.filter((g) => g.locked), ...structuredClone(scheme.groups)];
       draft.zones = [...draft.zones.filter((z) => z.locked), ...structuredClone(scheme.zones)];
       draft.routes = [...draft.routes.filter((r) => !r.visible), ...structuredClone(scheme.routes)];
+      if (scheme.catalogExtras?.length) {
+        const have = new Set((draft.catalogExtras ?? []).map((e) => e.id));
+        draft.catalogExtras = [
+          ...(draft.catalogExtras ?? []),
+          ...structuredClone(scheme.catalogExtras).filter((e) => !have.has(e.id)),
+        ];
+      }
     },
   };
 }

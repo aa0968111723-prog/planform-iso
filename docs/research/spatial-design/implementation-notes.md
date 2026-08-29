@@ -159,8 +159,25 @@ zafu 直徑 36 公分、zabuton 76×71×8 公分（有製造商頁）；
 **研究結論**：攤位普遍以 3×3 公尺為模組；
 攤位入口與排隊區不應溢出到主通道。
 
-**變成什麼**：`booth-module-3x3`、`booth-entry-clear` 兩條知識條目，
-以及 `EVENT_TYPE_CUES` 裡 `攤位|擺攤|園遊會|市集|展攤` → `eventType: "booth"`。
+**變成什麼**：`src/core/boothLayout.ts` 的三種攤位策略，用 `boothCatalog.ts`
+的真實家具（帳篷、攤位桌、塑膠凳、展示板、立旗）：
+
+| 方案 | 做法 | `booth-entry-clear` 的代價 |
+|---|---|---|
+| A 正面開放 | 桌子橫在正面 | **排隊區在主通道上**（`queueContained: false`） |
+| B 側面入口 | 桌子轉 90 度靠邊，正面留一半當入口 | 排隊區收在攤位內 |
+| C 體驗優先 | 桌子退到最後，正面中間留給體驗 | 排隊區收在攤位內 |
+
+`booth-entry-clear` 直接變成 `keep-aisle-clear` 這個硬性限制：
+使用者說「不能阻擋主要通道」時，方案 A `eligible: false` 並寫出理由，
+但仍列在比較表裡讓使用者自己判斷。
+
+`booth-module-3x3` 變成 `boothFrame()` 的 3 公尺上限，以及
+`EVENT_TYPE_CUES` 裡 `攤位|擺攤|園遊會|市集|展攤` → `eventType: "booth"`。
+
+攤位的容量改用 `event-area-per-person` 的**站立**係數（0.65 m²/人）算訪客區面積，
+不是座位數——攤位沒有座位。而且 capacity 的權重歸零：同時站 6 人 vs
+一個下午來 40 人是類別錯誤。
 
 **沒有變成程式的**：改變場地尺寸。
 「把這個 3×3 公尺攤位改成…」會被解析成 `venueSize` slot，
