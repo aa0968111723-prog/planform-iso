@@ -30,10 +30,55 @@ const KNOWLEDGE_JSON = JSON.parse(readFileSync("docs/research/spatial-design/kno
 };
 
 describe("sources.json", () => {
-  it("covers all fifteen research topics", () => {
-    expect(SOURCES.topicCount).toBe(15);
-    expect(SOURCES.topics.length).toBe(15);
-    expect(new Set(SOURCES.topics.map((t) => t.id)).size).toBe(15);
+  it("covers every research topic, including the regulation follow-up", () => {
+    // 15 from the first pass plus 4 targeted follow-ups that went back for the
+    // primary regulation articles the first pass could not retrieve.
+    expect(SOURCES.topicCount).toBe(19);
+    expect(SOURCES.topics.length).toBe(19);
+    expect(new Set(SOURCES.topics.map((t) => t.id)).size).toBe(19);
+  });
+
+  it("the regulation follow-up reached primary government sources where they exist", () => {
+    const byId = new Map(SOURCES.topics.map((t) => [t.id, t]));
+    for (const id of [
+      "16-tw-accessibility-turning-space",
+      "17-tw-corridor-width-article",
+      "18-ada-turning-and-route",
+    ]) {
+      const t = byId.get(id);
+      expect(t, `${id} 不在研究紀錄裡`).toBeTruthy();
+      expect(
+        t!.sources.some((x) => x.sourceType === "government" || x.sourceType === "official-standard"),
+        `${id} 沒有引用到政府或標準來源`,
+      ).toBe(true);
+    }
+  });
+
+  it("records that NFPA 101 could NOT be reached first-hand", () => {
+    // Its text is paywalled. Two passes failed to read it, so the entry that
+    // cites it must not be graded as if a primary source had been checked —
+    // that is the difference between a citation and decoration.
+    const nfpa = SOURCES.topics.find((t) => t.id === "19-nfpa-101-egress-width")!;
+    expect(nfpa.sources.every((x) => x.sourceType === "secondary")).toBe(true);
+
+    const entry = KNOWLEDGE_BASE.find((e) => e.id === "egress-not-a-single-number")!;
+    expect(entry.confidence).not.toBe("high");
+    expect(entry.limitations.join(" ")).toContain("未能讀到原文");
+  });
+
+  it("the entries the follow-up did verify are graded high", () => {
+    for (const id of [
+      "accessibility-corridor-width",
+      "accessibility-outdoor-path-width",
+      "accessibility-turning-space",
+      "accessibility-ada-route",
+    ]) {
+      const e = KNOWLEDGE_BASE.find((x) => x.id === id);
+      expect(e, `${id} 不存在`).toBeTruthy();
+      expect(e!.confidence, `${id} 已取得條文原文，應為 high`).toBe("high");
+      // Still a design reminder, never a compliance verdict.
+      expect(e!.requiresHumanReview, id).toBe(true);
+    }
   });
 
   it("records no failed topic silently", () => {

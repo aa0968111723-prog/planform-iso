@@ -10,7 +10,7 @@
     "保證合規",
     "完全合法"
   ],
-  "entryCount": 25,
+  "entryCount": 27,
   "entries": [
     {
       "id": "venue-tku-space-rental",
@@ -261,28 +261,28 @@
     },
     {
       "id": "accessibility-corridor-width",
-      "title": "無障礙通路走廊淨寬（台灣）",
+      "title": "無障礙通路走廊淨寬（台灣，室內 204.2.2）",
       "category": "accessibility",
-      "summary": "《建築物無障礙設施設計規範》要求通路走廊寬度不得小於 120 公分，且走廊中有門時，扣除門扇開啟空間後淨寬仍不得小於 120 公分。另有通路淨寬不得小於 130 公分的條文，獨棟或連棟建築物得為 90 公分以上。",
+      "summary": "《建築物無障礙設施設計規範》第 204.2.2 條規定**室內**通路走廊寬度不得小於 120 公分，且走廊中有開門時，扣除門扇開啟空間後仍不得小於 120 公分。這是本工具比對走道寬度時採用的依據。",
       "rules": [
         {
-          "statement": "無障礙通路走廊淨寬下限",
+          "statement": "室內無障礙通路走廊淨寬下限（204.2.2）",
           "value": 1.2,
           "unit": "m",
           "appliesTo": "checkAccessibilityWarnings"
         },
         {
-          "statement": "門扇開啟後仍須維持的淨寬",
+          "statement": "門扇開啟後仍須維持的淨寬（204.2.2）",
           "value": 1.2,
           "unit": "m",
           "appliesTo": "checkDoorClearance"
         }
       ],
       "examples": [
-        "排走道時，把最小走道寬度設成 1.2 公尺，可以先排除明顯過窄的配置。"
+        "排走道時，把最小走道寬度設成 1.2 公尺，可以先排除明顯過窄的室內配置。"
       ],
-      "confidence": "medium",
-      "sourceUrl": "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=D0070115",
+      "confidence": "high",
+      "sourceUrl": "https://www.nlma.gov.tw/filesys/file/chinese/dept/br2/br1011225-2.pdf",
       "sourceType": "government",
       "retrievedAt": "2026-08-29",
       "applicableVenueTypes": [
@@ -292,39 +292,110 @@
         "activity-centre"
       ],
       "limitations": [
+        "這是**室內**通路的條文。室外通路是另一條（203.2.3，見 accessibility-outdoor-path-width），兩者數值不同，不可互相套用。",
         "法規條文有適用條件（建築用途、樓層、新建或既有），本工具不判斷適用性。",
-        "本工具只比對模型上的數字，不代表現場完成面尺寸符合規範。",
-        "條次與數值需以主管機關最新公告 PDF 原文核對。"
+        "本工具只比對模型上的數字，不代表現場完成面尺寸符合規範。"
+      ],
+      "requiresHumanReview": true
+    },
+    {
+      "id": "accessibility-outdoor-path-width",
+      "title": "無障礙室外通路淨寬（台灣，203.2.3）",
+      "category": "accessibility",
+      "summary": "第 203.2.3 條規定**室外**通路淨寬不得小於 130 公分；但第 202.4 所列的獨棟或連棟建築物，其通路淨寬得為 90 公分以上。130 與 120 是不同條文、不同適用情形，常被混為一談。",
+      "rules": [
+        {
+          "statement": "室外無障礙通路淨寬下限（203.2.3）",
+          "value": 1.3,
+          "unit": "m"
+        },
+        {
+          "statement": "獨棟或連棟建築物的例外下限（202.4）",
+          "value": 0.9,
+          "unit": "m"
+        }
+      ],
+      "examples": [
+        "戶外擺攤的通路要用 130 公分估算，不是室內的 120 公分。"
+      ],
+      "confidence": "high",
+      "sourceUrl": "https://www.nlma.gov.tw/uploads/files/a5fc1f6258d7a0d88ce06afde8c68128.pdf",
+      "sourceType": "government",
+      "retrievedAt": "2026-08-29",
+      "applicableVenueTypes": [
+        "outdoor-booth",
+        "corridor"
+      ],
+      "limitations": [
+        "例外條件由 202.4 界定，本工具不判斷某個建築物屬不屬於該類。",
+        "本工具只比對模型上的數字，不代表現場完成面尺寸符合規範。"
       ],
       "requiresHumanReview": true
     },
     {
       "id": "accessibility-turning-space",
-      "title": "輪椅迴轉空間",
+      "title": "輪椅迴轉空間（台灣 A102.2.6）",
       "category": "accessibility",
-      "summary": "台灣無障礙規範通常以直徑 150 公分的迴轉空間作為輪椅轉向的基本判斷；ADA Standards 則要求 60 英吋（約 1525 公釐）直徑的迴轉空間。兩套法規體系需分別判讀，不可互相取代。",
+      "summary": "《建築物無障礙設施設計規範》A102.2.6 規定，輪椅使用者作 360 度迴轉所需空間的直徑為 150 公分。**受限制時亦可改用 T 型空間迴轉**，該空間須平整、堅固且坡度在 1/50 以下。另 404.1 就昇降機出入口另訂不得小於直徑 1.5 公尺的淨空間。",
       "rules": [
         {
-          "statement": "輪椅迴轉空間直徑（台灣慣用判斷值）",
+          "statement": "輪椅 360 度迴轉空間直徑（A102.2.6）",
           "value": 1.5,
           "unit": "m",
           "appliesTo": "checkAccessibilityWarnings"
+        },
+        {
+          "statement": "空間受限時可改用 T 型迴轉空間，不是只有圓形一種解法。"
         }
       ],
       "examples": [
-        "報到桌前若要能讓輪椅轉向，桌前應保留至少直徑 1.5 公尺的淨空。"
+        "報到桌前若要能讓輪椅轉向，桌前應保留直徑 1.5 公尺的淨空。",
+        "空間不足時，T 型迴轉是規範明列的替代方案——工具報「沒有 150 公分圓」不等於不合規。"
       ],
-      "confidence": "low",
-      "sourceUrl": "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=D0070115",
+      "confidence": "high",
+      "sourceUrl": "https://www.nlma.gov.tw/filesys/file/chinese/dept/br2/br1011225-2.pdf",
       "sourceType": "government",
       "retrievedAt": "2026-08-29",
       "applicableVenueTypes": [
         "any"
       ],
       "limitations": [
-        "研究過程未取得該條完整條文原文，數值需以官方 PDF 逐條核對後才可引用。",
-        "ADA 的 60 英吋數值同樣需以 ada.gov 官方標準核對。",
+        "本工具只檢查圓形迴轉空間，**不檢查 T 型替代方案**，所以它的警告會比規範嚴格。",
+        "坡度、地面平整度與堅固程度本工具完全不檢查。",
         "本工具不做無障礙認證，也不判斷任何配置是否通過查驗。"
+      ],
+      "requiresHumanReview": true
+    },
+    {
+      "id": "accessibility-ada-route",
+      "title": "ADA 無障礙通路淨寬與迴轉空間（美國）",
+      "category": "accessibility",
+      "summary": "2010 ADA Standards §403.5.1 規定無障礙通路淨寬下限為 36 英吋（915 公釐）；在長度不超過 24 英吋的區段可縮減為 32 英吋，但兩段之間須有至少 48 英吋長、36 英吋寬的區段。§304 另訂迴轉空間。ADA 與台灣規範是兩套獨立體系，不可互相取代。",
+      "rules": [
+        {
+          "statement": "ADA 無障礙通路淨寬下限（403.5.1）",
+          "value": 0.915,
+          "unit": "m"
+        },
+        {
+          "statement": "短區段縮減下限（403.5.1 例外）",
+          "value": 0.815,
+          "unit": "m"
+        }
+      ],
+      "examples": [
+        "跨國活動或引用英文資料時，注意 36 英吋（0.915 m）與台灣的 120 公分不同。"
+      ],
+      "confidence": "high",
+      "sourceUrl": "https://www.ada.gov/assets/pdfs/2010-design-standards.pdf",
+      "sourceType": "official-standard",
+      "retrievedAt": "2026-08-29",
+      "applicableVenueTypes": [
+        "any"
+      ],
+      "limitations": [
+        "ADA 適用於美國，對台灣的活動沒有法律效力，本工具不依它做任何判斷。",
+        "本工具的走道檢查採用台灣的 120 公分，不是 ADA 的 36 英吋。"
       ],
       "requiresHumanReview": true
     },
@@ -332,24 +403,29 @@
       "id": "egress-not-a-single-number",
       "title": "避難寬度不是單一數字",
       "category": "safety-warnings",
-      "summary": "NFPA 101 的避難寬度依容留人數、構件類型與用途計算，不是固定值；台灣的避難層出入口規定也與建築用途、樓梯總寬、門扇開啟方向一併判定。任何把避難寬度化約成單一數字的說法都應被視為不完整。",
+      "summary": "NFPA 101 的避難寬度在第 7 章：7.3.1 先依「每人占用面積」算出容留人數（Table 7.3.1.2），7.3.2／7.3.3 再乘上每人所需寬度的容量係數（Table 7.3.3.1），樓梯與水平構件係數不同。也就是說它是**依人數計算的變數**，不是單一固定寬度。台灣的避難層出入口同樣與建築用途、樓梯總寬、門扇開啟方向一併判定。",
       "rules": [
         {
-          "statement": "避難寬度需依容留人數與用途計算，本工具不做此計算。"
+          "statement": "避難寬度＝所服務人數 × 容量係數，先算人數再算寬度。"
+        },
+        {
+          "statement": "本工具不做容留人數計算，也不做避難寬度計算。"
         }
       ],
       "examples": [
         "工具會提醒「門前有物件」，但不會告訴你這扇門的避難寬度是否足夠。"
       ],
       "confidence": "medium",
-      "sourceUrl": "https://www.nfpa.org/codes-and-standards/nfpa-101-standard-development/101",
+      "sourceUrl": "https://www.nfpa.org/codes-and-standards/all-codes-and-standards/list-of-codes-and-standards/detail?code=101",
       "sourceType": "official-standard",
       "retrievedAt": "2026-08-29",
       "applicableVenueTypes": [
         "any"
       ],
       "limitations": [
-        "研究過程未取得 NFPA 101 條文原文，僅確認其為情境式計算。",
+        "NFPA 101 正文受版權保護且需付費取得，研究兩次都未能讀到原文。",
+        "章節編號（7.3.1／7.3.2／Table 7.3.3.1）來自二手技術文獻，非一手核對，引用前請查該版本正文。",
+        "係數依用途、是否設置自動灑水與語音警報而異。",
         "消防與避難規劃必須由合格專業人員依現況判定。"
       ],
       "requiresHumanReview": true

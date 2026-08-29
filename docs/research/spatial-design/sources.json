@@ -2,7 +2,7 @@
   "generatedBy": "scripts/research/emit-docs.mjs",
   "tool": "Perplexity API (sonar-pro) via scripts/research/pplx.mjs",
   "note": "These are the pages the research pass consulted. A citation here means 'this URL was returned and read', NOT 'this claim is verified'. Verified conclusions live in knowledge.json with their own confidence field.",
-  "topicCount": 15,
+  "topicCount": 19,
   "topics": [
     {
       "id": "01-ai-3d-editor-architecture",
@@ -2011,6 +2011,394 @@
           "title": "vitest/LICENSE at main · hi-ogawa/vitest",
           "date": "2023-10-30",
           "sourceType": "official-docs"
+        }
+      ]
+    },
+    {
+      "id": "16-tw-accessibility-turning-space",
+      "topic": "台灣無障礙規範迴轉空間條文原文",
+      "question": "請找出中華民國《建築物無障礙設施設計規範》中，關於「輪椅迴轉空間」的**條文編號與原文文字**。這一條通常規定迴轉空間的直徑或尺寸。請直接引用條文原文（例如「第 XXX 條 … 迴轉空間直徑不得小於 150 公分」），並提供 law.moj.gov.tw、內政部營建署 (cpami.gov.tw)、國土管理署 (nlma.gov.tw) 或政府公報 (gazette.nat.gov.tw) 的官方網址。如果找不到條文原文，請明確說「找不到條文原文」，不要用二手整理代替。",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-29T01:54:15.197Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://www.freeway.gov.tw/Upload/201604/%E5%BB%BA%E7%AF%89%E7%89%A9%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E6%96%BD%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84.pdf",
+          "title": "建築物無障礙設施設計規範",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.nlma.gov.tw/filesys/file/chinese/dept/br2/br1011225-2.pdf",
+          "title": "建築物無障礙設施設計規範 修正條文說明",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://ws.moi.gov.tw/001/Upload/OldFile/Act_file/%E8%8D%89%E6%A1%88%E9%A0%90%E5%91%8A%E6%9C%9F%E9%96%93%E4%BA%BA%E6%B0%91%E6%84%8F%E8%A6%8B%E8%99%95%E7%90%86%E8%A1%A8_4.pdf",
+          "title": "建築物無障礙設施設計規範草案預告期間人民意見處理表",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://gazette2.nat.gov.tw/EG_FileManager/eguploadpub/eg024040/ch02/type3/gov10/num3/images/Eg01.pdf",
+          "title": "建築物無障礙設施設計規範於九十七年四月十日訂定，經歷三次修正。相關規定",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://gazette.nat.gov.tw/EG_FileManager/eguploadpub/eg025003/ch02/type2/gov10/num1/images/Eg01.pdf",
+          "title": "建築物無障礙設施設計規範修正規定 - 行政院公報資訊網",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www-ws.gov.taipei/001/Upload/845/relfile/-1/845/d0c47cb1-3dea-4d6e-bdf2-e15df6b02c22.pdf",
+          "title": "建築物無障礙設施設計規範講師",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ctsp.gov.tw/files/3167fbe8-8302-4d42-bd0f-035df89f7535.pdf",
+          "title": "建築物無障礙相關法規說明會",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.ctsp.gov.tw/files/d1f57517-f3e3-4b2d-ac30-8a9f8da90d81.pdf",
+          "title": "建築物無障礙設施設計規範及相關法令",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.publicwork.ntpc.gov.tw/uploaddowndoc?file=news/202007031201060.pdf&filedisplay=109%E5%B9%B4%E7%89%88%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A6%8F%E7%AF%84%E5%85%A8%E6%96%87.pdf&flag=doc",
+          "title": "1",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://gazette.nat.gov.tw/EG_FileManager/eguploadpub/eg014068/ch02/type2/gov10/num1/OEg.pdf",
+          "title": "內政篇 - 行政院公報資訊網",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "http://www.fsci.org.tw/files/common_unit/f99f6ad1-340e-4a86-b4d5-59a1ce500a9a/doc/1060421%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84%E7%B0%A1%E5%A0%B1.pdf",
+          "title": "[PDF] 建築物無障礙設施設計規範條文與解說",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=D0070227",
+          "title": "所有條文",
+          "date": null,
+          "sourceType": "government"
+        }
+      ]
+    },
+    {
+      "id": "17-tw-corridor-width-article",
+      "topic": "台灣無障礙通路走廊淨寬條文原文",
+      "question": "請找出《建築物無障礙設施設計規範》中關於「無障礙通路」與「走廊淨寬」的**條文編號與原文**，特別是 120 公分與 130 公分這兩個數值分別出自哪一條、適用什麼情形。請引用 law.moj.gov.tw、cpami.gov.tw、nlma.gov.tw 或 gazette.nat.gov.tw 的官方網址。查不到就說查不到。",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-29T01:54:22.907Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://arch-people.com/laws/%E5%BB%BA%E7%AF%89%E7%89%A9%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E6%96%BD%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84/",
+          "title": "建築物無障礙設施設計規範",
+          "date": "2020-05-11",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://arkiteki.com/term/%E7%AC%AC%E4%BA%8C%E7%AB%A0%E7%84%A1%E9%9A%9C%E7%A4%99%E9%80%9A%E8%B7%AF",
+          "title": "建築物無障礙設施設計規範｜第二章｜無障礙通路",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.nlma.gov.tw/uploads/files/a5fc1f6258d7a0d88ce06afde8c68128.pdf",
+          "title": "建築物無障礙設施設計規範",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.nlma.gov.tw/filesys/file/chinese/dept/br2/br1011225-2.pdf",
+          "title": "建築物無障礙設施設計規範 修正條文說明",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "http://www.fsci.org.tw/files/common_unit/9544c070-efa0-4870-99ed-83b9d801fa55/doc/1061117%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84%E7%B0%A1%E5%A0%B1%E5%BB%96%E6%85%A7%E7%87%95%E8%80%81%E5%B8%AB.pdf",
+          "title": "[PDF] 建築物無障礙設施設計規範條文與解說",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://gazette2.nat.gov.tw/EG_FileManager/eguploadpub/eg024040/ch02/type3/gov10/num3/images/Eg01.pdf",
+          "title": "建築物無障礙設施設計規範於九十七年四月十日訂定，經歷三次修正。相關規定",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.tyaa.org.tw/download.php?tb=article&&id=2464",
+          "title": "[PDF] 桃園縣「建築物無障礙設施」協審檢討表（適用102",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "http://www.fsci.org.tw/files/common_unit/f99f6ad1-340e-4a86-b4d5-59a1ce500a9a/doc/1060421%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84%E7%B0%A1%E5%A0%B1.pdf",
+          "title": "[PDF] 建築物無障礙設施設計規範條文與解說",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ctsp.gov.tw/files/d1f57517-f3e3-4b2d-ac30-8a9f8da90d81.pdf",
+          "title": "建築物無障礙設施設計規範及相關法令",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.scribd.com/document/825785317/%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E6%96%BD%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84",
+          "title": "建築物無障礙設施設計規範 - Scribd",
+          "date": "2025-11-20",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.scribd.com/document/872034540/%E5%BB%BA%E7%AF%89%E7%89%A9%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E6%96%BD%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84-108%E5%B9%B47%E6%9C%881%E6%97%A5%E7%94%9F%E6%95%88",
+          "title": "建築物無障礙設施設計規範(108年7月1日生效) - Scribd",
+          "date": "2026-02-24",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www-ws.gov.taipei/001/Upload/845/relfile/-1/845/d0c47cb1-3dea-4d6e-bdf2-e15df6b02c22.pdf",
+          "title": "建築物無障礙設施設計規範講師",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.marine.gov.tw/xhr/archive/download?file=6757f35f367376aebfa42981",
+          "title": "[PDF] 建築物無障礙設施設計規範",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.scribd.com/document/942265140/%E5%BB%BA%E7%AF%89%E7%89%A9%E7%84%A1%E9%9A%9C%E7%A4%99%E8%A8%AD%E6%96%BD%E8%A8%AD%E8%A8%88%E8%A6%8F%E7%AF%84",
+          "title": "建築物無障礙設施設計規範| PDF - Scribd",
+          "date": "2026-01-31",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.naa.org.tw/download.php?tb=article&&id=2244",
+          "title": "[PDF] 一、無障礙建築物相關法規",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.nlma.gov.tw/ch/legislation/regsearch/929",
+          "title": "既有公共建築物無障礙設施替代改善計畫作業程序及認定原則",
+          "date": null,
+          "sourceType": "government"
+        }
+      ]
+    },
+    {
+      "id": "18-ada-turning-and-route",
+      "topic": "ADA accessible route 與迴轉空間官方條文",
+      "question": "In the 2010 ADA Standards for Accessible Design, what do sections 403.5 (clear width of accessible routes) and 304 (turning space) actually say? Quote the requirement text and the exact section numbers, and give the official ada.gov URL for the standards. If you cannot retrieve the primary text, say so explicitly rather than paraphrasing a secondary source.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-29T01:54:41.470Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://www.ada.gov/law-and-regs/design-standards/2010-stds/",
+          "title": "2010 ADA Standards for Accessible Design",
+          "date": "2010-09-15",
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.ada.gov/assets/pdfs/2010-design-standards.pdf",
+          "title": "2010 ADA Standards for Accessible Design",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.access-board.gov/ada/guides/chapter-4-accessible-routes/",
+          "title": "Chapter 4: Accessible Routes - Access-Board.gov",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://datadrivenaec.com/tools/ada-accessible-route-width-checker",
+          "title": "ADA Accessible Route Width Checker — §403.5",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.corada.com/documents/2010ADAStandards/403-5-3",
+          "title": "Passing Spaces: ADA Standard Section 403.5.3",
+          "date": "2015-05-05",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://up.codes/s/clear-width-at-turn",
+          "title": "403.5.2 Clear Width at Turn - UpCodes",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.corada.com/documents/2010ADAStandards/403-5-1",
+          "title": "Clear Width: ADA Standard Section 403.5.1",
+          "date": "2015-05-05",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.corada.com/documents/2010ADAStandards/304",
+          "title": "Turning Space: ADA Standard Section 304",
+          "date": "2015-05-05",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.access-board.gov/files/ada/guides/ADA-Standards-Guide_Chapters1-5.pdf",
+          "title": "Guide to the ADA",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://inspectionsada.com/ada-compliance-blog/2020/12/6/turning-space-as-defined-by-the-ada-technical",
+          "title": "Turning Space As Defined by the ADA - Technical",
+          "date": "2020-12-08",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.corada.com/documents/2019CBCPG/11b-403-5-1-clear-width",
+          "title": "11B-403.5.1 Clear width",
+          "date": "2019-01-07",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.ada.gov/assets/pdfs/guidance-2010-standards.pdf",
+          "title": "Guidance on the 2010 ADA Standards for Accessible Design",
+          "date": null,
+          "sourceType": "government"
+        },
+        {
+          "url": "https://www.corada.com/documents/2010ADAStandards/304-3-2",
+          "title": "T-Shaped Space: ADA Standard Section 304.3.2 - Corada",
+          "date": "2015-05-05",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://abadiaccess.com/clear-widths-along-an-accessible-route/",
+          "title": "Clear Widths Along an Accessible Route - Abadi Access",
+          "date": "2020-01-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://up.codes/s/t-shaped-space",
+          "title": "304.3.2 T-Shaped Space",
+          "date": null,
+          "sourceType": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "19-nfpa-101-egress-width",
+      "topic": "NFPA 101 egress width 計算方式",
+      "question": "What does NFPA 101 Life Safety Code say about calculating required egress width — specifically the capacity factors (inches per person) for level components and stairs, and which section they appear in? Give the official nfpa.org URL. NFPA codes are copyrighted; do not reproduce the full table, just identify the section and confirm whether the requirement is occupant-load-based rather than a single fixed width. If the primary text is not retrievable, say so.",
+      "model": "sonar-pro",
+      "retrievedAt": "2026-08-29T01:55:04.411Z",
+      "error": null,
+      "sources": [
+        {
+          "url": "https://www.callout.app/codes/nfpa-101-7-3-2",
+          "title": "NFPA 101 Section 7.3.2: Capacity of Means of Egress",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.callout.app/codes/nfpa-101-7-3-1",
+          "title": "NFPA 101 Section 7.3.1: Capacity of Means of Egress | Callout",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://up.codes/viewer/department-of-defense/nfpa-101-2021/chapter/7/means-of-egress",
+          "title": "Chapter 7 Means of Egress: Means of Egress, Department of Defense Life Safety Code 2021 | UpCodes",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://evacplangenerator.com/articles/nfpa-101-chapter-7-means-of-egress-explained",
+          "title": "NFPA 101 Chapter 7: Means of Egress Explained Section by ...",
+          "date": "2026-05-25",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://up.codes/viewer/centers-for-medicare-and-medicaid-services/nfpa-101-2012/chapter/7/means-of-egress",
+          "title": "Chapter 7 Means of Egress: Means of Egress, Centers for Medicare & Medicaid Services Life Safety Code 2012 | UpCodes",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://up.codes/viewer/florida/nfpa-101-2021/chapter/7/means-of-egress",
+          "title": "Chapter 7 Means of Egress: Means of Egress, Florida Life Safety Code 2021 | UpCodes",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://up.codes/s/means-of-egress-sizing",
+          "title": "Section 1005 Means of Egress Sizing - UpCodes",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://roxana-il.org/wp-content/uploads/2020/06/2000-NFPA-101.pdf",
+          "title": "NFPA 101®",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://engineersuniverse.com/studios/fire-alarm/means-of-egress-calculator",
+          "title": "NFPA 101 Means of Egress Calculator — Occupant Load, Exit ...",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://reuven.tools/tools/occupant-load-egress/",
+          "title": "Occupant Load & Egress Calculator",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://thiendang.net/thidaco/tieu-chuan/nfpa/thong-dung/NFPA%20101-2018%20Handbook.pdf",
+          "title": "Edited by",
+          "date": null,
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.scribd.com/document/668540763/Means-of-Egress-NFPA-101-Life-Safety-Code",
+          "title": "NFPA 101 Means of Egress Requirements | PDF | Door - Scribd",
+          "date": "2026-02-03",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.meltplan.com/buildingcodes/ibc/means-of-egress",
+          "title": "Exits, Travel Distance & Occupant Load — Chapter 10 - IBC - MeltPlan",
+          "date": "2026-08-20",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://manuals.plus/m/64e2593c45684197e7be473c762bb79edc4f8535a847a1bc355c16234206d4e2",
+          "title": "FEMTC Paper Instructions FEMTC Paper Instructions",
+          "date": "2018-01-01",
+          "sourceType": "secondary"
+        },
+        {
+          "url": "https://www.scribd.com/document/686052862/NFPA-101-Essentials-Training-Module-3",
+          "title": "NFPA 101 Essentials Training Module 3",
+          "date": "2025-07-12",
+          "sourceType": "secondary"
         }
       ]
     }

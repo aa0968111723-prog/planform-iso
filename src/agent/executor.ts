@@ -1036,7 +1036,12 @@ export class AgentExecutor {
               code: "turning-space",
               message:
                 `門「${door.id}」內側直徑 ${(turning * 100).toFixed(0)} 公分的迴轉空間裡有 ` +
-                `${intruders.length} 件物件（${intruders.map((o) => o.id).join("、")}）。`,
+                `${intruders.length} 件物件（${intruders.map((o) => o.id).join("、")}）。` +
+                // A102.2.6 permits a T-shaped turning space where a circle does
+                // not fit. This check only tests the circle, so it is stricter
+                // than the regulation — say so rather than letting the user
+                // read a warning as a violation.
+                "規範在空間受限時允許改用 T 型迴轉空間，本工具只檢查圓形，所以這個提醒比規範嚴格。",
               targetId: door.id,
             });
           }
