@@ -102,7 +102,7 @@ const PLACEMENT_TARGETS = [
 
 const OBJECTIVES = [
   "clear-doors", "separate-checkin-payment", "reduce-crowding",
-  "increase-interaction", "easy-to-staff", "maximise-capacity",
+  "increase-interaction", "easy-to-staff", "maximise-capacity", "keep-aisle-clear",
 ] as const;
 
 const EVENT_TYPES = [

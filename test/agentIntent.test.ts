@@ -170,6 +170,13 @@ describe("slot extraction", () => {
     expect(objectives).toContain("reduce-crowding");
   });
 
+  it("reads 「不能阻擋主要通道」 as an objective", () => {
+    // The sentence said it and scheme A's own risk list admits it blocks the
+    // aisle; without parsing it, A stayed eligible and could be recommended.
+    const s2 = slots("把攤位改成適合互動的配置，不能阻擋主要通道");
+    expect(s2.objectives.map((o) => o.value)).toContain("keep-aisle-clear");
+  });
+
   it("keeps each object's relation inside its own clause", () => {
     // Reading relations over the whole sentence assigned both 右側 and 左側 to
     // both desks — the user sees two desks stacked on one side.

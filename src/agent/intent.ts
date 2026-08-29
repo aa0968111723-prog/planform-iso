@@ -223,6 +223,7 @@ export const OBJECTIVE_CUES: { re: RegExp; objective: LayoutObjective }[] = [
   { re: /分流|分開|各自|另外(?:排|設|開)|分\s*\d*\s*(?:條|邊|桌)/, objective: "separate-checkin-payment" },
   { re: /最塞|壅塞|擁擠|人擠人|塞車|降低排隊|減少排隊|不要排太久/, objective: "reduce-crowding" },
   { re: /互動|體驗|停留|吸引|參與感/, objective: "increase-interaction" },
+  { re: /不(?:能|要|可)?阻擋(?:主要)?通道|不擋(?:到)?通道|別擋(?:到)?通道|通道要(?:保持)?暢通|不要擋住走道/, objective: "keep-aisle-clear" },
   { re: /好管理|方便管理|人力少|省人力|容易顧/, objective: "easy-to-staff" },
   { re: /坐更多|多坐|最多人|容納最多|塞更多人/, objective: "maximise-capacity" },
 ];
