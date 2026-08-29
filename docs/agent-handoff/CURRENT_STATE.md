@@ -38,7 +38,7 @@
 | Gate | 結果 |
 |---|---|
 | lint / typecheck / build | PASS |
-| `npm run test` | 962 tests / 77 files PASS |
+| `npm run test` | 982 tests / 78 files PASS |
 | `npm run test:e2e` | 137 tests PASS（12.1 分鐘） |
 | 既有 723 個測試 | 零回歸，未修改任何既有 fixture |
 
@@ -54,6 +54,15 @@
 4. **回頭追法規原文**（研究題目 16–19）。三條升到 high，
    修正了一個已出貨的錯誤（120 與 130 公分是不同條文），
    NFPA 刻意維持 medium 因為原文付費讀不到。
+5. **攤位排版**（`src/core/boothLayout.ts`）。三種策略用真實攤位家具；
+   容量改用站立係數且 capacity 權重歸零（同時站 6 人 vs 一下午來 40 人
+   是類別錯誤）；「不能阻擋主要通道」成為硬性限制。
+
+### 接手時最容易誤解的一點（補充）
+
+**攤位不是小房間。** `buildersFor(b)` 依 `eventType` 分流到兩組完全不同的
+builder。改室內邏輯不會影響攤位，反之亦然。攤位方案沒有 groups（座位陣列）
+是刻意的，不是漏掉。
 
 
 ## 最新一輪：通用互動流程系統（PR #19，未 merge）
