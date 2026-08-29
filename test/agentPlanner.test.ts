@@ -178,6 +178,21 @@ describe("making the stall's own props and collateral", () => {
     expect(prop.print).toBeUndefined();
   });
 
+  it("calls a poster a 文宣, not an 互動道具", async () => {
+    // The change note's noun was hard-coded, so an A2 poster was announced as
+    // an interactive prop — the one word a volunteer reads to decide whether
+    // this is the thing they asked for.
+    const { r } = await run("幫我做一張 A2 海報");
+    const notes = r.summary.notes.join(" ");
+    expect(notes).toContain("新增文宣");
+    expect(notes).not.toContain("互動道具");
+  });
+
+  it("calls a raffle box an 擺攤小物", async () => {
+    const { r } = await run("做一個抽獎箱");
+    expect(r.summary.notes.join(" ")).toContain("新增擺攤小物");
+  });
+
   it("still lands in the preview gate, not the committed plan", async () => {
     const { store } = await run("幫我做一張 A2 海報");
     expect(store.getState().props ?? []).toEqual([]);
