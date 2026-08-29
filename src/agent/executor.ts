@@ -23,7 +23,7 @@
 import { eventFlowAdapter } from "../adapters/eventFlow";
 import { ALL_KINDS, assetDef } from "../core/assets";
 import { createCustomAssetProxy } from "../assets/proxy";
-import { describeRecipe, propFromRecipe } from "../core/propRecipe";
+import { describeRecipe, propFromRecipe, type PropRecipe } from "../core/propRecipe";
 import { syncPropEntries } from "../core/propCatalog";
 import {
   MockReconstructionWorker,
@@ -33,7 +33,7 @@ import {
 import type { AssetCatalogEntry, SemanticAssetType, ServiceRole } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
 import { buildSummaryLines } from "../core/summary";
-import { inventoryLines } from "../export/constructionPlan";
+import { inventoryLines, printOrderLines } from "../export/constructionPlan";
 import { groupMembers } from "../core/arrays";
 import { measure, objectGap } from "../core/measure";
 import { areaBounds, doorSweep, footprintBounds, pointInDoorSweep, pointToRectDist, wallClearances, type Rect } from "../core/placement";
@@ -278,6 +278,11 @@ export class AgentExecutor {
               : {}),
             ...(faces?.length ? { faces } : {}),
             ...(args.interactive === false ? { interactive: false } : {}),
+            ...(args.text !== undefined ? { text: str(args.text) } : {}),
+            ...(args.imageBlobId !== undefined ? { imageBlobId: str(args.imageBlobId) } : {}),
+            ...(Array.isArray(args.print) && args.print.length
+              ? { print: (args.print as Args[])[0] as PropRecipe["print"] }
+              : {}),
           },
           uid("prop"),
         );
@@ -1299,10 +1304,21 @@ export class AgentExecutor {
       case "exportMaterialList": {
         // Pure data: this one works headless, so it does not need a host.
         const lines = inventoryLines(draft);
+        // Anything printed gets its own list, because it is a different errand
+        // on a different deadline: the 物資 you carry from the club room, and
+        // the 文宣 somebody has to send to a printer days earlier.
+        const print = printOrderLines(draft);
         return ok({
           lines,
           totalItems: lines.reduce((n, l) => n + l.count, 0),
-          explanation: explainWithSources("物資清單由目前場佈的物件與陣列統計。", ["visual-plan-legibility"]),
+          printOrders: print,
+          totalPrints: print.reduce((n, l) => n + l.quantity, 0),
+          explanation: explainWithSources(
+            print.length
+              ? "物資清單由目前場佈的物件與陣列統計；印刷品另外列出可直接送印的規格。"
+              : "物資清單由目前場佈的物件與陣列統計。",
+            ["visual-plan-legibility"],
+          ),
         });
       }
 

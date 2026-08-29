@@ -148,6 +148,28 @@ const POINT_SHAPE: Record<string, ToolParamSpec> = {
   z: meters("Z 座標（公尺）", true),
 };
 
+const PRINT_STANDARD_IDS = [
+  "A6", "A5", "A4", "A3", "A2", "A1", "B2",
+  "x-banner", "roll-up", "table-runner", "hanging-banner",
+  "backdrop-24", "backdrop-30", "standee-a1",
+] as const;
+
+const PRINT_MATERIALS = [
+  "coated-paper", "matte-paper", "sticker", "pp-synthetic", "canvas",
+  "foam-board", "acrylic", "fabric", "corrugated",
+] as const;
+
+const PRINT_SHAPE: Record<string, ToolParamSpec> = {
+  standard: { type: "enum", description: "印刷標準尺寸", values: PRINT_STANDARD_IDS },
+  widthMm: { type: "number", description: "自訂寬（公釐）", min: 10, max: 5000 },
+  heightMm: { type: "number", description: "自訂高（公釐）", min: 10, max: 5000 },
+  orientation: { type: "enum", description: "直式或橫式", values: ["portrait", "landscape"] as const },
+  sides: { type: "number", description: "單面 1 或雙面 2", min: 1, max: 2, integer: true },
+  material: { type: "enum", description: "材質", values: PRINT_MATERIALS },
+  quantity: { type: "number", description: "印製份數", min: 1, max: 10000, integer: true },
+  finishNote: { type: "string", description: "加工需求，例如上光、打孔", maxLength: 60 },
+};
+
 const FACE_SHAPE: Record<string, ToolParamSpec> = {
   label: { type: "string", description: "面上的文字", required: true, maxLength: 60 },
   color: { type: "string", description: "十六進位顏色", maxLength: 9 },
@@ -219,6 +241,12 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
       height: positiveMeters("高（公尺）"),
       interactive: { type: "boolean", description: "是否可互動" },
       faces: { type: "object[]", description: "面／格／卡片", maxItems: 12, itemShape: FACE_SHAPE },
+      text: { type: "string", description: "印在主要面上的文字", maxLength: 120 },
+      imageBlobId: id("已匯入的圖片 blob id，畫在主要面上", false),
+      print: {
+        type: "object[]", description: "印刷規格（只取第一筆）",
+        maxItems: 1, itemShape: PRINT_SHAPE,
+      },
     },
   },
   {

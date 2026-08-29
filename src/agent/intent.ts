@@ -178,6 +178,14 @@ export interface ExtractedSlots {
   audience?: Slot<string>;
   /** Furniture asked for by name and count: 「三張長桌」「兩個架子」. */
   requiredAssets: Slot<{ assetId: string; count: number; zone?: ZoneType }>[];
+  /** A prop or piece of collateral to make: 「做一個 A2 海報」「桌前布條」. */
+  propRequest?: Slot<{
+    kind: string;
+    text?: string;
+    printStandard?: string;
+    quantity?: number;
+    sides?: 1 | 2;
+  }>;
 }
 
 /** Metres for a number written with a unit. Returns null when there is no unit. */
@@ -234,6 +242,37 @@ export const OBJECTIVE_CUES: { re: RegExp; objective: LayoutObjective }[] = [
  * counter is deliberately loose (張/個/台/組/支/把/座) because people do not
  * agree on measure words for furniture.
  */
+/**
+ * Props and collateral the agent can make, matched longest-phrase-first.
+ *
+ * These map onto `KIND_PRESETS` in `propRecipe.ts` — the recipe layer owns the
+ * geometry, this table only has to recognise the words.
+ */
+export const PROP_KIND_CUES: { re: RegExp; kind: string }[] = [
+  // 文宣 — the longest phrases first so 「A2 海報」 is not read as 「海報」
+  { re: /x\s*展架|展架/i, kind: "x展架" },
+  { re: /易拉寶|拉捲式|捲軸式/, kind: "易拉寶" },
+  { re: /珍珠板立牌|珍珠板/, kind: "珍珠板立牌" },
+  { re: /桌上立牌|桌牌|桌卡/, kind: "桌上立牌" },
+  { re: /桌前布條|桌裙|桌圍/, kind: "桌前布條" },
+  { re: /直式布條|布條|布幔/, kind: "直式布條" },
+  { re: /海報|poster/i, kind: "海報" },
+  { re: /傳單|dm|文宣單/i, kind: "海報" },
+  // 背景
+  { re: /大型?背景牆|大背景/, kind: "大背景" },
+  { re: /合照背景|背景牆|背板|背景圖/, kind: "背景牆" },
+  // 擺攤小物
+  { re: /dm\s*架|傳單架|文宣架/i, kind: "傳單架" },
+  { re: /名片架/, kind: "名片架" },
+  { re: /抽獎箱|投票箱/, kind: "抽獎箱" },
+  { re: /募款箱|隨喜箱/, kind: "募款箱" },
+  { re: /試吃盤|樣品盤/, kind: "試吃盤" },
+  { re: /qr\s*立?架|掃碼架/i, kind: "qr立架" },
+  { re: /集章台|集章/, kind: "集章台" },
+  { re: /獎品架|陳列架/, kind: "獎品架" },
+  { re: /桌巾/, kind: "桌巾" },
+];
+
 export const COUNTABLE_ASSET_CUES: { re: RegExp; assetId: string; label: string; zone?: ZoneType }[] = [
   { re: /報到桌|簽到桌/, assetId: "builtin:regTable", label: "報到桌", zone: "registration" },
   { re: /收費桌|繳費桌|售票桌/, assetId: "builtin:regTable", label: "收費桌", zone: "payment" },
@@ -411,6 +450,31 @@ export function extractSlots(normalized: string): ExtractedSlots {
     }
   }
 
+  // --- a prop or piece of collateral to make
+  {
+    const makeVerb = /做|製作|建立|新增|設計|來(?:一|1)?[張個面塊]|生成|弄/;
+    for (const cue of PROP_KIND_CUES) {
+      const m = t.match(cue.re);
+      if (!m) continue;
+      // Only treat it as a request to MAKE something when the sentence says so;
+      // 「海報放右邊」 is a placement instruction about a poster that exists.
+      if (!makeVerb.test(t)) break;
+      const value: NonNullable<ExtractedSlots["propRequest"]>["value"] = { kind: cue.kind };
+      // Word boundaries written as an explicit class: a literal \b in a
+      // generated string is a BACKSPACE, and this line spent a while silently
+      // requiring two of them before an A5 would be recognised.
+      const std = t.match(/(?:^|[^A-Za-z0-9])(A[1-6]|B2)(?![A-Za-z0-9])/i);
+      if (std) value.printStandard = std[1].toUpperCase();
+      const qty = t.match(new RegExp(`${NUM}\\s*(?:張|份|個|面|塊)`));
+      if (qty) value.quantity = Math.max(1, Math.round(Number(qty[1])));
+      if (/雙面/.test(t)) value.sides = 2;
+      const quoted = t.match(/[「"']([^」"']{1,40})[」"']/);
+      if (quoted) value.text = quoted[1];
+      slots.propRequest = { value, evidence: m[0] };
+      break;
+    }
+  }
+
   const audience = t.match(/(淡江大學(?:學)?生|大學生|新生|社員|同學|校友|老師)/);
   if (audience) slots.audience = { value: audience[1], evidence: audience[0] };
 
@@ -521,8 +585,16 @@ export const INTENT_RULES: IntentRule[] = [
     type: "create-prop",
     groups: [
       { name: "action", re: ACTION_MAKE, weight: 2 },
-      { name: "subject", re: /骰子|轉盤|抽卡|道具|關卡|遊戲/, weight: 3 },
+      // Games AND the stall's own props and collateral. Without the second
+      // half, 「做一張 A2 海報」 scored 2 against a threshold of 5 and fell
+      // through to "unknown" — the slots had already read it correctly.
+      {
+        name: "subject",
+        re: /骰子|轉盤|抽卡|道具|關卡|遊戲|海報|傳單|展架|易拉寶|布條|桌巾|立牌|背景牆|背景圖|背板|抽獎箱|募款箱|隨喜箱|名片架|文宣|dm|qr|集章|獎品架|陳列架|試吃盤|樣品盤/i,
+        weight: 3,
+      },
     ],
+    slotBonus: [{ name: "propRequest", has: (s) => !!s.propRequest, weight: 2 }],
     threshold: 5,
   },
   {
@@ -634,6 +706,16 @@ export function describeParse(parsed: ParsedRequest): string[] {
   if (s.requiredZones.length) lines.push(`區域：${s.requiredZones.map((z) => z.value).join("、")}`);
   if (s.objectives.length) lines.push(`目標：${s.objectives.map((o) => o.value).join("、")}`);
   if (s.schemeCount) lines.push(`方案數：${s.schemeCount.value}`);
+  if (s.propRequest) {
+    const v = s.propRequest.value;
+    lines.push(
+      `要做的東西：${v.kind}` +
+      (v.printStandard ? `（${v.printStandard}）` : "") +
+      (v.quantity ? ` × ${v.quantity}` : "") +
+      (v.text ? `，印上「${v.text}」` : "") +
+      `（讀自「${s.propRequest.evidence}」）`,
+    );
+  }
   for (const a of s.requiredAssets) {
     lines.push(`素材：${a.value.assetId} × ${a.value.count}（讀自「${a.evidence}」）`);
   }

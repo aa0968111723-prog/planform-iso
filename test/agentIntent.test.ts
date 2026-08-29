@@ -225,6 +225,45 @@ describe("slot extraction", () => {
     expect(describeParse(p).join(" ")).toContain("builtin:table × 3");
   });
 
+  it("reads a request to make a piece of collateral", () => {
+    const s2 = slots("幫我做一張 A2 海報，印上「淡江禪學社招生」");
+    const v = s2.propRequest!.value;
+    expect(v.kind).toBe("海報");
+    expect(v.printStandard).toBe("A2");
+    expect(v.text).toBe("淡江禪學社招生");
+  });
+
+  it("reads the print run and the sidedness", () => {
+    const v = slots("做 500 張雙面 A5 傳單").propRequest!.value;
+    expect(v.quantity).toBe(500);
+    expect(v.sides).toBe(2);
+    // A5 is spelled with a digit; a `` written into generated source became a
+    // literal backspace and this silently never matched.
+    expect(v.printStandard).toBe("A5");
+  });
+
+  it("recognises stall items that are not printed", () => {
+    for (const [text, kind] of [
+      ["做一個抽獎箱", "抽獎箱"],
+      ["做一個 QR 立架", "qr立架"],
+      ["做一個集章台", "集章台"],
+      ["做一個合照背景牆", "背景牆"],
+    ] as const) {
+      expect(slots(text).propRequest?.value.kind, text).toBe(kind);
+    }
+  });
+
+  it("does not read a placement instruction as a request to make one", () => {
+    // 「海報放右邊」 is about a poster that already exists.
+    expect(slots("海報放右邊").propRequest).toBeUndefined();
+  });
+
+  it("prefers the longest matching phrase", () => {
+    // 「桌前布條」 must not be read as 「布條」.
+    expect(slots("做一個桌前布條").propRequest!.value.kind).toBe("桌前布條");
+    expect(slots("做一個大型背景牆").propRequest!.value.kind).toBe("大背景");
+  });
+
   it("reads how many alternatives were asked for", () => {
     expect(slots("提出三種方案").schemeCount?.value).toBe(3);
     expect(slots("提出兩種改善方案").schemeCount?.value).toBe(2);
