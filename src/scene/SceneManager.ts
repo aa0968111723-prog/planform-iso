@@ -311,6 +311,11 @@ export class SceneManager {
 
   // --- workspace viewport (CanvasSafeRect) --------------------------------
 
+  /** Canvas width in CSS pixels — the workspace breakpoint reads this. */
+  canvasWidth(): number {
+    return this.canvasSize().w;
+  }
+
   /** Canvas size in CSS pixels, with a sane fallback before first layout. */
   private canvasSize(): { w: number; h: number } {
     return {

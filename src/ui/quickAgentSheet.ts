@@ -31,14 +31,80 @@ export interface QuickAgentHooks {
   sharePartnerImage?: () => void;
 }
 
+/**
+ * UI names for the tools a card can mention.
+ *
+ * A card only ever shows a tool name when something FAILED, which is exactly
+ * when the user least wants to read `checkAccessibilityWarnings`. The map
+ * covers every tool the local planner can emit; anything else falls through to
+ * its own name rather than being hidden.
+ */
 const TOOL_LABEL: Record<string, string> = {
+  // read
+  getProjectSummary: "讀取場佈摘要",
+  getVenueGeometry: "讀取場地尺寸",
+  getZones: "讀取區域",
+  getRoutes: "讀取動線",
+  listAssets: "讀取素材庫",
+  getValidationIssues: "讀取檢查結果",
+  getSimulationSummary: "讀取模擬結果",
+  getViewportState: "讀取目前視角",
+  getMeasurements: "讀取量測",
+  getActiveScenario: "讀取活動流程",
+  // objects
   placeAsset: "放置物品",
+  createAssetFromCatalog: "放置物品",
+  createCustomAssetProxy: "建立素材",
+  createPropFromRecipe: "建立互動道具",
+  importAsset: "匯入素材",
+  updateAssetMetadata: "修改素材資料",
+  moveAsset: "移動物品",
+  rotateAsset: "旋轉物品",
+  resizeAsset: "調整尺寸",
+  duplicateAsset: "複製物品",
+  removeAsset: "刪除物品",
+  // arrays
+  createArray: "排列陣列",
+  updateArray: "修改陣列",
+  removeArray: "刪除陣列",
+  distributeObjects: "等距排開",
+  alignObjects: "對齊物品",
+  // zones / routes / stations
   createZone: "建立區域",
+  updateZone: "修改區域",
+  removeZone: "刪除區域",
   createRoute: "建立動線",
+  updateRoute: "修改動線",
+  removeRoute: "刪除動線",
+  connectRouteToZones: "連接動線與區域",
+  createServiceStation: "建立服務站",
+  updateServiceStation: "修改服務站",
+  removeServiceStation: "刪除服務站",
+  // spatial
+  generateLayoutCandidates: "產生場佈方案",
+  applySmartLayout: "套用場佈方案",
+  scoreLayoutCandidate: "評分方案",
   validateLayout: "檢查場佈",
+  measureGap: "量距離",
+  checkDoorClearance: "檢查門前淨空",
+  checkAccessibilityWarnings: "無障礙提醒",
+  checkSightlines: "檢查視線",
+  calculateCapacity: "估算容納人數",
   simulateScenario: "模擬活動",
   compareScenarios: "比較方案",
-  createCustomAssetProxy: "建立素材",
+  explainBottleneck: "找出最塞的地方",
+  // project / view
+  saveProject: "存檔",
+  createLayoutVersion: "存成版本",
+  restoreLayoutVersion: "讀回版本",
+  exportPlanImage: "匯出場佈圖",
+  exportPartnerView: "匯出夥伴圖",
+  exportMaterialList: "產生物資清單",
+  focusObject: "對焦物品",
+  focusZone: "對焦區域",
+  setView: "切換視角",
+  setLayerVisibility: "切換圖層",
+  fitScene: "縮放到全場",
 };
 
 export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): QuickAgentSheetHandles {
@@ -53,6 +119,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
   }) as HTMLTextAreaElement;
   const cards = el("div", { class: "agent-sheet__cards" });
   const compare = el("div", { class: "agent-compare", style: "display:none" });
+  const schemes = el("div", { class: "agent-schemes", style: "display:none" });
   const previewBar = el("div", { class: "agent-preview-bar", style: "display:none" });
 
   // Shortcut chips keep the canonical 幫我◯◯ names (spec §6); honesty about
@@ -106,6 +173,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     input,
     el("div", { class: "row wrap", style: "gap:6px;margin-top:8px" }, [runBtn, closeBtn]),
     compare,
+    schemes,
     previewBar,
     cards,
   );
@@ -131,6 +199,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
           ]),
         );
       }
+      renderSchemes(last);
       if (last.previewActive) {
         renderComparison(last.summary);
         previewBar.style.display = "flex";
@@ -144,6 +213,97 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
           text: "這一步沒有成功，場佈沒有被改動。換個說法再試一次。",
         }),
       );
+    }
+  }
+
+  /**
+   * A/B/C, as a table you can act on.
+   *
+   * `generateLayoutCandidates` already measured each scheme with the real
+   * validator and the real simulator, and already knows which one it
+   * recommends and which ones break a requirement the user stated. None of
+   * that reached the screen — the sheet only ever rendered the diff summary,
+   * so 「提出三種方案」 produced three fully-costed options and showed none of
+   * them. Each row can be applied on its own, because "compare then choose" is
+   * the whole point of asking for alternatives.
+   */
+  function renderSchemes(result: QuickAgentResult): void {
+    schemes.innerHTML = "";
+    const found = result.toolResults.find((r) => r.ok && r.tool === "generateLayoutCandidates");
+    const data = found?.data as {
+      recommendedId: string | null;
+      recommendation: string;
+      notes: string[];
+      comparison: {
+        id: string; name: string; capacity: number;
+        avgWaitSeconds: number | null; maxWaitSeconds: number | null;
+        errors: number; warnings: number; score: number;
+        busiest: string | null; eligible: boolean; ineligibleReason: string | null;
+      }[];
+    } | undefined;
+    if (!data?.comparison?.length) {
+      schemes.style.display = "none";
+      return;
+    }
+
+    const mins = (sec: number | null): string =>
+      sec === null ? "—" : sec < 90 ? `${Math.round(sec)} 秒` : `${Math.round(sec / 60)} 分`;
+
+    schemes.append(el("div", { class: "agent-schemes__title", text: "三種排法，數字是實際模擬出來的" }));
+    for (const row of data.comparison) {
+      const recommended = row.id === data.recommendedId;
+      const card = el("div", {
+        class: `agent-scheme${recommended ? " agent-scheme--pick" : ""}${row.eligible ? "" : " agent-scheme--out"}`,
+      }, [
+        el("div", { class: "agent-scheme__head" }, [
+          el("span", { class: "agent-scheme__name", text: row.name }),
+          el("span", { class: "agent-scheme__score", text: recommended ? `推薦 · ${row.score} 分` : `${row.score} 分` }),
+        ]),
+        el("div", { class: "agent-scheme__stats", text: [
+          `可坐 ${row.capacity} 人`,
+          `平均等 ${mins(row.avgWaitSeconds)}`,
+          `最久 ${mins(row.maxWaitSeconds)}`,
+          row.busiest ? `最塞：${row.busiest}` : null,
+          row.errors ? `${row.errors} 個問題` : null,
+        ].filter(Boolean).join(" · ") }),
+      ]);
+      if (!row.eligible && row.ineligibleReason) {
+        card.append(el("div", { class: "agent-scheme__warn", text: row.ineligibleReason }));
+      }
+      card.append(button(
+        `用這個排法`,
+        () => void applyScheme(row.id),
+        `chip chip--sm${recommended ? " chip--accent" : ""}`,
+      ));
+      schemes.append(card);
+    }
+    if (data.notes.length) {
+      schemes.append(el("div", { class: "agent-scheme__warn", text: data.notes.join(" ") }));
+    }
+    schemes.style.display = "block";
+  }
+
+  /** Apply one named scheme, straight into the same preview → 套用 loop. */
+  async function applyScheme(candidateId: string): Promise<void> {
+    cards.innerHTML = "";
+    cards.append(el("div", { class: "agent-card", text: "排版中…" }));
+    const last = await app.quickAgent.run({
+      text: input.value.trim() || "幫我排場佈",
+      selectionIds: [...app.session.selection],
+      applyScheme: candidateId,
+    });
+    cards.innerHTML = "";
+    for (const c of last.cards) {
+      cards.append(el("div", { class: "agent-card" }, [
+        el("div", { class: "agent-card__title", text: humanizeCardTitle(c.title) }),
+        el("div", { class: "agent-card__detail", text: humanizeDetail(c.detail) }),
+      ]));
+    }
+    renderSchemes(last);
+    if (last.previewActive) {
+      renderComparison(last.summary);
+      previewBar.style.display = "flex";
+      app.applyAgentPreview(app.quickAgent.getDraftProject());
     }
   }
 
@@ -214,7 +374,13 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
   }
 
   function humanizeDetail(detail: string): string {
-    return detail
+    // A failure card reads 「toolName: reason」, so the tool name is in the
+    // DETAIL, not the title. Mapping only titles left the user looking at
+    // 「checkAccessibilityWarnings: …」 at exactly the moment they least want
+    // to read an identifier.
+    const named = detail.replace(/^([A-Za-z][A-Za-z0-9]*): /, (whole, tool: string) =>
+      TOOL_LABEL[tool] ? `${TOOL_LABEL[tool]}：` : whole);
+    return named
       .replace(/Validation/g, "檢查")
       .replace(/error/gi, "錯誤")
       .replace(/warning/gi, "提醒")
@@ -236,6 +402,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
       previewBar.style.display = "none";
       compare.style.display = "none";
     }
+    schemes.style.display = "none";
     sheet.style.display = "none";
   }
 

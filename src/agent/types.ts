@@ -40,37 +40,86 @@ export type AgentIntent =
   | { type: "unknown"; raw: string };
 
 export type AgentToolName =
+  // --- read ---
   | "getProjectSummary"
   | "getVenueGeometry"
-  | "listAssets"
   | "getSelection"
   | "getZones"
   | "getRoutes"
+  | "listAssets"
   | "getValidationIssues"
   | "getSimulationSummary"
+  | "getViewportState"
+  | "getLayerVisibility"
+  | "getMeasurements"
+  | "getActiveScenario"
+  // --- objects ---
   | "createAssetFromCatalog"
   | "createCustomAssetProxy"
   | "createPropFromRecipe"
-  | "requestAssetReconstruction"
   | "importAsset"
+  | "requestAssetReconstruction"
   | "updateAssetMetadata"
   | "replaceAssetVisual"
   | "placeAsset"
   | "moveAsset"
   | "rotateAsset"
+  | "resizeAsset"
   | "duplicateAsset"
+  | "removeAsset"
+  // --- arrays ---
   | "createArray"
   | "updateArray"
+  | "removeArray"
+  | "distributeObjects"
+  | "alignObjects"
+  // --- zones / routes / stations ---
   | "createZone"
   | "updateZone"
+  | "removeZone"
   | "createRoute"
   | "updateRoute"
+  | "removeRoute"
+  | "connectRouteToZones"
   | "createServiceStation"
   | "updateServiceStation"
+  | "removeServiceStation"
+  // --- spatial design ---
+  | "generateLayoutCandidates"
+  | "applySmartLayout"
+  | "scoreLayoutCandidate"
   | "validateLayout"
   | "measureGap"
+  | "checkDoorClearance"
+  | "checkAccessibilityWarnings"
+  | "checkSightlines"
+  | "calculateCapacity"
   | "simulateScenario"
   | "compareScenarios"
+  | "explainBottleneck"
+  // --- project ---
+  | "createProject"
+  | "openProject"
+  | "saveProject"
+  | "duplicateProject"
+  | "renameProject"
+  | "deleteProject"
+  | "createLayoutVersion"
+  | "restoreLayoutVersion"
+  | "exportProject"
+  | "importProject"
+  | "exportPlanImage"
+  | "exportPartnerView"
+  | "exportMaterialList"
+  // --- view ---
+  | "focusObject"
+  | "focusZone"
+  | "setView"
+  | "setLayerVisibility"
+  | "fitScene"
+  | "toggleLabels"
+  | "toggleSimulation"
+  // --- meta ---
   | "previewAgentChanges"
   | "commitAgentChanges"
   | "rollbackAgentChanges";
@@ -84,6 +133,16 @@ export interface AgentRequest {
   text: string;
   selectionIds?: string[];
   locale?: string;
+  /**
+   * Apply this specific layout scheme instead of the recommended one.
+   *
+   * Set when the user picks a row out of the A/B/C comparison. It is a
+   * deliberate override of the engine's recommendation — including of a scheme
+   * the engine marked ineligible, because a person who has read the reason is
+   * allowed to disagree with it. The reason keeps travelling with the scheme so
+   * the sheet keeps saying so.
+   */
+  applyScheme?: string;
 }
 
 export interface AgentResponse {
@@ -91,6 +150,21 @@ export interface AgentResponse {
   toolCalls: AgentToolCall[];
   message: string;
   provider: string;
+  /**
+   * A structured reading of the sentence, when the provider produced one.
+   *
+   * The orchestrator turns this into tool calls by planning against the DRAFT.
+   * Planning is deliberately not the provider's job: resolving 「報到桌」 and
+   * 「入口右側」 needs the whole plan, and a cloud provider must never be handed
+   * the whole plan just to parse a sentence. A provider that already knows its
+   * tool calls simply leaves this undefined.
+   *
+   * Typed as `unknown` so `types.ts` stays free of a dependency on the parser;
+   * `quickAgent.ts` narrows it.
+   */
+  parsed?: unknown;
+  /** What the provider had to assume, surfaced to the user rather than hidden. */
+  assumptions?: string[];
 }
 
 export interface AgentDiffSummary {

@@ -1,10 +1,26 @@
 /**
- * Quick Agent orchestrator: NL → provider intents → draft tools → preview summary.
+ * Quick Agent orchestrator: NL → provider → plan → draft tools → preview.
+ *
+ * The orchestrator owns three things the provider deliberately does not:
+ *
+ * 1. **Planning against the draft.** 「把報到桌移到入口右側」 becomes coordinates
+ *    only once you can see where the door and the desk are. A provider does not
+ *    get the plan document — a cloud one must never get it — so resolution
+ *    happens here.
+ * 2. **Threading outputs into later steps.** A plan that creates an asset and
+ *    then places it cannot know the new id in advance. Steps carry
+ *    `<from:toolName>` placeholders and this file substitutes the real value,
+ *    aborting the dependent step honestly when the producer failed.
+ * 3. **The preview/commit gate.** Every run starts a fresh draft from committed
+ *    state; nothing reaches the store until `commit()`.
  */
 
 import type { Store } from "../state/store";
 import { ReconstructionQueue } from "../assets/reconstruction";
-import { AgentExecutor } from "./executor";
+import { AgentExecutor, type ToolResult } from "./executor";
+import type { AgentHost } from "./host";
+import { describeParse, type ParsedRequest } from "./intent";
+import { planFromRequest, type PlannedStep } from "./planner";
 import { createDefaultProvider, type AgentProvider } from "./provider";
 import { AgentTransaction } from "./transaction";
 import type {
@@ -17,26 +33,46 @@ import type {
 
 export interface QuickAgentResult {
   response: AgentResponse;
-  toolResults: { ok: boolean; tool: string; error?: string; data?: unknown }[];
+  toolResults: ToolResult[];
   summary: AgentDiffSummary;
   cards: AgentActionCard[];
   previewActive: boolean;
+  /** What the sentence was understood to mean, in the user's words. */
+  understanding: string[];
+  /** Values the agent had to assume. */
+  assumptions: string[];
+  /** References the sentence made that the plan could not satisfy. */
+  unresolved: string[];
+  /** The steps that were planned, with the reason for each. */
+  plan: { tool: string; because: string }[];
 }
+
+const PLACEHOLDER = /^<from:(\w+)>$/;
+
+/** Fields a producing tool can supply to a later step. */
+const OUTPUT_KEYS = ["assetId", "objectId", "zoneId", "routeId", "groupId", "propId", "stationId"] as const;
 
 export class QuickAgent {
   readonly tx = new AgentTransaction();
   readonly reconstructionQueue = new ReconstructionQueue();
   private provider: AgentProvider;
+  private host?: AgentHost;
 
   constructor(
     private store: Store,
     provider?: AgentProvider,
+    host?: AgentHost,
   ) {
     this.provider = provider ?? createDefaultProvider();
+    this.host = host;
   }
 
   setProvider(provider: AgentProvider): void {
     this.provider = provider;
+  }
+
+  setHost(host: AgentHost | undefined): void {
+    this.host = host;
   }
 
   getProviderId(): string {
@@ -54,7 +90,7 @@ export class QuickAgent {
   async run(request: AgentRequest): Promise<QuickAgentResult> {
     // Always start (or restart) a fresh preview from committed state.
     if (this.tx.isActive) this.tx.rollback();
-    this.tx.start(this.store.getState());
+    const draft = this.tx.start(this.store.getState());
 
     let response: AgentResponse;
     try {
@@ -68,34 +104,145 @@ export class QuickAgent {
       };
     }
 
+    // --- planning ----------------------------------------------------
+    let steps: PlannedStep[];
+    let unresolved: string[] = [];
+    let assumptions = response.assumptions ?? [];
+    let understanding: string[] = [];
+    let message = response.message;
+
+    const parsed = response.parsed as ParsedRequest | undefined;
+    if (parsed && Array.isArray(parsed.intents)) {
+      const plan = planFromRequest(parsed, draft);
+      steps = plan.steps;
+      unresolved = plan.unresolved;
+      assumptions = plan.assumptions;
+      understanding = describeParse(parsed);
+      message = plan.message;
+    } else {
+      steps = response.toolCalls.map((call) => ({ call, because: "" }));
+    }
+
+    // The orchestrator owns commit/rollback/preview; a provider or plan asking
+    // for them is ignored rather than obeyed.
+    steps = steps.filter(
+      (s) => !["commitAgentChanges", "rollbackAgentChanges", "previewAgentChanges"].includes(s.call.tool),
+    );
+
+    // The user picked a row out of the A/B/C table. That is an explicit choice
+    // and it wins over the engine's recommendation — but it still goes through
+    // the same preview gate as everything else.
+    if (request.applyScheme) {
+      steps = this.forceScheme(steps, request.applyScheme);
+    }
+
+    // --- execution with output threading -----------------------------
     const executor = new AgentExecutor(this.tx, {
       selectionIds: request.selectionIds ?? [],
       reconstructionQueue: this.reconstructionQueue,
+      ...(this.host ? { host: this.host } : {}),
     });
 
-    // Drop commit/rollback/preview meta tools from provider — orchestrator owns them.
-    const calls: AgentToolCall[] = response.toolCalls.filter(
-      (c) => !["commitAgentChanges", "rollbackAgentChanges", "previewAgentChanges"].includes(c.tool),
-    );
-    const toolResults = await executor.runAll(calls);
+    const produced = new Map<string, Record<string, unknown>>();
+    const toolResults: ToolResult[] = [];
+    for (const step of steps) {
+      const resolved = this.substitute(step.call, produced);
+      if ("error" in resolved) {
+        toolResults.push({ ok: false, tool: step.call.tool, error: resolved.error });
+        continue;
+      }
+      const result = await executor.run(resolved.call);
+      toolResults.push(result);
+      if (result.ok && result.data && typeof result.data === "object") {
+        produced.set(step.call.tool, result.data as Record<string, unknown>);
+      }
+    }
+
     const preview = await executor.run({ tool: "previewAgentChanges", args: {} });
     const summary = (preview.data as AgentDiffSummary) ?? this.tx.summarize();
 
+    const failures = toolResults.filter((r) => !r.ok);
     const cards: AgentActionCard[] = [
-      { title: "AI 說明", detail: response.message },
+      ...(message ? [{ title: "AI 說明", detail: message }] : []),
+      ...understanding.map((u) => ({ title: "理解", detail: u })),
+      ...assumptions.map((a) => ({ title: "假設", detail: a })),
       ...summary.notes.map((n) => ({ title: "變更", detail: n })),
-      ...toolResults
-        .filter((r) => !r.ok)
-        .map((r) => ({ title: "工具失敗", detail: `${r.tool}: ${r.error}` })),
+      ...unresolved.map((u) => ({ title: "沒做到", detail: u })),
+      ...failures.map((r) => ({ title: "工具失敗", detail: `${r.tool}: ${r.error}` })),
     ];
 
     return {
-      response,
+      response: { ...response, message },
       toolResults,
       summary,
       cards,
       previewActive: this.tx.isActive,
+      understanding,
+      assumptions,
+      unresolved,
+      plan: steps.map((s) => ({ tool: s.call.tool, because: s.because })),
     };
+  }
+
+  /**
+   * Rewrite the plan so it applies the scheme the user chose.
+   *
+   * If the plan already had an `applySmartLayout`, its candidate is swapped.
+   * If it did not — the user asked for alternatives and then picked one — the
+   * step is appended, together with the validation pass that must follow any
+   * layout change.
+   */
+  private forceScheme(steps: PlannedStep[], candidateId: string): PlannedStep[] {
+    const existing = steps.find((s) => s.call.tool === "applySmartLayout");
+    if (existing) {
+      existing.call = { tool: "applySmartLayout", args: { ...existing.call.args, candidateId } };
+      existing.because = `套用你選的方案 ${candidateId.replace("scheme-", "").toUpperCase()}。`;
+      return steps;
+    }
+    const brief = steps.find((s) => s.call.tool === "generateLayoutCandidates")?.call.args ?? {};
+    return [
+      ...steps,
+      {
+        call: { tool: "applySmartLayout", args: { ...brief, candidateId } },
+        because: `套用你選的方案 ${candidateId.replace("scheme-", "").toUpperCase()}。`,
+      },
+      { call: { tool: "validateLayout", args: {} }, because: "套用後重跑檢查。" },
+    ];
+  }
+
+  /**
+   * Replace `<from:toolName>` placeholders with a value the named tool actually
+   * returned. A dependent step whose producer failed is reported as a failure
+   * rather than being run with the literal placeholder — which would either
+   * error confusingly or, worse, match nothing and look like a no-op.
+   */
+  private substitute(
+    call: AgentToolCall,
+    produced: Map<string, Record<string, unknown>>,
+  ): { call: AgentToolCall } | { error: string } {
+    if (!call.args) return { call };
+    const args: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(call.args)) {
+      if (typeof value !== "string") {
+        args[key] = value;
+        continue;
+      }
+      const m = PLACEHOLDER.exec(value);
+      if (!m) {
+        args[key] = value;
+        continue;
+      }
+      const source = produced.get(m[1]);
+      if (!source) {
+        return { error: `這一步需要 ${m[1]} 的結果，但那一步沒有成功。` };
+      }
+      const found = OUTPUT_KEYS.map((k) => source[k]).find((v) => typeof v === "string");
+      if (found === undefined) {
+        return { error: `${m[1]} 沒有回傳可以用在「${key}」的 id。` };
+      }
+      args[key] = found;
+    }
+    return { call: { tool: call.tool, args } };
   }
 
   commit(): AgentDiffSummary {

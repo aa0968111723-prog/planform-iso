@@ -291,6 +291,20 @@ export class Store {
     }
   }
 
+  /**
+   * Read a saved version WITHOUT loading it.
+   *
+   * `loadNamedLayout` replaces the live plan immediately, which is exactly what
+   * the agent's preview gate exists to prevent: restoring a version has to land
+   * in the draft first so the user can look before it replaces what is on
+   * screen.
+   */
+  readNamedLayout(name: string): Project | null {
+    const layouts = readLayouts();
+    const project = layouts[name];
+    return project ? migrateProject(project) : null;
+  }
+
   loadNamedLayout(name: string): boolean {
     const layouts = readLayouts();
     const project = layouts[name];

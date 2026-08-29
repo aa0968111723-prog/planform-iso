@@ -24,3 +24,6 @@ _lead_wpc/
 
 # local-only reference audit output (may contain photo paths with faces)
 docs/field-research/*.local.md
+
+# Raw Perplexity research transcripts — evidence, not product. See docs/research/spatial-design/README.md
+.research-raw/
