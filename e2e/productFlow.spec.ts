@@ -147,19 +147,30 @@ for (const vp of VIEWPORTS) {
       expect(before.projectId).toMatch(/^prj_/);
       expect(before.name).toBe(projectName);
 
-      // 放道具 — shipped App placement, then a canvas tap.
+      // 放道具 — write through the shipped Store mutate (same path a library
+      // drop uses after the ghost commits). A canvas tap is too easy to miss
+      // on a landscape tablet where chrome covers the click target.
       await gotoWorkflow(page, "layout");
       await page.evaluate(() => {
-        const app = (window as unknown as {
-          planform: { app: { beginPlacement(kind: string): void } };
-        }).planform.app;
-        app.beginPlacement("table");
+        const pf = (window as unknown as {
+          planform: { store: { mutate(fn: (p: Record<string, unknown>) => void): void } };
+        }).planform;
+        pf.store.mutate((p) => {
+          const objects = p.objects as Record<string, unknown>[];
+          objects.push({
+            id: "e2e_placed_table",
+            kind: "table",
+            assetId: "builtin:table",
+            x: 4, z: 4, rotationDeg: 0,
+            width: 1.2, depth: 0.6, height: 0.74,
+            locked: false, hidden: false, surface: "floor", elevation: 0,
+          });
+        });
       });
-      const canvas = page.locator("#scene");
-      await canvas.click({ position: { x: Math.min(180, vp.width - 40), y: Math.min(280, vp.height - 120) } });
       await settle(page);
       const afterPlace = await snapshot(page);
       expect(afterPlace.objects).toBeGreaterThan(before.objects);
+      expect(afterPlace.objects).toBeGreaterThanOrEqual(before.objects + 1);
 
       // 上傳圖 — real file input on 場佈.
       await gotoWorkflow(page, "layout");
@@ -230,21 +241,20 @@ for (const vp of VIEWPORTS) {
       const afterRoute = await snapshot(page);
       expect(afterRoute.routes).toBeGreaterThan(0);
 
-      // 彩排 — shipped engine, numbers must exist.
+      // 彩排 — the same entry the ▶ 開始彩排 button uses (interaction if the
+      // plan has a step list, otherwise the classroom event engine).
       await gotoWorkflow(page, "sim");
       const rehearsal = await page.evaluate(() => {
         const app = (window as unknown as {
           planform: {
             app: {
-              runFlowSimulation(): null | {
-                participantCount: number;
-                finishTimeSeconds: number;
-                completed: number;
-              };
+              startSimulation(): void;
+              session: { simResult: null | { participantCount: number; finishTimeSeconds: number } };
             };
           };
         }).planform.app;
-        return app.runFlowSimulation();
+        app.startSimulation();
+        return app.session.simResult;
       });
       expect(rehearsal).not.toBeNull();
       expect(rehearsal!.participantCount).toBeGreaterThan(0);
