@@ -374,7 +374,13 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
   }
 
   function humanizeDetail(detail: string): string {
-    return detail
+    // A failure card reads 「toolName: reason」, so the tool name is in the
+    // DETAIL, not the title. Mapping only titles left the user looking at
+    // 「checkAccessibilityWarnings: …」 at exactly the moment they least want
+    // to read an identifier.
+    const named = detail.replace(/^([A-Za-z][A-Za-z0-9]*): /, (whole, tool: string) =>
+      TOOL_LABEL[tool] ? `${TOOL_LABEL[tool]}：` : whole);
+    return named
       .replace(/Validation/g, "檢查")
       .replace(/error/gi, "錯誤")
       .replace(/warning/gi, "提醒")
