@@ -113,6 +113,28 @@ describe("the six target sentences", () => {
     expect(place.assetId).toBe("<from:createCustomAssetProxy>");
   });
 
+  it("5b — furniture named in the sentence reaches the plan and gets placed", async () => {
+    // 「需要的素材」 was a stated brief input that only supported seating, so a
+    // sentence naming tables produced a layout silently missing them.
+    const store = new Store(staffedRoom());
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    const r = await agent.run({ text: "幫我排一個 40 人的茶會，要三張長桌、兩個投影幕" });
+    expect(r.toolResults.filter((x) => !x.ok)).toEqual([]);
+
+    const brief = r.plan.length > 0
+      ? (planFromRequest(parseRequest("幫我排一個 40 人的茶會，要三張長桌、兩個投影幕"), staffedRoom())
+        .steps.find((s) => s.call.tool === "generateLayoutCandidates")!.call.args!)
+      : {};
+    expect(brief.requiredAssets).toEqual([
+      { assetId: "builtin:table", count: 3 },
+      { assetId: "builtin:screen", count: 2 },
+    ]);
+
+    const draft = agent.getDraftProject()!;
+    expect(draft.objects.filter((o) => o.assetId === "builtin:table").length).toBe(3);
+    expect(draft.objects.filter((o) => o.assetId === "builtin:screen").length).toBe(2);
+  });
+
   it("6 — exports the staff plan and the material list", () => {
     const t = tools("根據目前場地，產生一張工作人員看得懂的場佈圖與物資清單。");
     expect(t).toContain("exportPlanImage");

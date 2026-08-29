@@ -27,7 +27,7 @@ import { groupMembers } from "./arrays";
 import { catalogFromProject } from "./migrate";
 import { createDefaultScenario, resolveScenarioBindings } from "./migrate";
 import { buildCheckinPaymentVariants, runDiscreteEvent, type SimulationResult } from "./eventFlow";
-import { areaBounds, type Bounds } from "./placement";
+import { areaBounds, nearestWallSnap, rectsOverlap, type Bounds, type Rect } from "./placement";
 import { generateLayouts, type GroupSpec } from "./smartLayout";
 import { issueCounts, validateProject, type Issue } from "./validation";
 import {
@@ -61,6 +61,21 @@ export type LayoutObjective =
   | "easy-to-staff"
   | "maximise-capacity";
 
+/**
+ * A piece of furniture the organiser said they need, over and above the seats.
+ *
+ * 「要三張長桌、一個茶水區的桌子」 is a real sentence, and until this existed
+ * the brief could only express seating — so the planner produced a layout that
+ * silently omitted half of what was asked for.
+ */
+export interface RequiredAsset {
+  /** Catalog id. Anything `catalogFromProject` can resolve. */
+  assetId: string;
+  count: number;
+  /** Put it near this zone when the plan has one. */
+  zone?: ZoneType;
+}
+
 export interface LayoutBrief {
   /** How many people the plan must seat and move. */
   participants: number;
@@ -76,6 +91,8 @@ export interface LayoutBrief {
   objectives: LayoutObjective[];
   /** Catalog id used for one seat. Defaults by event type. */
   seatAssetId?: string;
+  /** Extra furniture the brief asked for by name and count. */
+  requiredAssets: RequiredAsset[];
 }
 
 export interface SchemeScoreBreakdown {
@@ -179,6 +196,7 @@ export const DEFAULT_BRIEF: LayoutBrief = {
   doorClearance: 1.2,
   requiredZones: ["registration", "payment", "shoe", "meditation"],
   objectives: ["clear-doors", "reduce-crowding"],
+  requiredAssets: [],
 };
 
 /**
@@ -327,6 +345,162 @@ function clampToUsable(x: number, z: number, u: Bounds, halfW = 0, halfD = 0): {
     x: Math.min(Math.max(x, u.minX + halfW), u.maxX - halfW),
     z: Math.min(Math.max(z, u.minZ + halfD), u.maxZ - halfD),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Extra furniture the brief asked for                                 */
+/* ------------------------------------------------------------------ */
+
+/** Every footprint a new object must not land on. */
+function occupiedRects(objects: SceneObject[], groups: ArrayGroup[]): Rect[] {
+  const out: Rect[] = objects
+    .filter((o) => !o.hidden)
+    .map((o) => ({ cx: o.x, cz: o.z, w: o.width, d: o.depth, rot: o.rotationDeg }));
+  for (const g of groups) {
+    if (g.hidden) continue;
+    // The whole block, not each member: a hundred separate mat rects turns a
+    // linear scan into a quadratic one for no extra accuracy here.
+    const w = g.cols * g.itemWidth + (g.cols - 1) * g.gapX;
+    const d = g.rows * g.itemDepth + (g.rows - 1) * g.gapZ;
+    out.push({ cx: g.anchorX + w / 2, cz: g.anchorZ + d / 2, w, d, rot: g.rotationDeg });
+  }
+  return out;
+}
+
+interface Spot { x: number; z: number; rotationDeg?: number }
+
+/** Nearest free lattice point to `anchor`, on the floor. */
+function bestFloorSpot(
+  u: Bounds, w: number, d: number, step: number, clear: number,
+  anchor: { x: number; z: number }, blocked: Rect[],
+): Spot | null {
+  let best: { x: number; z: number; dist: number } | null = null;
+  for (let x = u.minX + w / 2; x <= u.maxX - w / 2 + 1e-9; x += step) {
+    for (let z = u.minZ + d / 2; z <= u.maxZ - d / 2 + 1e-9; z += step) {
+      const candidate: Rect = { cx: x, cz: z, w: w + clear, d: d + clear, rot: 0 };
+      if (blocked.some((r) => rectsOverlap(candidate, r))) continue;
+      const dist = Math.hypot(x - anchor.x, z - anchor.z);
+      if (!best || dist < best.dist) best = { x, z, dist };
+    }
+  }
+  return best ? { x: best.x, z: best.z } : null;
+}
+
+/**
+ * Nearest free spot ON a wall.
+ *
+ * Walks each wall of the classroom at the same lattice pitch and snaps the
+ * result with `nearestWallSnap` — the same function `validateProject` uses to
+ * decide whether something is against a wall, so a placement that passes here
+ * passes there too.
+ */
+function bestWallSpot(
+  project: Project, w: number, d: number, clear: number,
+  anchor: { x: number; z: number }, blocked: Rect[],
+): Spot | null {
+  const b = areaBounds(project.classroom);
+  const areas = [project.classroom, project.corridor];
+  const step = 0.3;
+  const probes: { x: number; z: number }[] = [];
+  for (let x = b.minX; x <= b.maxX + 1e-9; x += step) {
+    probes.push({ x, z: b.minZ }, { x, z: b.maxZ });
+  }
+  for (let z = b.minZ; z <= b.maxZ + 1e-9; z += step) {
+    probes.push({ x: b.minX, z }, { x: b.maxX, z });
+  }
+
+  let best: { spot: Spot; dist: number } | null = null;
+  for (const probe of probes) {
+    const snap = nearestWallSnap(probe.x, probe.z, areas, w);
+    if (!snap || snap.areaId !== "classroom") continue;
+    const candidate: Rect = { cx: snap.x, cz: snap.z, w: w + clear, d: d + clear, rot: snap.rotationDeg };
+    if (blocked.some((r) => rectsOverlap(candidate, r))) continue;
+    const dist = Math.hypot(snap.x - anchor.x, snap.z - anchor.z);
+    if (!best || dist < best.dist) {
+      best = { spot: { x: snap.x, z: snap.z, rotationDeg: snap.rotationDeg }, dist };
+    }
+  }
+  return best?.spot ?? null;
+}
+
+/**
+ * Place the brief's extra furniture in space the scheme has actually left free.
+ *
+ * A greedy scan on a 0.3 m lattice, preferring positions near the zone the item
+ * was assigned to. Anything that cannot be placed is REPORTED, not dropped:
+ * quietly leaving out two of the three tables someone asked for is the same
+ * class of failure as a tool returning ok:true without doing anything.
+ */
+function placeRequiredAssets(
+  project: Project,
+  b: NormalizedBrief,
+  parts: { objects: SceneObject[]; groups: ArrayGroup[]; zones: Zone[] },
+): { placed: SceneObject[]; unplaced: string[] } {
+  if (!b.requiredAssets.length) return { placed: [], unplaced: [] };
+
+  const catalog = catalogFromProject(project);
+  const placed: SceneObject[] = [];
+  const unplaced: string[] = [];
+  // Keep the caller's own furniture, the doors and the walls out of bounds.
+  const blocked: Rect[] = [
+    ...occupiedRects(parts.objects, parts.groups),
+    ...occupiedRects(project.objects.filter((o) => o.kind === "door" || o.locked), []),
+  ];
+
+  const u = b.usable;
+  const STEP = 0.3;
+  const CLEAR = 0.3; // breathing room around each new item
+
+  for (const req of b.requiredAssets) {
+    const entry = catalog.get(req.assetId);
+    if (!entry) {
+      unplaced.push(`找不到素材 ${req.assetId}，沒有放置。`);
+      continue;
+    }
+    const zone = req.zone ? parts.zones.find((z) => z.type === req.zone) : undefined;
+    const anchor = zone
+      ? { x: zone.x, z: zone.z }
+      : { x: (u.minX + u.maxX) / 2, z: (u.minZ + u.maxZ) / 2 };
+
+    // A screen or a switch mounts on a WALL. Dropping it on the floor lattice
+    // produced a plan that failed the product's own `wall-off` check — the
+    // planner must not hand the user a layout its validator rejects.
+    const onWall = entry.placementType === "wall";
+    let done = 0;
+    for (let i = 0; i < req.count; i += 1) {
+      const w = entry.dimensions.width;
+      const d = entry.dimensions.depth;
+      const spot = onWall
+        ? bestWallSpot(project, w, d, CLEAR, anchor, blocked)
+        : bestFloorSpot(u, w, d, STEP, CLEAR, anchor, blocked);
+      if (!spot) break;
+
+      const obj: SceneObject = {
+        id: uid("obj"),
+        kind: entry.kind,
+        assetId: entry.id,
+        ...(entry.serviceRole ? { serviceRole: entry.serviceRole } : {}),
+        x: spot.x,
+        z: spot.z,
+        rotationDeg: spot.rotationDeg ?? entry.defaultFacingDeg,
+        width: w,
+        depth: d,
+        height: entry.dimensions.height,
+        locked: false,
+        hidden: false,
+        surface: entry.placementType,
+        elevation: onWall ? entry.defaultElevation ?? 0 : 0,
+      };
+      placed.push(obj);
+      blocked.push({ cx: spot.x, cz: spot.z, w: w + CLEAR, d: d + CLEAR, rot: spot.rotationDeg ?? 0 });
+      done += 1;
+    }
+
+    if (done < req.count) {
+      unplaced.push(`${entry.name}要 ${req.count} 件，只排得下 ${done} 件——場地空間不足。`);
+    }
+  }
+  return { placed, unplaced };
 }
 
 /* ------------------------------------------------------------------ */
@@ -804,6 +978,11 @@ export function generateLayoutSchemes(project: Project, input: Partial<LayoutBri
   const schemes: LayoutScheme[] = [];
   for (const { id: schemeId, name, build } of BUILDERS) {
     const parts = build(b);
+    // The brief's extra furniture goes in AFTER the scheme has claimed its own
+    // space, so a requested table lands in a gap rather than on the seats.
+    const extras = placeRequiredAssets(project, b, parts);
+    parts.objects = [...parts.objects, ...extras.placed];
+    parts.risks.push(...extras.unplaced);
     const candidate = projectWithScheme(project, parts);
     const issues = validateProject(candidate);
     const counts = issueCounts(issues);

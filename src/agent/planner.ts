@@ -160,6 +160,7 @@ export function planFromRequest(parsed: ParsedRequest, project: Project): PlanRe
     ...(s.aisleWidth ? { minAisleWidth: s.aisleWidth.value } : {}),
     ...(zones.length ? { zones: dedupeZones(zones, eventType) } : {}),
     ...(objectives.length ? { objectives } : {}),
+    ...(s.requiredAssets.length ? { requiredAssets: s.requiredAssets.map((a) => a.value) } : {}),
   };
 
   const add = (call: AgentToolCall, because: string) => steps.push({ call, because });

@@ -132,6 +132,25 @@ describe("argument validation", () => {
     expect(validateToolArgs("generateLayoutCandidates", { zones: ["registration", "payment"] }).ok).toBe(true);
   });
 
+  it("accepts the requiredAssets shape and rejects a malformed one", () => {
+    const ok = validateToolArgs("generateLayoutCandidates", {
+      requiredAssets: [{ assetId: "builtin:table", count: 3, zone: "registration" }],
+    });
+    expect(ok.ok).toBe(true);
+    // count is required
+    expect(validateToolArgs("generateLayoutCandidates", {
+      requiredAssets: [{ assetId: "builtin:table" }],
+    }).ok).toBe(false);
+    // zone must be a real zone type
+    expect(validateToolArgs("generateLayoutCandidates", {
+      requiredAssets: [{ assetId: "builtin:table", count: 1, zone: "nowhere" }],
+    }).ok).toBe(false);
+    // and a fractional count is meaningless
+    expect(validateToolArgs("generateLayoutCandidates", {
+      requiredAssets: [{ assetId: "builtin:table", count: 1.5 }],
+    }).ok).toBe(false);
+  });
+
   it("validates the shape of object arrays", () => {
     expect(validateToolArgs("createRoute", { points: [{ x: 1, z: 1 }, { x: 2, z: 2 }] }).ok).toBe(true);
     expect(validateToolArgs("createRoute", { points: [{ x: 1 }] }).ok).toBe(false);

@@ -194,6 +194,37 @@ describe("slot extraction", () => {
     expect(s.objectRefs.every((r) => r.clearance === undefined)).toBe(true);
   });
 
+  it("reads furniture asked for by the piece", () => {
+    const s2 = slots("幫我排一個 40 人的茶會，要三張長桌、兩個投影幕");
+    const ids = s2.requiredAssets.map((a) => `${a.value.assetId}x${a.value.count}`);
+    expect(ids).toContain("builtin:tablex3");
+    expect(ids).toContain("builtin:screenx2");
+  });
+
+  it("does not read a clearance or a headcount as furniture", () => {
+    // 「留 1 公尺」 and 「40 人」 both carry a number and a counter-ish word.
+    const s2 = slots("排 40 人的茶會，門口保留 1.2 公尺");
+    expect(s2.requiredAssets).toEqual([]);
+  });
+
+  it("keeps 報到桌 distinct from a plain 桌子", () => {
+    // The cue table is ordered longest-phrase-first, so 「兩張報到桌」 must not
+    // be read as two generic tables.
+    const s2 = slots("要兩張報到桌");
+    expect(s2.requiredAssets.length).toBe(1);
+    expect(s2.requiredAssets[0].value.zone).toBe("registration");
+  });
+
+  it("tags a service desk with the zone it belongs to", () => {
+    const s2 = slots("要一張收費桌");
+    expect(s2.requiredAssets[0].value.zone).toBe("payment");
+  });
+
+  it("shows the requested furniture in the readback", () => {
+    const p = parseRequest("幫我排一個 40 人的茶會，要三張長桌");
+    expect(describeParse(p).join(" ")).toContain("builtin:table × 3");
+  });
+
   it("reads how many alternatives were asked for", () => {
     expect(slots("提出三種方案").schemeCount?.value).toBe(3);
     expect(slots("提出兩種改善方案").schemeCount?.value).toBe(2);

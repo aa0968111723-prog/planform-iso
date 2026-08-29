@@ -1367,6 +1367,13 @@ export class AgentExecutor {
     if (args.zones !== undefined) brief.requiredZones = args.zones as ZoneType[];
     if (args.objectives !== undefined) brief.objectives = args.objectives as LayoutObjective[];
     if (args.seatAssetId !== undefined) brief.seatAssetId = str(args.seatAssetId);
+    if (args.requiredAssets !== undefined) {
+      brief.requiredAssets = (args.requiredAssets as Args[]).map((a) => ({
+        assetId: str(a.assetId),
+        count: num(a.count, 1),
+        ...(a.zone !== undefined ? { zone: str(a.zone) as ZoneType } : {}),
+      }));
+    }
     return brief;
   }
 

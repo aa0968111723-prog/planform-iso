@@ -142,6 +142,89 @@ describe("scheme measurement is honest", () => {
   });
 });
 
+describe("furniture the brief asked for by name", () => {
+  const brief = (over: Record<string, unknown> = {}) => ({
+    participants: 40, staffCount: 4,
+    requiredAssets: [
+      { assetId: "builtin:table", count: 3 },
+      { assetId: "builtin:screen", count: 2 },
+    ],
+    ...over,
+  });
+
+  it("places every requested piece in every scheme", () => {
+    const r = generateLayoutSchemes(bigRoom(), brief());
+    for (const s of r.schemes) {
+      expect(s.objects.filter((o) => o.assetId === "builtin:table").length, s.id).toBe(3);
+      expect(s.objects.filter((o) => o.assetId === "builtin:screen").length, s.id).toBe(2);
+    }
+  });
+
+  it("does not put them on top of the seats or the desks", () => {
+    const r = generateLayoutSchemes(bigRoom(), brief());
+    for (const s of r.schemes) {
+      // The scheme's own validation is the arbiter: an overlap would raise one.
+      const overlaps = s.validation.issues.filter((i) => i.code === "overlap" || i.code === "mat-overlap");
+      expect(overlaps, `${s.id}: ${overlaps.map((o) => o.message).join("; ")}`).toEqual([]);
+    }
+  });
+
+  it("mounts a wall asset on a wall, not in the middle of the floor", () => {
+    // A screen dropped on the floor lattice failed the product's own wall-off
+    // check — the planner must not hand the user a layout its validator rejects.
+    const r = generateLayoutSchemes(bigRoom(), brief());
+    for (const s of r.schemes) {
+      expect(s.validation.issues.filter((i) => i.code === "wall-off"), s.id).toEqual([]);
+      for (const screen of s.objects.filter((o) => o.assetId === "builtin:screen")) {
+        expect(screen.surface).toBe("wall");
+        expect(screen.elevation).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("reports what it could not fit instead of dropping it", () => {
+    const small = createDefaultProject();
+    small.classroom = { ...small.classroom, length: 4, width: 3 };
+    const r = generateLayoutSchemes(small, {
+      participants: 10,
+      requiredAssets: [{ assetId: "builtin:table", count: 20 }],
+    });
+    for (const s of r.schemes) {
+      expect(s.risks.join(" "), s.id).toMatch(/只排得下/);
+    }
+  });
+
+  it("reports an asset id it cannot resolve", () => {
+    const r = generateLayoutSchemes(bigRoom(), {
+      participants: 20,
+      requiredAssets: [{ assetId: "builtin:teleporter", count: 1 }],
+    });
+    expect(r.schemes[0].risks.join(" ")).toContain("找不到素材");
+  });
+
+  it("puts a zone-tagged asset nearer that zone than the room centre", () => {
+    const r = generateLayoutSchemes(bigRoom(), {
+      participants: 40, staffCount: 4,
+      requiredZones: ["registration", "payment", "meditation"],
+      requiredAssets: [{ assetId: "builtin:table", count: 1, zone: "registration" }],
+    });
+    const scheme = r.schemes.find((s) => s.id === "scheme-b")!;
+    const zone = scheme.zones.find((z) => z.type === "registration")!;
+    const table = scheme.objects.find((o) => o.assetId === "builtin:table")!;
+    const toZone = Math.hypot(table.x - zone.x, table.z - zone.z);
+    const centre = { x: (r.brief.usable.minX + r.brief.usable.maxX) / 2, z: (r.brief.usable.minZ + r.brief.usable.maxZ) / 2 };
+    const toCentre = Math.hypot(table.x - centre.x, table.z - centre.z);
+    expect(toZone).toBeLessThanOrEqual(toCentre);
+  });
+
+  it("changes nothing when the brief names no extra furniture", () => {
+    const without = generateLayoutSchemes(bigRoom(), { participants: 40, staffCount: 4 });
+    for (const s of without.schemes) {
+      expect(s.objects.filter((o) => o.assetId === "builtin:table")).toEqual([]);
+    }
+  });
+});
+
 describe("an explicit requirement is a constraint, not a weight", () => {
   it("a combined-desk scheme is ineligible when 分流 was asked for", () => {
     const r = generateLayoutSchemes(bigRoom(), {

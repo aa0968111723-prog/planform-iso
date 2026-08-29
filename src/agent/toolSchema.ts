@@ -137,6 +137,12 @@ function name(description: string, required = false): ToolParamSpec {
   return { type: "string", description, required, maxLength: 80 };
 }
 
+const REQUIRED_ASSET_SHAPE: Record<string, ToolParamSpec> = {
+  assetId: { type: "string", description: "素材目錄 id", required: true, maxLength: 120 },
+  count: { type: "number", description: "數量", required: true, min: 1, max: 200, integer: true },
+  zone: { type: "enum", description: "要放在哪一類區域附近", values: ZONE_TYPES },
+};
+
 const POINT_SHAPE: Record<string, ToolParamSpec> = {
   x: meters("X 座標（公尺）", true),
   z: meters("Z 座標（公尺）", true),
@@ -440,6 +446,10 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
       zones: { type: "string[]", description: "需要的區域類型", values: ZONE_TYPES, maxItems: 16 },
       objectives: { type: "string[]", description: "設計目標", values: OBJECTIVES, maxItems: 8 },
       seatAssetId: id("座位素材 id（地墊或椅子）", false),
+      requiredAssets: {
+        type: "object[]", description: "指名要的素材與數量，例如三張長桌",
+        maxItems: 20, itemShape: REQUIRED_ASSET_SHAPE,
+      },
     },
   },
   {
@@ -454,6 +464,10 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
       zones: { type: "string[]", description: "需要的區域類型", values: ZONE_TYPES, maxItems: 16 },
       objectives: { type: "string[]", description: "設計目標", values: OBJECTIVES, maxItems: 8 },
       seatAssetId: id("座位素材 id", false),
+      requiredAssets: {
+        type: "object[]", description: "指名要的素材與數量",
+        maxItems: 20, itemShape: REQUIRED_ASSET_SHAPE,
+      },
     },
   },
   {

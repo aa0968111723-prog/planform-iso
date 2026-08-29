@@ -176,6 +176,8 @@ export interface ExtractedSlots {
   schemeCount?: Slot<number>;
   /** Named audience, e.g. 淡江大學生. Kept for the rationale, not for maths. */
   audience?: Slot<string>;
+  /** Furniture asked for by name and count: 「三張長桌」「兩個架子」. */
+  requiredAssets: Slot<{ assetId: string; count: number; zone?: ZoneType }>[];
 }
 
 /** Metres for a number written with a unit. Returns null when there is no unit. */
@@ -225,6 +227,23 @@ export const OBJECTIVE_CUES: { re: RegExp; objective: LayoutObjective }[] = [
   { re: /坐更多|多坐|最多人|容納最多|塞更多人/, objective: "maximise-capacity" },
 ];
 
+/**
+ * Furniture the brief can ask for by the piece.
+ *
+ * Ordered longest-phrase-first so 「報到桌」 is not matched as 「桌」. The
+ * counter is deliberately loose (張/個/台/組/支/把/座) because people do not
+ * agree on measure words for furniture.
+ */
+export const COUNTABLE_ASSET_CUES: { re: RegExp; assetId: string; label: string; zone?: ZoneType }[] = [
+  { re: /報到桌|簽到桌/, assetId: "builtin:regTable", label: "報到桌", zone: "registration" },
+  { re: /收費桌|繳費桌|售票桌/, assetId: "builtin:regTable", label: "收費桌", zone: "payment" },
+  { re: /長桌|折疊桌|會議桌|桌子|方桌/, assetId: "builtin:table", label: "桌子" },
+  { re: /椅子|摺疊椅|凳子/, assetId: "builtin:chair", label: "椅子" },
+  { re: /投影幕|布幕|螢幕/, assetId: "builtin:screen", label: "投影幕" },
+  { re: /電腦|筆電/, assetId: "builtin:computer", label: "電腦" },
+  { re: /地墊|坐墊|墊子/, assetId: "builtin:mat", label: "地墊" },
+];
+
 export const RELATION_CUES: { re: RegExp; relation: SpatialRelation }[] = [
   { re: /右(側|邊|方)/, relation: "right" },
   { re: /左(側|邊|方)/, relation: "left" },
@@ -255,7 +274,7 @@ function clauses(text: string): string[] {
 }
 
 export function extractSlots(normalized: string): ExtractedSlots {
-  const slots: ExtractedSlots = { requiredZones: [], objectives: [], objectRefs: [] };
+  const slots: ExtractedSlots = { requiredZones: [], objectives: [], objectRefs: [], requiredAssets: [] };
   const t = normalized;
 
   // --- headcount. 「60 人」 but not 「1 公尺」 and not 「3 種方案」.
@@ -367,6 +386,30 @@ export function extractSlots(normalized: string): ExtractedSlots {
   // --- how many alternatives
   const schemes = t.match(new RegExp(`${NUM}\\s*(?:種|個|款)[^,.;]{0,4}?(?:方案|做法|配置|排法|版本)`));
   if (schemes) slots.schemeCount = { value: Math.round(Number(schemes[1])), evidence: schemes[0] };
+
+  // --- furniture asked for by the piece
+  {
+    const COUNTER = "(?:張|個|台|臺|組|支|把|座|件)";
+    const seen = new Set<string>();
+    for (const cue of COUNTABLE_ASSET_CUES) {
+      // The count must sit immediately before the noun, so 「留 1 公尺，放三張
+      // 長桌」 reads three tables and not one.
+      const re = new RegExp(`${NUM}\\s*${COUNTER}\\s*(?:的)?\\s*(?:${cue.re.source})`);
+      const m = t.match(re);
+      if (!m) continue;
+      const key = `${cue.assetId}:${cue.zone ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      slots.requiredAssets.push({
+        value: {
+          assetId: cue.assetId,
+          count: Math.max(1, Math.round(Number(m[1]))),
+          ...(cue.zone ? { zone: cue.zone } : {}),
+        },
+        evidence: m[0],
+      });
+    }
+  }
 
   const audience = t.match(/(淡江大學(?:學)?生|大學生|新生|社員|同學|校友|老師)/);
   if (audience) slots.audience = { value: audience[1], evidence: audience[0] };
@@ -591,6 +634,9 @@ export function describeParse(parsed: ParsedRequest): string[] {
   if (s.requiredZones.length) lines.push(`區域：${s.requiredZones.map((z) => z.value).join("、")}`);
   if (s.objectives.length) lines.push(`目標：${s.objectives.map((o) => o.value).join("、")}`);
   if (s.schemeCount) lines.push(`方案數：${s.schemeCount.value}`);
+  for (const a of s.requiredAssets) {
+    lines.push(`素材：${a.value.assetId} × ${a.value.count}（讀自「${a.evidence}」）`);
+  }
   for (const r of s.objectRefs) {
     lines.push(
       `物件：${r.phrase}` +
