@@ -279,16 +279,23 @@ function buildPart(part: PropPart, options: readonly InteractionOption[] | undef
     }
     case "box":
     default: {
-      const material = part.facesFromOptions && options
-        ? diceMaterials(part, options)
-        : part.text
-          ? [
-            baseMaterial(part), baseMaterial(part), baseMaterial(part),
-            baseMaterial(part), paintedMaterial(part.text, part.color ?? "#f8fafc"),
-            baseMaterial(part),
-          ]
-          : baseMaterial(part);
-      mesh = new Mesh(new BoxGeometry(width, height, depth), material as never);
+      if (part.facesFromOptions && options) {
+        mesh = new Mesh(new BoxGeometry(width, height, depth), diceMaterials(part, options) as never);
+      } else if (part.text || part.imageBlobId) {
+        // A nameplate or merch box is a box with a photo on the front — the
+        // same face the text path already paints. Artwork used to apply only
+        // to planes, so a custom 桌上小物 could never show the picture the
+        // Studio just accepted.
+        const front = paintedMaterial(part.text ?? "", part.color ?? "#f8fafc");
+        applyArtwork(front, part);
+        mesh = new Mesh(new BoxGeometry(width, height, depth), [
+          baseMaterial(part), baseMaterial(part), baseMaterial(part),
+          baseMaterial(part), front,
+          baseMaterial(part),
+        ] as never);
+      } else {
+        mesh = new Mesh(new BoxGeometry(width, height, depth), baseMaterial(part));
+      }
       break;
     }
   }

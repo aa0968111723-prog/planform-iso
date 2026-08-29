@@ -16,6 +16,7 @@ import { buildVenueCaptureFlow, venueCaptureAvailable } from "./venueCapture";
 import { refreshFlowPanel } from "./flowPanel";
 import { showPropStudio } from "./propStudio";
 import type { PropDefinition } from "../core/model";
+import type { PropDraftKind } from "../core/propDraft";
 import { deleteLibraryProp, listLibraryProps, loadLibraryProp } from "../state/propLibrary";
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
@@ -187,6 +188,9 @@ export class UI {
       const placed = this.app.store.getState().objects
         .filter((o) => o.assetId === `custom:${defId}`).length;
       this.openPropStudio(def, placed);
+    };
+    this.app.openNewPropStudioHook = (starter) => {
+      this.openPropStudio(undefined, 0, starter);
     };
     this.app.store.onLayoutError = (action) =>
       this.showToast(action === "save" ? "儲存平面圖失敗，請先匯出 JSON" : "刪除平面圖失敗，原檔案仍保留");
@@ -1011,11 +1015,12 @@ export class UI {
     return section("互動道具", rows);
   }
 
-  private openPropStudio(edit?: PropDefinition, instanceCount = 0): void {
+  private openPropStudio(edit?: PropDefinition, instanceCount = 0, starter?: PropDraftKind): void {
     if (this.root.querySelector(".propstudio")) return;
     const overlay = showPropStudio(this.app, {
       edit,
       instanceCount,
+      starter,
       onClose: () => this.update(),
     });
     this.root.append(overlay);

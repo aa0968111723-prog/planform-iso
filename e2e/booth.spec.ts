@@ -306,6 +306,83 @@ test.describe("outdoor booth", () => {
     expect(top.visible).toBe(0);
   });
 
+  test("自己做 a custom prop and put it on the booth table", async ({ page }) => {
+    test.setTimeout(120_000);
+    await openBooth(page);
+    const layoutNav = page.locator('.navbtn[data-nav="layout"]');
+    if (await layoutNav.isVisible()) await layoutNav.click();
+    else await page.locator(".group--flows button", { hasText: "場佈" }).click();
+    await settle(page);
+
+    await page.locator(".left .libtabs .libtab", { hasText: "攤位道具" }).click();
+    await expect(page.locator(".left .library")).toContainText("自己做");
+    await page.locator(".left .library .card", { hasText: "自己做" }).click();
+    await expect(page.locator(".propstudio__card")).toBeVisible();
+    await expect(page.locator(".propstudio__card")).toContainText("桌上小物（自己設計）");
+    await expect(page.locator(".propstudio__card")).toContainText("桌面");
+
+    await page.evaluate(() => {
+      const card = document.querySelector(".propstudio__card");
+      const labels = [...(card?.querySelectorAll("label.field") ?? [])]
+        .filter((el) => (el.querySelector(".field__label")?.textContent ?? "").trim() === "名稱");
+      const input = labels[0]?.querySelector("input") as HTMLInputElement | undefined;
+      if (!input) throw new Error("no 名稱 field");
+      input.value = "社徽立牌";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle(page);
+
+    await page.evaluate(() => {
+      const card = document.querySelector(".propstudio__card");
+      const btn = [...(card?.querySelectorAll("button") ?? [])]
+        .find((b) => (b.textContent ?? "").includes("加入專案並放置"));
+      if (!btn) throw new Error("no 加入專案並放置");
+      (btn as HTMLButtonElement).click();
+    });
+    await settle(page);
+    await expect(page.locator(".placebar-wrap")).toBeVisible();
+
+    const click = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: {
+          store: { getState(): { objects: { assetId?: string; x: number; z: number }[] } };
+          app: { scene: { project(x: number, z: number): { x: number; y: number } } };
+        };
+      }).planform;
+      const table = pf.store.getState().objects.find((o) => o.assetId === "custom:booth-table")!;
+      return pf.app.scene.project(table.x, table.z);
+    });
+    await page.mouse.click(click.x, click.y);
+    await page.locator(".placebar", { hasText: "完成" }).getByText("完成").click();
+
+    const placed = await page.evaluate(() => {
+      const state = (window as unknown as {
+        planform: {
+          store: {
+            getState(): {
+              props?: { id: string; name: string; placement?: string }[];
+              objects: { assetId?: string; surface: string; parentId?: string }[];
+            };
+          };
+        };
+      }).planform.store.getState();
+      const def = state.props?.find((d) => d.name === "社徽立牌");
+      const obj = def
+        ? state.objects.find((o) => o.assetId === `custom:${def.id}`)
+        : undefined;
+      return {
+        found: !!def,
+        placement: def?.placement ?? null,
+        surface: obj?.surface ?? null,
+        parentId: obj?.parentId ?? null,
+      };
+    });
+    expect(placed.found).toBe(true);
+    expect(placed.placement).toBe("tabletop");
+    expect(placed.surface).toBe("tabletop");
+    expect(placed.parentId).toBeTruthy();
+  });
+
   test("攤位道具 sit on the booth table, not on the grass", async ({ page }) => {
     await openBooth(page);
     const layoutNav = page.locator('.navbtn[data-nav="layout"]');

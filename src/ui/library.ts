@@ -3,7 +3,10 @@ import { CATALOG_CATEGORIES } from "../core/assets";
 import type { AssetCatalogEntry, CatalogCategory } from "../core/catalog";
 import { BOOTH_ZONE_ROLES, BOOTH_ZONE_ROLE_IDS } from "../core/boothCatalog";
 import { BOOTH_PROP_PRESETS } from "../core/boothPropPresets";
+import { isUserMadeProp } from "../core/propDraft";
+import { propEntryId } from "../core/propCatalog";
 import { planSymbolForEntry, renderPlanThumbDataUrl } from "../core/planSymbol";
+import { listLibraryProps, loadLibraryProp } from "../state/propLibrary";
 import { ZONE_DEFAULTS, type ZoneType } from "../core/model";
 import { metersToCm } from "../core/units";
 import { button, card, el } from "./dom";
@@ -94,12 +97,20 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
       { label: "擺攤小物", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "擺攤小物") },
       { label: "背景", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "背景") },
     ];
+    const mine = userMadePropCards(app, opts);
     panels.push({
       label: "攤位道具",
-      body: el("div", {}, groups.map((g) => el("div", {}, [
-        el("div", { class: "subhead", text: g.label }),
-        el("div", { class: "cardgrid" }, g.items.map((p) => boothPropCard(app, p, opts))),
-      ]))),
+      body: el("div", {}, [
+        el("div", { class: "cardgrid" }, [selfMakeCard(app, opts)]),
+        ...(mine.length ? [
+          el("div", { class: "subhead", text: "我做的" }),
+          el("div", { class: "cardgrid" }, mine),
+        ] : []),
+        ...groups.map((g) => el("div", {}, [
+          el("div", { class: "subhead", text: g.label }),
+          el("div", { class: "cardgrid" }, g.items.map((p) => boothPropCard(app, p, opts))),
+        ])),
+      ]),
     });
   }
 
@@ -149,6 +160,49 @@ function thumbFor(d: AssetCatalogEntry): string | null {
   } catch {
     return null;
   }
+}
+
+function selfMakeCard(app: App, opts: LibraryOptions = {}): HTMLButtonElement {
+  const c = card("＋", "自己做", "自己定尺寸、顏色、貼圖", () => {
+    app.openNewPropStudio("tabletop");
+    opts.onPick?.();
+  });
+  c.dataset.name = "自己做";
+  return c;
+}
+
+function userMadePropCards(app: App, opts: LibraryOptions = {}): HTMLButtonElement[] {
+  const cards: HTMLButtonElement[] = [];
+  const seen = new Set<string>();
+  for (const def of app.propDefinitions().filter(isUserMadeProp)) {
+    seen.add(def.id);
+    cards.push(userPropCard(def, () => {
+      app.beginPlacementByAssetId(propEntryId(def));
+      opts.onPick?.();
+    }));
+  }
+  for (const meta of listLibraryProps()) {
+    if (seen.has(meta.id)) continue;
+    const def = loadLibraryProp(meta.id);
+    if (!def || !isUserMadeProp(def)) continue;
+    cards.push(userPropCard(def, () => {
+      app.addPropToProject(def, { place: true });
+      opts.onPick?.();
+    }));
+  }
+  return cards;
+}
+
+function userPropCard(
+  def: { name: string; icon?: string; placement?: "floor" | "tabletop"; dimensions: { width: number; depth: number } },
+  onClick: () => void,
+): HTMLButtonElement {
+  const w = Math.round(metersToCm(def.dimensions.width));
+  const dep = Math.round(metersToCm(def.dimensions.depth));
+  const place = def.placement === "tabletop" ? "桌面" : "地面";
+  const c = card(def.icon ?? "✦", def.name, `${w}×${dep}cm · ${place}`, onClick);
+  c.dataset.name = def.name.toLowerCase();
+  return c;
 }
 
 function boothPropCard(app: App, def: (typeof BOOTH_PROP_PRESETS)[number], opts: LibraryOptions = {}): HTMLButtonElement {

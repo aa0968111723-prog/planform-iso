@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { BOOTH_PROP_META, BOOTH_PROP_PRESETS, boothPropPreset, boothPropsByCategory } from "../src/core/boothPropPresets";
 import { migrateProps } from "../src/core/migrate";
 import { metersFromTrim } from "../src/core/printSpec";
+import { blankPropDraft, isUserMadeProp } from "../src/core/propDraft";
 import { entryFromProp } from "../src/core/propCatalog";
 import { propPreset } from "../src/core/propPresets";
 import { describeRecipe, propFromRecipe } from "../src/core/propRecipe";
@@ -77,6 +78,24 @@ describe("stall props and collateral", () => {
     expect(boothPropPreset("prop_tablecloth")!.placement).toBe("floor");
     expect(boothPropPreset("prop_trash_bin")!.placement).toBe("floor");
     expect(entryFromProp(boothPropPreset("prop_rollup")!).placementType).toBe("floor");
+  });
+
+  it("a custom tabletop draft sits on a desk like the kit", () => {
+    const def = blankPropDraft("tabletop");
+    expect(def.placement).toBe("tabletop");
+    expect(def.category).toBe("擺攤小物");
+    expect(def.source).toBe("user");
+    expect(isUserMadeProp(def)).toBe(true);
+    const entry = entryFromProp(def);
+    expect(entry.placementType).toBe("tabletop");
+    expect(entry.kind).toBe("computer");
+    expect(entry.allowedParents).toEqual(["table", "regTable"]);
+    expect(entry.blocksFlow).toBe(false);
+  });
+
+  it("a kit item copied into the project is not listed as 我做的", () => {
+    expect(isUserMadeProp(boothPropPreset("prop_qr_stand")!)).toBe(false);
+    expect(isUserMadeProp({ id: "prop_homemade", source: "user" })).toBe(true);
   });
 
   it("survives migration with placement and print intact", () => {

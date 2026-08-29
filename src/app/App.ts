@@ -56,6 +56,7 @@ import {
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import type { PropDraftKind } from "../core/propDraft";
 import { claimPropId, parsePropFile, propFileName, serializeProp } from "../export/propFile";
 import { downloadText } from "../export/exporters";
 import { clearPropGroupCache } from "../scene/propVisual";
@@ -309,6 +310,8 @@ export class App {
   notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
   /** Set by the UI: open the Prop Studio on a definition. */
   openPropStudioHook: ((defId: string) => void) | null = null;
+  /** Set by the UI: open the Studio on a fresh draft (桌面小物 / 空白方塊). */
+  openNewPropStudioHook: ((starter?: PropDraftKind) => void) | null = null;
   /** UI hook: open the AI sheet with the 幫我改善 request (set by UI). */
   onImprove: (() => void) | null = null;
 
@@ -678,6 +681,11 @@ export class App {
 
   openPropStudioFor(defId: string): void {
     this.openPropStudioHook?.(defId);
+  }
+
+  /** Open the Studio to design a new prop. The library's 自己做 uses tabletop. */
+  openNewPropStudio(starter: PropDraftKind = "tabletop"): void {
+    this.openNewPropStudioHook?.(starter);
   }
 
   /**
