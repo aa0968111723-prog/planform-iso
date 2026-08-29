@@ -119,6 +119,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
   }) as HTMLTextAreaElement;
   const cards = el("div", { class: "agent-sheet__cards" });
   const compare = el("div", { class: "agent-compare", style: "display:none" });
+  const schemes = el("div", { class: "agent-schemes", style: "display:none" });
   const previewBar = el("div", { class: "agent-preview-bar", style: "display:none" });
 
   // Shortcut chips keep the canonical 幫我◯◯ names (spec §6); honesty about
@@ -172,6 +173,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     input,
     el("div", { class: "row wrap", style: "gap:6px;margin-top:8px" }, [runBtn, closeBtn]),
     compare,
+    schemes,
     previewBar,
     cards,
   );
@@ -197,6 +199,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
           ]),
         );
       }
+      renderSchemes(last);
       if (last.previewActive) {
         renderComparison(last.summary);
         previewBar.style.display = "flex";
@@ -210,6 +213,97 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
           text: "這一步沒有成功，場佈沒有被改動。換個說法再試一次。",
         }),
       );
+    }
+  }
+
+  /**
+   * A/B/C, as a table you can act on.
+   *
+   * `generateLayoutCandidates` already measured each scheme with the real
+   * validator and the real simulator, and already knows which one it
+   * recommends and which ones break a requirement the user stated. None of
+   * that reached the screen — the sheet only ever rendered the diff summary,
+   * so 「提出三種方案」 produced three fully-costed options and showed none of
+   * them. Each row can be applied on its own, because "compare then choose" is
+   * the whole point of asking for alternatives.
+   */
+  function renderSchemes(result: QuickAgentResult): void {
+    schemes.innerHTML = "";
+    const found = result.toolResults.find((r) => r.ok && r.tool === "generateLayoutCandidates");
+    const data = found?.data as {
+      recommendedId: string | null;
+      recommendation: string;
+      notes: string[];
+      comparison: {
+        id: string; name: string; capacity: number;
+        avgWaitSeconds: number | null; maxWaitSeconds: number | null;
+        errors: number; warnings: number; score: number;
+        busiest: string | null; eligible: boolean; ineligibleReason: string | null;
+      }[];
+    } | undefined;
+    if (!data?.comparison?.length) {
+      schemes.style.display = "none";
+      return;
+    }
+
+    const mins = (sec: number | null): string =>
+      sec === null ? "—" : sec < 90 ? `${Math.round(sec)} 秒` : `${Math.round(sec / 60)} 分`;
+
+    schemes.append(el("div", { class: "agent-schemes__title", text: "三種排法，數字是實際模擬出來的" }));
+    for (const row of data.comparison) {
+      const recommended = row.id === data.recommendedId;
+      const card = el("div", {
+        class: `agent-scheme${recommended ? " agent-scheme--pick" : ""}${row.eligible ? "" : " agent-scheme--out"}`,
+      }, [
+        el("div", { class: "agent-scheme__head" }, [
+          el("span", { class: "agent-scheme__name", text: row.name }),
+          el("span", { class: "agent-scheme__score", text: recommended ? `推薦 · ${row.score} 分` : `${row.score} 分` }),
+        ]),
+        el("div", { class: "agent-scheme__stats", text: [
+          `可坐 ${row.capacity} 人`,
+          `平均等 ${mins(row.avgWaitSeconds)}`,
+          `最久 ${mins(row.maxWaitSeconds)}`,
+          row.busiest ? `最塞：${row.busiest}` : null,
+          row.errors ? `${row.errors} 個問題` : null,
+        ].filter(Boolean).join(" · ") }),
+      ]);
+      if (!row.eligible && row.ineligibleReason) {
+        card.append(el("div", { class: "agent-scheme__warn", text: row.ineligibleReason }));
+      }
+      card.append(button(
+        `用這個排法`,
+        () => void applyScheme(row.id),
+        `chip chip--sm${recommended ? " chip--accent" : ""}`,
+      ));
+      schemes.append(card);
+    }
+    if (data.notes.length) {
+      schemes.append(el("div", { class: "agent-scheme__warn", text: data.notes.join(" ") }));
+    }
+    schemes.style.display = "block";
+  }
+
+  /** Apply one named scheme, straight into the same preview → 套用 loop. */
+  async function applyScheme(candidateId: string): Promise<void> {
+    cards.innerHTML = "";
+    cards.append(el("div", { class: "agent-card", text: "排版中…" }));
+    const last = await app.quickAgent.run({
+      text: input.value.trim() || "幫我排場佈",
+      selectionIds: [...app.session.selection],
+      applyScheme: candidateId,
+    });
+    cards.innerHTML = "";
+    for (const c of last.cards) {
+      cards.append(el("div", { class: "agent-card" }, [
+        el("div", { class: "agent-card__title", text: humanizeCardTitle(c.title) }),
+        el("div", { class: "agent-card__detail", text: humanizeDetail(c.detail) }),
+      ]));
+    }
+    renderSchemes(last);
+    if (last.previewActive) {
+      renderComparison(last.summary);
+      previewBar.style.display = "flex";
+      app.applyAgentPreview(app.quickAgent.getDraftProject());
     }
   }
 
@@ -302,6 +396,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
       previewBar.style.display = "none";
       compare.style.display = "none";
     }
+    schemes.style.display = "none";
     sheet.style.display = "none";
   }
 

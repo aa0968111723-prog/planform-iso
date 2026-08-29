@@ -161,6 +161,49 @@ test.describe("the agent shows its working", () => {
       .toBeVisible({ timeout: 30_000 });
   });
 
+  test("三種方案的比較表看得到，而且可以直接選一個套用", async ({ page }) => {
+    await openWorkspace(page);
+    await seedPlan(page);
+    const before = await probePlan(page);
+
+    await openAgent(page);
+    await ask(page, "幫我排一個 40 人的茶會，提出三種方案");
+
+    const table = page.locator(".agent-schemes");
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    // Three fully-measured options, one of them marked as the recommendation.
+    await expect(page.locator(".agent-scheme")).toHaveCount(3);
+    await expect(page.locator(".agent-scheme--pick")).toHaveCount(1);
+    await expect(table).toContainText("可坐");
+    await expect(table).toContainText("平均等");
+
+    // Asking for three options must not apply one behind your back.
+    expect(await probePlan(page)).toEqual(before);
+
+    // Picking a row goes through the same preview → 套用 loop.
+    await page.locator(".agent-scheme").nth(2).getByRole("button", { name: "用這個排法" }).click();
+    await expect(page.locator(".agent-preview-bar")).toBeVisible({ timeout: 30_000 });
+    expect(await probePlan(page)).toEqual(before);
+
+    await page.locator(".agent-preview-bar button", { hasText: "套用" }).click();
+    expect(await probePlan(page)).not.toEqual(before);
+  });
+
+  test("破壞明講要求的方案會標註原因，而不是被藏起來", async ({ page }) => {
+    await openWorkspace(page);
+    await seedPlan(page);
+    await openAgent(page);
+    await ask(page, "幫我排一個 40 人的茶會，收費另外分流，提出三種方案");
+    await expect(page.locator(".agent-schemes")).toBeVisible({ timeout: 30_000 });
+    // Still three rows — the user asked for three — with the disqualified one
+    // carrying its reason rather than vanishing.
+    await expect(page.locator(".agent-scheme")).toHaveCount(3);
+    await expect(page.locator(".agent-scheme--out")).toHaveCount(1);
+    await expect(page.locator(".agent-scheme--out")).toContainText("分流");
+    // And the recommendation is never the disqualified one.
+    await expect(page.locator(".agent-scheme--out.agent-scheme--pick")).toHaveCount(0);
+  });
+
   test("改變前 → 改變後的比較表打得開", async ({ page }) => {
     await openWorkspace(page);
     await seedPlan(page);

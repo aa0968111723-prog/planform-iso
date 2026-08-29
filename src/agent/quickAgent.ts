@@ -129,6 +129,13 @@ export class QuickAgent {
       (s) => !["commitAgentChanges", "rollbackAgentChanges", "previewAgentChanges"].includes(s.call.tool),
     );
 
+    // The user picked a row out of the A/B/C table. That is an explicit choice
+    // and it wins over the engine's recommendation — but it still goes through
+    // the same preview gate as everything else.
+    if (request.applyScheme) {
+      steps = this.forceScheme(steps, request.applyScheme);
+    }
+
     // --- execution with output threading -----------------------------
     const executor = new AgentExecutor(this.tx, {
       selectionIds: request.selectionIds ?? [],
@@ -175,6 +182,32 @@ export class QuickAgent {
       unresolved,
       plan: steps.map((s) => ({ tool: s.call.tool, because: s.because })),
     };
+  }
+
+  /**
+   * Rewrite the plan so it applies the scheme the user chose.
+   *
+   * If the plan already had an `applySmartLayout`, its candidate is swapped.
+   * If it did not — the user asked for alternatives and then picked one — the
+   * step is appended, together with the validation pass that must follow any
+   * layout change.
+   */
+  private forceScheme(steps: PlannedStep[], candidateId: string): PlannedStep[] {
+    const existing = steps.find((s) => s.call.tool === "applySmartLayout");
+    if (existing) {
+      existing.call = { tool: "applySmartLayout", args: { ...existing.call.args, candidateId } };
+      existing.because = `套用你選的方案 ${candidateId.replace("scheme-", "").toUpperCase()}。`;
+      return steps;
+    }
+    const brief = steps.find((s) => s.call.tool === "generateLayoutCandidates")?.call.args ?? {};
+    return [
+      ...steps,
+      {
+        call: { tool: "applySmartLayout", args: { ...brief, candidateId } },
+        because: `套用你選的方案 ${candidateId.replace("scheme-", "").toUpperCase()}。`,
+      },
+      { call: { tool: "validateLayout", args: {} }, because: "套用後重跑檢查。" },
+    ];
   }
 
   /**

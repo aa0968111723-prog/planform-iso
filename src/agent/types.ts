@@ -133,6 +133,16 @@ export interface AgentRequest {
   text: string;
   selectionIds?: string[];
   locale?: string;
+  /**
+   * Apply this specific layout scheme instead of the recommended one.
+   *
+   * Set when the user picks a row out of the A/B/C comparison. It is a
+   * deliberate override of the engine's recommendation — including of a scheme
+   * the engine marked ineligible, because a person who has read the reason is
+   * allowed to disagree with it. The reason keeps travelling with the scheme so
+   * the sheet keeps saying so.
+   */
+  applyScheme?: string;
 }
 
 export interface AgentResponse {

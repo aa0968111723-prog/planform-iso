@@ -281,6 +281,38 @@ describe("orchestration", () => {
     expect(agent.getDraftProject()!.props?.length).toBe(1);
   });
 
+  it("applyScheme overrides the recommendation with the user's choice", async () => {
+    // The user read the A/B/C table and picked a row. That is an explicit
+    // decision and it wins over the engine's recommendation — while still
+    // going through the same preview gate.
+    const store = new Store(staffedRoom());
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    const first = await agent.run({ text: "幫我排一個 40 人的茶會，提出三種方案" });
+    const gen = first.toolResults.find((t) => t.tool === "generateLayoutCandidates")!;
+    const recommended = (gen.data as { recommendedId: string }).recommendedId;
+    const other = ["scheme-a", "scheme-b", "scheme-c"].find((x) => x !== recommended)!;
+
+    const second = await agent.run({
+      text: "幫我排一個 40 人的茶會，提出三種方案",
+      applyScheme: other,
+    });
+    const applied = second.toolResults.find((t) => t.tool === "applySmartLayout");
+    expect(applied?.ok).toBe(true);
+    expect((applied!.data as { candidateId: string }).candidateId).toBe(other);
+    // Still a preview, still nothing committed.
+    expect(second.previewActive).toBe(true);
+    expect(store.getState().groups.length).toBe(0);
+  });
+
+  it("applyScheme swaps the candidate when the plan already had one", async () => {
+    const store = new Store(staffedRoom());
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    const r = await agent.run({ text: "幫我排一個 40 人的茶會", applyScheme: "scheme-c" });
+    const applied = r.toolResults.filter((t) => t.tool === "applySmartLayout");
+    expect(applied.length).toBe(1);
+    expect((applied[0].data as { candidateId: string }).candidateId).toBe("scheme-c");
+  });
+
   it("recovers from a provider that throws", async () => {
     const store = new Store(staffedRoom());
     const agent = new QuickAgent(store, {
