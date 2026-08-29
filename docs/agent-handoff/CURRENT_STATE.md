@@ -19,6 +19,14 @@
 
 送印清單在 `printOrderLines()`，只算實際放進場的道具。
 
+4. **`PropPart.imageBlobId` 以前是假的。** 註解說會畫在正面、plane 分支也
+   檢查了它，然後畫 text——場景層根本沒有任何地方讀 blob store。
+   現在 `propVisual.ts` 的 `artworkTexture()` 會非同步載入並換上 map，
+   讀不到就保留彩繪文字。改這一段時記得：**場景圖是同步建的，
+   載圖是非同步的**，所以一定是「先建 fallback、再換 map」。
+   `setPropArtwork` 工具會 bump 版本號，不 bump 的話已放在場上的道具
+   不會重建。
+
 ## 最新一輪：完整空間規劃 Agent（分支 `feat/full-planform-spatial-agent`，未 merge）
 
 從 `origin/main` 開的分支。四件事：
