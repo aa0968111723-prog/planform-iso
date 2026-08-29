@@ -26,10 +26,8 @@ Review 對象：`feat/multi-project` 分支相對 `main`（`5cfb4a4`）。
 - 編輯器內 named layouts 的標題由「我的平面圖（本機儲存）」改為
   **「這個專案的版本（方案 A／方案 B／最後版）」**，講清楚它是 Project *內部*的版本。
 
-**殘留（誠實記錄）**：named layouts 在儲存層仍是全域的（`planform-iso:layouts`，以名稱為 key），
-不是 project-scoped。規格 §7 明講「如果暫時不值得做 project-scoped snapshots，
-可以保留現有 named layout 相容能力，但 UI 不要把它叫成另一個專案」——本輪照這條走：
-**改 UI 語意、不動儲存結構**。真正的 project-scoped snapshot 列為 1.1。
+綁定專案時，方案 A／B 寫入 `planform-iso:snapshots:<projectId>`。
+未綁定（舊單一編輯器）仍用全域 `planform-iso:layouts`。
 
 ---
 

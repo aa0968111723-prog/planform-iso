@@ -7,6 +7,17 @@ test.describe("production bundle", () => {
     await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { planform?: unknown }).planform))).toBe(true);
   });
 
+  test("stays usable after going offline", async ({ page, context }) => {
+    await page.goto("/?e2e");
+    await expect(page.locator("#app")).toBeVisible();
+    await page.waitForFunction(() => navigator.serviceWorker?.ready.then((r) => Boolean(r)), undefined, {
+      timeout: 30_000,
+    }).catch(() => undefined);
+    await context.setOffline(true);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator("#app")).toBeVisible();
+  });
+
   test("serves a build version and exposes the update-banner surface", async ({ page, request }) => {
     const version = await request.get("/version.json");
     expect(version.ok()).toBeTruthy();

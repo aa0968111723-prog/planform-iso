@@ -19,6 +19,8 @@ describe("asset catalog", () => {
     expect(BUILTIN_CATALOG.some((e) => e.id === "builtin:payment-desk")).toBe(true);
     expect(BUILTIN_CATALOG.some((e) => e.id === "builtin:signage-stand")).toBe(true);
     expect(BUILTIN_CATALOG.some((e) => e.id === "builtin:shoe-rack")).toBe(true);
+    expect(BUILTIN_CATALOG.some((e) => e.id === "builtin:av-mixer")).toBe(true);
+    expect(BUILTIN_CATALOG.some((e) => e.id === "builtin:name-badge-box")).toBe(true);
   });
 
   it("resolves assetId over kind and falls back when missing", () => {

@@ -8,18 +8,7 @@ import {
 describe("PRODUCT_LIMITATIONS", () => {
   it("lists every documented 1.1 / field-only / runtime gap once", () => {
     const ids = PRODUCT_LIMITATIONS.map((item) => item.id);
-    expect(ids).toEqual([
-      "thumbnail",
-      "named-layouts",
-      "r06-family-seating",
-      "r07-av-position",
-      "r08-name-badge",
-      "venue-scan-mock",
-      "ai-offline-rules",
-      "v2-checkin-wizard",
-      "last-write-wins",
-      "production-unverified",
-    ]);
+    expect(ids).toEqual(["production-unverified"]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const item of PRODUCT_LIMITATIONS) {
       expect(item.title.length).toBeGreaterThan(4);

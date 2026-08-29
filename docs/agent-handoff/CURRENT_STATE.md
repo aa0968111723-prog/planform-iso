@@ -125,9 +125,8 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium-1194/chrome-linux/chrom
 1. ~~e2e 全綠 → push → 開 PR~~ 完成：**PR #18**（draft），head `14a6053`
 2. **使用者端**：`audit-local-references.ps1`、放行 production 網域或本機跑 prodSmoke、
    Grok/Codex CLI 登入
-3. 1.1／已知限制已收進 `docs/PRODUCT_LIMITATIONS.md` 與產品「更多 → 已知限制」。
-   eventDate 現在有卡片／分享入口。仍待辦：project-scoped snapshots、thumbnail 自動產圖、
-   R-06／R-07／R-08、V2 報到精靈、真場地辨識、真 LLM、雙分頁合併、production 實測
+3. 1.1／已知限制的產品缺口已補上（縮圖、專案內快照、R-06／07／08、本機影像、
+   可選雲端 AI、A–E 精靈、分頁衝突）。剩下：遠端 Zeabur 本環境連不到。
 
 ## 7. 環境備忘
 
