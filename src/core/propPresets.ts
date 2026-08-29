@@ -16,6 +16,7 @@
  * record what happens, never how long it takes.
  */
 
+import { BOOTH_PROP_PRESETS } from "./boothPropPresets";
 import type { InteractionOption, PropDefinition } from "./model";
 
 const face = (i: number, color: string): InteractionOption => ({
@@ -593,7 +594,19 @@ export const PROP_PRESETS: PropDefinition[] = [
   diceStation(), blessingBox(), quizStation(), spinnerStation(),
 ];
 
+/**
+ * Every preset the Studio and the recipe layer can start from.
+ *
+ * The stall props (`boothPropPresets.ts`) are a separate file because they are
+ * a separate design problem — printed collateral and table items rather than
+ * interactive games — but they resolve through this one lookup so a caller
+ * never has to know which file a preset came from.
+ */
+export function allPropPresets(): PropDefinition[] {
+  return [...PROP_PRESETS, ...BOOTH_PROP_PRESETS];
+}
+
 export function propPreset(id: string): PropDefinition | null {
-  const found = PROP_PRESETS.find((d) => d.id === id || d.source === id);
+  const found = allPropPresets().find((d) => d.id === id || d.source === id);
   return found ? JSON.parse(JSON.stringify(found)) as PropDefinition : null;
 }

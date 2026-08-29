@@ -23,7 +23,7 @@
 import { eventFlowAdapter } from "../adapters/eventFlow";
 import { ALL_KINDS, assetDef } from "../core/assets";
 import { createCustomAssetProxy } from "../assets/proxy";
-import { describeRecipe, propFromRecipe } from "../core/propRecipe";
+import { describeRecipe, propFromRecipe, type PropRecipe } from "../core/propRecipe";
 import { syncPropEntries } from "../core/propCatalog";
 import {
   MockReconstructionWorker,
@@ -33,7 +33,7 @@ import {
 import type { AssetCatalogEntry, SemanticAssetType, ServiceRole } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
 import { buildSummaryLines } from "../core/summary";
-import { inventoryLines } from "../export/constructionPlan";
+import { inventoryLines, printOrderLines } from "../export/constructionPlan";
 import { groupMembers } from "../core/arrays";
 import { measure, objectGap } from "../core/measure";
 import { areaBounds, doorSweep, footprintBounds, pointInDoorSweep, pointToRectDist, wallClearances, type Rect } from "../core/placement";
@@ -278,6 +278,11 @@ export class AgentExecutor {
               : {}),
             ...(faces?.length ? { faces } : {}),
             ...(args.interactive === false ? { interactive: false } : {}),
+            ...(args.text !== undefined ? { text: str(args.text) } : {}),
+            ...(args.imageBlobId !== undefined ? { imageBlobId: str(args.imageBlobId) } : {}),
+            ...(Array.isArray(args.print) && args.print.length
+              ? { print: (args.print as Args[])[0] as PropRecipe["print"] }
+              : {}),
           },
           uid("prop"),
         );
@@ -286,6 +291,51 @@ export class AgentExecutor {
           p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
         });
         return ok({ propId: def.id, summary: describeRecipe(def) });
+      }
+
+      case "setPropArtwork": {
+        const propId = str(args.propId);
+        const def = (draft.props ?? []).find((d) => d.id === propId);
+        if (!def) return fail(`找不到道具 ${propId}`);
+
+        // A blob id can be given directly, but nobody knows one by heart. The
+        // useful path is 「用剛剛匯入的那張圖」: name the asset, and its stored
+        // source image is found for you.
+        let blobId = str(args.imageBlobId);
+        if (!blobId) {
+          const assetId = str(args.assetId);
+          if (!assetId) return fail("setPropArtwork 需要 assetId 或 imageBlobId");
+          const entry = (draft.catalogExtras ?? []).find((e) => e.id === assetId);
+          if (!entry) return fail(`找不到素材 ${assetId}`);
+          blobId = entry.blobIds?.sourceImage ?? "";
+          if (!blobId) return fail(`素材「${entry.name}」沒有來源圖片，無法當作圖稿。`);
+        }
+
+        // The printable face is the last part for every printed preset (foot
+        // first, panel last). A named part wins when the caller knows better.
+        const wantedPart = str(args.partId);
+        const index = wantedPart
+          ? def.parts.findIndex((p) => p.id === wantedPart)
+          : def.parts.length - 1;
+        if (index < 0) return fail(`道具「${def.name}」沒有零件 ${wantedPart}`);
+        const target = def.parts[index];
+        if (target.shape !== "plane") {
+          return fail(`零件「${target.id}」不是平面，貼圖只能貼在印刷面上。`);
+        }
+
+        this.tx.mutate((p) => {
+          p.props = (p.props ?? []).map((d) => (d.id === propId
+            ? {
+              ...d,
+              // The catalog entry mirrors this number and the scene's rebuild
+              // signature reads it; without the bump the artwork never appears.
+              version: (d.version ?? 1) + 1,
+              parts: d.parts.map((part, i) => (i === index ? { ...part, imageBlobId: blobId } : part)),
+            }
+            : d));
+          p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+        });
+        return ok({ propId, partId: target.id, imageBlobId: blobId });
       }
 
       case "importAsset": {
@@ -1299,10 +1349,21 @@ export class AgentExecutor {
       case "exportMaterialList": {
         // Pure data: this one works headless, so it does not need a host.
         const lines = inventoryLines(draft);
+        // Anything printed gets its own list, because it is a different errand
+        // on a different deadline: the 物資 you carry from the club room, and
+        // the 文宣 somebody has to send to a printer days earlier.
+        const print = printOrderLines(draft);
         return ok({
           lines,
           totalItems: lines.reduce((n, l) => n + l.count, 0),
-          explanation: explainWithSources("物資清單由目前場佈的物件與陣列統計。", ["visual-plan-legibility"]),
+          printOrders: print,
+          totalPrints: print.reduce((n, l) => n + l.quantity, 0),
+          explanation: explainWithSources(
+            print.length
+              ? "物資清單由目前場佈的物件與陣列統計；印刷品另外列出可直接送印的規格。"
+              : "物資清單由目前場佈的物件與陣列統計。",
+            ["visual-plan-legibility"],
+          ),
         });
       }
 

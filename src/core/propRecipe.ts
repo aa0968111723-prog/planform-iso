@@ -15,6 +15,8 @@
  */
 
 import { propPreset } from "./propPresets";
+import { BOOTH_PROP_META } from "./boothPropPresets";
+import { describePrintSpec, metersFromTrim, specFromStandard, type PrintSpec } from "./printSpec";
 import type { InteractionOption, PropDefinition } from "./model";
 
 export interface PropRecipe {
@@ -25,6 +27,34 @@ export interface PropRecipe {
   color?: string;
   faces?: { label: string; color?: string; prompt?: string }[];
   interactive?: boolean;
+  /**
+   * Words to print on the prop's main face — a poster headline, the club name
+   * on a table runner, 「掃我報名」 on a QR stand.
+   *
+   * Applied to the LAST part, which for every printed preset here is the
+   * printable panel; the foot and the frame come first. Painted as a texture,
+   * not 3D type, exactly like the existing `PropPart.text`.
+   */
+  text?: string;
+  /** An image blob already in the asset store, painted on the same face. */
+  imageBlobId?: string;
+  /**
+   * Order this at a real print size.
+   *
+   * A standard id (`A4`, `x-banner`, `backdrop-24`…) resizes the 3D panel to
+   * the trim size AND attaches the order line. Giving a size on the plan and a
+   * different size to the printer is the failure this prevents.
+   */
+  print?: {
+    standard?: string;
+    widthMm?: number;
+    heightMm?: number;
+    orientation?: "portrait" | "landscape";
+    sides?: 1 | 2;
+    material?: string;
+    quantity?: number;
+    finishNote?: string;
+  };
 }
 
 /** Recipe words → preset ids. Everything else becomes a plain box. */
@@ -45,6 +75,52 @@ const KIND_PRESETS: Record<string, string> = {
   立牌: "prop_standee",
   button: "prop_button",
   按鈕: "prop_button",
+
+  // --- 文宣 -------------------------------------------------------------
+  poster: "prop_poster_a2",
+  海報: "prop_poster_a2",
+  a1海報: "prop_poster_a1",
+  a2海報: "prop_poster_a2",
+  xbanner: "prop_xbanner",
+  x展架: "prop_xbanner",
+  展架: "prop_xbanner",
+  rollup: "prop_rollup",
+  易拉寶: "prop_rollup",
+  拉捲式: "prop_rollup",
+  standee: "prop_foamboard_standee",
+  珍珠板立牌: "prop_foamboard_standee",
+  桌牌: "prop_table_tent_a5",
+  桌上立牌: "prop_table_tent_a5",
+  桌前布條: "prop_table_runner",
+  桌裙: "prop_table_runner",
+  布條: "prop_hanging_banner",
+  直式布條: "prop_hanging_banner",
+
+  // --- 背景 -------------------------------------------------------------
+  backdrop: "prop_backdrop",
+  背景: "prop_backdrop",
+  背景牆: "prop_backdrop",
+  背板: "prop_backdrop",
+  合照背景: "prop_backdrop",
+  大背景: "prop_backdrop_wide",
+
+  // --- 擺攤小物 ---------------------------------------------------------
+  傳單架: "prop_flyer_stand",
+  dm架: "prop_flyer_stand",
+  文宣架: "prop_flyer_stand",
+  名片架: "prop_card_holder",
+  抽獎箱: "prop_raffle_box",
+  投票箱: "prop_raffle_box",
+  募款箱: "prop_donation_box",
+  隨喜箱: "prop_donation_box",
+  試吃盤: "prop_sample_tray",
+  樣品盤: "prop_sample_tray",
+  qr立架: "prop_qr_stand",
+  qr架: "prop_qr_stand",
+  集章台: "prop_stamp_station",
+  獎品架: "prop_prize_shelf",
+  陳列架: "prop_prize_shelf",
+  桌巾: "prop_tablecloth",
 };
 
 const DEFAULT_FACE_COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#f472b6", "#a78bfa", "#fb923c"];
@@ -95,6 +171,9 @@ export function propFromRecipe(recipe: PropRecipe, id: string): PropDefinition {
   const presetId = recipe.kind ? KIND_PRESETS[recipe.kind.toLowerCase()] ?? KIND_PRESETS[recipe.kind] : undefined;
   const base = (presetId && propPreset(presetId)) || plainBox(recipe.name);
 
+  // `source` becomes "agent" so the Studio shows where it came from, which
+  // loses the preset id — and with it the preset's use note. Keep it.
+  const basePresetId = base.source;
   let def: PropDefinition = { ...base, id, name: recipe.name || base.name, source: "agent", version: 1 };
 
   if (recipe.dimensions) {
@@ -132,13 +211,112 @@ export function propFromRecipe(recipe: PropRecipe, id: string): PropDefinition {
     };
   }
 
+  // --- printed collateral ------------------------------------------------
+  // The print spec is applied BEFORE text so the panel is already the right
+  // shape when the words land on it, and AFTER `dimensions` so an explicit
+  // print size wins over a hand-typed one — asking for A3 and getting a
+  // 60 cm plane is the exact mismatch this whole block exists to prevent.
+  if (recipe.print) {
+    def = applyPrint(def, recipe.print);
+  }
+
+  // Words and artwork go on the LAST part: every printed preset here builds
+  // foot-then-panel, so the panel is last. A prop with one part gets it there.
+  if (recipe.text || recipe.imageBlobId) {
+    const lastIndex = def.parts.length - 1;
+    def = {
+      ...def,
+      parts: def.parts.map((p, i) => (i === lastIndex
+        ? {
+          ...p,
+          ...(recipe.text ? { text: recipe.text } : {}),
+          ...(recipe.imageBlobId ? { imageBlobId: recipe.imageBlobId } : {}),
+        }
+        : p)),
+    };
+  }
+
   // 「做一個裝飾用的」 — an explicit no turns the game off; a prop with no
   // preset interaction stays decorative either way.
   if (recipe.interactive === false && def.interaction) {
     def = { ...def, interaction: undefined };
   }
 
-  return def;
+  // Carried so `describeRecipe` can still name what the thing is for. Not part
+  // of PropDefinition: it is provenance for the preview card, not plan data.
+  return basePresetId ? Object.assign(def, { basePresetId }) : def;
+}
+
+const PRINT_MATERIALS = new Set([
+  "coated-paper", "matte-paper", "sticker", "pp-synthetic", "canvas",
+  "foam-board", "acrylic", "fabric", "corrugated",
+]);
+
+/**
+ * Attach an order line and resize the printable panel to match it.
+ *
+ * The panel is the last part by construction. Its metres come from the trim
+ * size, and the definition's overall footprint grows with it, so a poster that
+ * says A1 on the order form occupies A1 on the plan.
+ */
+function applyPrint(def: PropDefinition, want: NonNullable<PropRecipe["print"]>): PropDefinition {
+  const fromStandard = want.standard ? specFromStandard(want.standard) : null;
+  const widthMm = want.widthMm ?? fromStandard?.widthMm;
+  const heightMm = want.heightMm ?? fromStandard?.heightMm;
+  // Nothing usable to print at: leave the definition exactly as it was rather
+  // than inventing a size.
+  if (!widthMm || !heightMm || widthMm <= 0 || heightMm <= 0) return def;
+
+  const material = want.material && PRINT_MATERIALS.has(want.material)
+    ? want.material
+    : fromStandard?.material ?? def.print?.material ?? "coated-paper";
+
+  const spec: NonNullable<PropDefinition["print"]> = {
+    widthMm: Math.round(Math.min(5000, Math.max(10, widthMm))),
+    heightMm: Math.round(Math.min(5000, Math.max(10, heightMm))),
+    ...(fromStandard?.standard ? { standard: fromStandard.standard } : {}),
+    orientation: want.orientation ?? fromStandard?.orientation ?? "portrait",
+    sides: want.sides === 2 ? 2 : 1,
+    material,
+    quantity: Math.round(Math.min(10000, Math.max(1, want.quantity ?? def.print?.quantity ?? 1))),
+    bleedMm: fromStandard?.bleedMm ?? def.print?.bleedMm ?? 3,
+    ...(want.finishNote ? { finishNote: want.finishNote } : {}),
+  };
+
+  const panel = metersFromTrim(spec);
+  const lastIndex = def.parts.length - 1;
+  const foot = lastIndex > 0 ? def.parts[0] : null;
+  // The foot scales with the panel: an A5 card on an A1 poster's foot is not a
+  // thing you can buy, and leaving the old foot behind is what made an A5
+  // flyer report a 46 cm footprint — the A2 preset's width, kept by a max().
+  // The foot keeps its 6 cm overhang at the new panel width, rather than being
+  // scaled by a ratio that compounds every time the size changes.
+  const footScale = foot ? (panel.width + 0.06) / foot.size.width : 1;
+  const parts = def.parts.map((p, i) => {
+    if (i === lastIndex) {
+      return { ...p, size: { ...p.size, width: panel.width, height: panel.height } };
+    }
+    return {
+      ...p,
+      size: { ...p.size, width: p.size.width * footScale },
+    };
+  });
+
+  // The footprint is DERIVED, never maxed with the value it is replacing:
+  // taking the larger of old and new means a smaller print can never shrink
+  // the object, and the plan then reserves space for a poster nobody ordered.
+  const footHeight = foot ? def.parts[lastIndex].offset.y : 0;
+  const width = foot ? Math.max(panel.width, foot.size.width * footScale) : panel.width;
+  return {
+    ...def,
+    parts,
+    dimensions: {
+      width,
+      depth: def.dimensions.depth,
+      height: footHeight + panel.height,
+    },
+    print: spec,
+  };
 }
 
 /** One sentence describing what a recipe will produce, for the preview card. */
@@ -148,7 +326,32 @@ export function describeRecipe(def: PropDefinition): string {
   const faces = def.interaction?.steps
     .find((s) => s.branch?.kind === "chance")?.branch;
   const count = faces?.kind === "chance" ? faces.options.length : 0;
-  return count
-    ? `${def.name}：${size}，${count} 個面，放下去就能彩排`
+  // A printed prop's headline fact is the ORDER, not the box size: the club
+  // has to send something to a printer, and 「60 公分寬」 is not something a
+  // printer can quote from.
+  if (def.print) {
+    return `${def.name}：${describePrintSpec(def.print as PrintSpec)}`;
+  }
+  if (count) return `${def.name}：${size}，${count} 個面，放下去就能彩排`;
+  // 「裝飾用」 is wrong for a QR stand or a raffle box: they do a job, they
+  // just are not simulated. Say what it is for when the preset knows.
+  const use = presetUse(def);
+  return use
+    ? `${def.name}：${size}，${use}`
     : `${def.name}：${size}，裝飾用（沒有互動）`;
+}
+
+/**
+ * What a prop is for, when it came from a stall preset.
+ *
+ * Matched on the parts signature rather than `source`, because a recipe-built
+ * prop reports `source: "agent"` — it genuinely did come from the agent, and
+ * overwriting that to keep a lookup working would trade a true field for a
+ * convenient one.
+ */
+function presetUse(def: PropDefinition): string | undefined {
+  const direct = def.source ? BOOTH_PROP_META[def.source]?.use : undefined;
+  if (direct) return direct;
+  const tagged = (def as { basePresetId?: string }).basePresetId;
+  return tagged ? BOOTH_PROP_META[tagged]?.use : undefined;
 }

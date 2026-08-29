@@ -11,6 +11,14 @@ function clone<T>(v: T): T {
   return structuredClone(v);
 }
 
+/** What to call a prop in a change note, from what it actually is. */
+function propNoun(def: { category?: string; interaction?: unknown }): string {
+  if (def.category === "文宣") return "文宣";
+  if (def.category === "背景") return "背景";
+  if (def.category === "擺攤小物") return "擺攤小物";
+  return def.interaction ? "互動道具" : "道具";
+}
+
 export class AgentTransaction {
   private base: Project | null = null;
   private draft: Project | null = null;
@@ -83,7 +91,10 @@ export class AgentTransaction {
     if (movedObjectIds.length) notes.push(`移動 ${movedObjectIds.length} 件物件`);
     if (addedCatalogIds.length) notes.push(`新增 ${addedCatalogIds.length} 筆素材`);
     for (const id of addedPropIds) {
-      notes.push(`新增互動道具「${afterProps.get(id)!.name}」`);
+      const def = afterProps.get(id)!;
+      // 「互動道具」 was hard-coded, so an A2 poster was announced as an
+      // interactive prop. The definition already says what it is.
+      notes.push(`新增${propNoun(def)}「${def.name}」`);
     }
     for (const id of changedPropIds) notes.push(`修改道具「${afterProps.get(id)!.name}」`);
     for (const id of removedPropIds) notes.push(`移除道具「${beforeProps.get(id)!.name}」`);

@@ -9,7 +9,9 @@
 import { assetDef } from "../core/assets";
 import { catalogFromProject } from "../core/migrate";
 import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
-import { calibrationComplete, venueNeedsCalibration, type Project, type SceneObject } from "../core/model";
+import { calibrationComplete, venueNeedsCalibration, type PropDefinition, type Project, type SceneObject } from "../core/model";
+import { propForAssetId } from "../core/propCatalog";
+import { artboardMm, describePrintSpec, type PrintSpec } from "../core/printSpec";
 import { audienceJoiners, stationForStep, normalizeTemplate } from "../core/interactionCompile";
 import { groupFootprint, groupMembers, memberLabel } from "../core/arrays";
 
@@ -156,6 +158,61 @@ export function inventoryLines(project: Project): InventoryLine[] {
     add(entry.icon, named ? preset.label : preset ? `${entry.name} ${preset.label}` : entry.name, g.rows * g.cols);
   }
   return [...byName.values()].sort((a, b) => b.count - a.count);
+}
+
+export interface PrintOrderLine {
+  /** The prop's name, as the club calls it. */
+  name: string;
+  icon: string;
+  /** One line a printer can quote from. */
+  spec: string;
+  /** Artwork canvas including bleed, for whoever makes the file. */
+  artboard: string;
+  quantity: number;
+}
+
+/**
+ * What to send to the printer.
+ *
+ * The plan already knows every poster, banner and backdrop the stall needs and
+ * exactly how big each one is. Until this existed that knowledge died on the
+ * canvas: the 場佈圖 showed a white rectangle and somebody still had to work
+ * out, by hand, that it meant 「A2 雪銅紙 30 份」.
+ *
+ * Only props that are actually PLACED are counted — designing a banner and not
+ * putting it anywhere is not an order.
+ */
+export function printOrderLines(project: Project): PrintOrderLine[] {
+  const placedCount = new Map<string, { def: PropDefinition; placed: number }>();
+  for (const o of project.objects) {
+    if (o.hidden) continue;
+    // `propForAssetId` is the one place that knows how a placed object points
+    // back at a definition; re-deriving it here would be a second answer to
+    // the same question.
+    const def = propForAssetId(project.props, o.assetId);
+    if (!def) continue;
+    const cur = placedCount.get(def.id);
+    if (cur) cur.placed += 1;
+    else placedCount.set(def.id, { def, placed: 1 });
+  }
+
+  const out: PrintOrderLine[] = [];
+  for (const { def, placed } of placedCount.values()) {
+    if (!def.print) continue;
+    const spec = def.print as PrintSpec;
+    // The spec's own quantity is per placed item: two X 展架 on the plan, each
+    // specced 1, is an order for two.
+    const quantity = spec.quantity * placed;
+    const board = artboardMm(spec);
+    out.push({
+      name: def.name,
+      icon: def.icon ?? "🖨",
+      spec: describePrintSpec({ ...spec, quantity }),
+      artboard: `完稿 ${board.widthMm} × ${board.heightMm} mm`,
+      quantity,
+    });
+  }
+  return out.sort((a, b) => b.quantity - a.quantity);
 }
 
 interface Bounds { minX: number; minZ: number; maxX: number; maxZ: number }

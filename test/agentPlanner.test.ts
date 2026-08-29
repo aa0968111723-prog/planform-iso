@@ -145,6 +145,63 @@ describe("the six target sentences", () => {
   });
 });
 
+describe("making the stall's own props and collateral", () => {
+  const run = async (text: string) => {
+    const store = new Store(staffedRoom());
+    const agent = new QuickAgent(store, new LocalPlannerProvider());
+    const r = await agent.run({ text });
+    return { r, draft: agent.getDraftProject()!, store };
+  };
+
+  it("makes an A2 poster with the words on it, at A2", async () => {
+    const { r, draft } = await run("幫我做一張 A2 海報，印上「淡江禪學社招生」");
+    expect(r.toolResults.filter((x) => !x.ok)).toEqual([]);
+    const prop = draft.props![0];
+    expect(prop.print!.standard).toBe("A2");
+    expect(prop.dimensions.width).toBeCloseTo(0.42, 3);
+    expect(prop.parts[prop.parts.length - 1].text).toBe("淡江禪學社招生");
+  });
+
+  it("carries the print run through to the order", async () => {
+    const { draft } = await run("做 500 張雙面 A5 傳單");
+    expect(draft.props![0].print).toMatchObject({ standard: "A5", quantity: 500, sides: 2 });
+  });
+
+  it("makes a backdrop at a real backdrop size", async () => {
+    const { draft } = await run("做一個合照背景牆");
+    const prop = draft.props![0];
+    expect(prop.category).toBe("背景");
+    expect(prop.dimensions.width).toBeCloseTo(2.4, 2);
+  });
+
+  it("makes a table item without inventing a print spec for it", async () => {
+    const { draft } = await run("做一個抽獎箱");
+    const prop = draft.props![0];
+    expect(prop.category).toBe("擺攤小物");
+    expect(prop.print).toBeUndefined();
+  });
+
+  it("calls a poster a 文宣, not an 互動道具", async () => {
+    // The change note's noun was hard-coded, so an A2 poster was announced as
+    // an interactive prop — the one word a volunteer reads to decide whether
+    // this is the thing they asked for.
+    const { r } = await run("幫我做一張 A2 海報");
+    const notes = r.summary.notes.join(" ");
+    expect(notes).toContain("新增文宣");
+    expect(notes).not.toContain("互動道具");
+  });
+
+  it("calls a raffle box an 擺攤小物", async () => {
+    const { r } = await run("做一個抽獎箱");
+    expect(r.summary.notes.join(" ")).toContain("新增擺攤小物");
+  });
+
+  it("still lands in the preview gate, not the committed plan", async () => {
+    const { store } = await run("幫我做一張 A2 海報");
+    expect(store.getState().props ?? []).toEqual([]);
+  });
+});
+
 describe("resolution is honest", () => {
   it("reports a reference the plan cannot satisfy instead of moving something else", () => {
     const empty = createDefaultProject();

@@ -257,10 +257,35 @@ export function planFromRequest(parsed: ParsedRequest, project: Project): PlanRe
 
   // --- assets and props
   if (types.has("create-prop")) {
-    add(
-      { tool: "createPropFromRecipe", args: { name: "AI 道具", ...(s.dimensions ? dimsToArgs(s.dimensions.value) : {}) } },
-      "依描述建立互動道具。",
-    );
+    const req = s.propRequest?.value;
+    if (req) {
+      // A named prop or piece of collateral: the recipe layer owns the
+      // geometry and, for anything printed, the order line.
+      const print: Record<string, unknown> = {};
+      if (req.printStandard) print.standard = req.printStandard;
+      if (req.quantity) print.quantity = req.quantity;
+      if (req.sides) print.sides = req.sides;
+      add(
+        {
+          tool: "createPropFromRecipe",
+          args: {
+            name: propName(req.kind, req.text),
+            kind: req.kind,
+            ...(req.text ? { text: req.text } : {}),
+            ...(Object.keys(print).length ? { print: [print] } : {}),
+            ...(s.dimensions ? dimsToArgs(s.dimensions.value) : {}),
+          },
+        },
+        printedKinds.has(req.kind)
+          ? `做一個${req.kind}，並附上可直接送印的規格。`
+          : `做一個${req.kind}。`,
+      );
+    } else {
+      add(
+        { tool: "createPropFromRecipe", args: { name: "AI 道具", ...(s.dimensions ? dimsToArgs(s.dimensions.value) : {}) } },
+        "依描述建立互動道具。",
+      );
+    }
   } else if (types.has("create-asset")) {
     const d = s.dimensions?.value ?? { width: 1.8, depth: 0.6, height: 0.74 };
     if (!s.dimensions) assumptions.push("沒有給尺寸，先用 180 x 60 x 74 公分的標準折疊桌。");
@@ -393,6 +418,17 @@ function zoneLabel(z: ZoneType): string {
     meditation: "禪坐區", shoe: "鞋子區", backpack: "背包區", custom: "自訂區",
   };
   return map[z] ?? "指定區域";
+}
+
+/** Kinds whose recipe produces a print spec, for the step's reason line. */
+const printedKinds = new Set([
+  "海報", "x展架", "易拉寶", "珍珠板立牌", "桌上立牌",
+  "桌前布條", "直式布條", "背景牆", "大背景",
+]);
+
+/** A name a volunteer would recognise on the material list. */
+function propName(kind: string, text?: string): string {
+  return text ? `${kind}（${text}）` : kind;
 }
 
 function guessAssetName(text: string): string {

@@ -61,6 +61,7 @@ export type AgentToolName =
   | "requestAssetReconstruction"
   | "updateAssetMetadata"
   | "replaceAssetVisual"
+  | "setPropArtwork"
   | "placeAsset"
   | "moveAsset"
   | "rotateAsset"

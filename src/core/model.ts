@@ -705,6 +705,29 @@ export interface PropDefinition {
   /** Where it came from: builtin preset id, "user", or "import". */
   source?: string;
   /**
+   * What to send to the printer, when this prop represents something printed.
+   *
+   * Optional exactly like `booth` and `interaction`, and like them it does NOT
+   * move PROJECT_VERSION: an older build ignores the block and still draws the
+   * poster as the plane it already understands. What it loses is the order
+   * line, not the prop.
+   *
+   * Typed loosely here on purpose — `core/printSpec.ts` owns the shape, and
+   * `model.ts` must not start importing sibling modules or every consumer of
+   * the data model drags the print vocabulary in with it.
+   */
+  print?: {
+    widthMm: number;
+    heightMm: number;
+    standard?: string;
+    orientation: "portrait" | "landscape";
+    sides: 1 | 2;
+    material: string;
+    quantity: number;
+    bleedMm: number;
+    finishNote?: string;
+  };
+  /**
    * §40 — draw this prop with an imported model instead of its `parts`.
    *
    * The upgrade path from a grey box to a real 3D dice: import a GLB, then
