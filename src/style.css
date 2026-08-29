@@ -381,9 +381,12 @@ html, body {
 }
 .navbtn {
   flex: 1; appearance: none; border: none; background: none; cursor: pointer;
-  color: var(--text-dim); font: inherit; font-size: 11px;
+  color: var(--text-dim); font: inherit; font-size: 10px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   min-height: var(--tap);
+  padding: 0 1px;
+  line-height: 1.15;
+  text-align: center;
 }
 .navbtn__icon { font-size: 18px; }
 .navbtn[aria-pressed="true"] { color: var(--accent); }
@@ -934,6 +937,9 @@ html, body {
   flex-wrap: wrap;
   margin: 4px 0 16px;
 }
+.projhome__brand { flex: 1 1 100%; }
+.projhome__wordmark { font-size: 13px; font-weight: 700; letter-spacing: .04em; color: var(--accent-text); }
+.projhome__tagline { margin: 2px 0 0; font-size: 13px; color: var(--text-dim); }
 .projhome__title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: .01em; }
 .projhome__new { margin-left: auto; min-height: var(--tap); }
 .projhome__count { margin: 0 0 10px; }

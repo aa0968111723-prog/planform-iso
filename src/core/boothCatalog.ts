@@ -330,6 +330,16 @@ export const BOOTH_OVERLAP_EXEMPT: ReadonlySet<string> = new Set<string>([
 /** Walking speed at the booth, metres per second. */
 export const BOOTH_WALK_SPEED = 1.15;
 
+/**
+ * Fraction of people walking past who stop. `BoothParams.visitorCount` is the
+ * number who actually come in (joiners). Passers-by = joiners / this rate, so
+ * the funnel is real and the old "40 people at the stall" meaning is kept.
+ *
+ * A classroom compile uses stopRate = 1 (everybody who was invited turns up).
+ * Using that here would make a booth UI report indoor 報到 numbers.
+ */
+export const BOOTH_STOP_RATE = 0.3;
+
 /** The booth plan's seed. Same plan, same seed, same answer. */
 export const BOOTH_DEFAULT_SEED = 20260302;
 

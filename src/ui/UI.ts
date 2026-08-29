@@ -29,6 +29,8 @@ import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } fr
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
+import { BRAND } from "../core/brand";
+import { PRIMARY_WORKFLOWS, WORKFLOW_LABELS } from "../core/workflow";
 
 const VIEWS: { id: ViewName; label: string }[] = [
   { id: "top", label: "俯視" }, { id: "iso", label: "立體" }, { id: "front", label: "正視" },
@@ -38,28 +40,12 @@ const SNAPS: { id: SnapMode; label: string }[] = [
   { id: "off", label: "自由" }, { id: "intersection", label: "交點" }, { id: "edge", label: "邊線" },
   { id: "center", label: "中心" }, { id: "half", label: "半格" },
 ];
-const WORKFLOWS: { id: Workflow; label: string; icon: string }[] = [
-  { id: "site", label: "場地", icon: "▦" }, { id: "layout", label: "場佈", icon: "▤" },
-  { id: "route", label: "動線", icon: "↝" }, { id: "export", label: "分享", icon: "↗" },
-];
-/** Outdoor booth plans get a fifth slot: 場地 / 場佈 / 動線 / 模擬 / 分享. */
-const BOOTH_SIM_WORKFLOW: { id: Workflow; label: string; icon: string } = { id: "sim", label: "模擬", icon: "▶" };
-const WORKFLOW_LABELS: Record<Workflow, string> = {
-  site: "場地", layout: "場佈", route: "動線", sim: "模擬", check: "檢查", export: "分享",
-};
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
 
-/**
- * A 模擬 tab on a classroom plan would be an empty room: the crowd model for
- * a classroom already lives inside 動線 (模擬活動). The tab appears only when
- * the open project actually has a booth to simulate.
- */
-function primaryWorkflows(app: App): { id: Workflow; label: string; icon: string }[] {
-  if (!app.isBoothPlan()) return WORKFLOWS;
-  const out = [...WORKFLOWS];
-  out.splice(out.length - 1, 0, BOOTH_SIM_WORKFLOW);
-  return out;
+/** First-layer editor tabs — same five for classroom and booth. */
+function primaryWorkflows(): { id: Workflow; label: string; icon: string }[] {
+  return PRIMARY_WORKFLOWS.map((w) => ({ id: w.id, label: w.label, icon: w.icon }));
 }
 
 /** Which sheet, if any, currently covers part of the canvas on a compact layout. */
@@ -369,7 +355,7 @@ export class UI {
     const views = el("div", { class: "group", "data-group": "views" },
       VIEWS.map((v) => button(v.label, () => this.app.setView(v.id), "chip chip--sm")));
     const flows = el("div", { class: "group group--flows", "data-group": "flows" },
-      primaryWorkflows(this.app).map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
+      primaryWorkflows().map((w) => button(w.label, () => this.app.setWorkflow(w.id), "chip")));
     const snapSel = el("select", { class: "field__input field__input--inline", title: "吸附模式" }) as HTMLSelectElement;
     for (const sn of SNAPS) snapSel.append(el("option", { value: sn.id, text: `吸附：${sn.label}` }));
     snapSel.value = this.app.session.snap;
@@ -386,7 +372,7 @@ export class UI {
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
       this.homeButton("← 我的專案"),
-      el("div", { class: "topbar__title", text: "平面場 ISO" }),
+      el("div", { class: "topbar__title", text: BRAND.name }),
       history, flows, views, more, el("div", { class: "topbar__spacer" }), team, moreBtn,
     );
     this.topbar.append(this.statusBadge);
@@ -494,17 +480,16 @@ export class UI {
 
   /** Rebuild the bottom nav only when its slot list actually changed. */
   private syncNav(): void {
-    const sig = primaryWorkflows(this.app).map((w) => w.id).join(",");
+    const sig = primaryWorkflows().map((w) => w.id).join(",");
     if (sig === this.navSig) return;
     this.navSig = sig;
     this.nav.innerHTML = "";
     this.buildNav();
-    // Adding or removing the 模擬 slot also changes the desktop 流程 chips.
     if (!this.compact) this.buildTopbar();
   }
 
   private buildNav(): void {
-    this.nav.append(...primaryWorkflows(this.app).map((it) =>
+    this.nav.append(...primaryWorkflows().map((it) =>
       el("button", { type: "button", class: "navbtn", "data-nav": it.id }, [
         el("span", { class: "navbtn__icon", text: it.icon }), el("span", { text: it.label }),
       ])));
@@ -1045,8 +1030,8 @@ export class UI {
 
     refreshFlowPanel(this.simPanelRoot, this.app);
 
-    return section("動線", [
-      el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。" }),
+    return section("動線／互動", [
+      el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。彩排數字在「彩排」。" }),
       presetRow,
       el("div", { class: "row" }, [button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
       list,
@@ -1156,7 +1141,7 @@ export class UI {
         el("span", { text: "🟡" }),
         el("span", { text: "尺寸還沒現場校正——圖可以先傳討論，右下角會標「尺寸待現場校正」" }),
       ])] : []),
-      el("div", { class: "hint", text: "分享會使用目前畫面與活動名稱；需要修改時可回到場地、場佈或動線。" }),
+      el("div", { class: "hint", text: "分享會使用目前畫面與活動名稱；需要修改時可回到場地、場佈、動線／互動或彩排。" }),
     ]);
     const planSection = section("場刊圖（傳給夥伴）", [
       el("p", { class: "hint", text: "乾淨、看得懂的圖，手機會直接開分享（LINE），電腦則下載。" }),
@@ -1208,7 +1193,7 @@ export class UI {
       el("div", { class: "subhead", text: "模擬摘要" }),
       el("p", { class: "hint", text: this.app.session.simResult
         ? this.app.session.simResult.summaryLines.join(" ")
-        : "先到「動線」按一次 ▶ 開始彩排，再回來匯出摘要。" }),
+        : "先到「彩排」按一次 ▶ 開始彩排，再回來匯出摘要。" }),
       button("匯出模擬摘要圖", () => {
         const r = this.app.session.simResult ?? this.app.runEventSimulation();
         share("route", null, "模擬摘要", { simplify: true, titleSuffix: "模擬摘要", extraNotes: r.summaryLines });
@@ -1316,12 +1301,12 @@ export class UI {
 
     if (this.compact) {
       const title = this.topbar.querySelector(".topbar__title--compact");
-      if (title) title.textContent = s.name || "平面場 ISO";
+      if (title) title.textContent = s.name || BRAND.name;
     } else {
       const desktopTitle = this.topbar.querySelector(".topbar__title");
-      if (desktopTitle) desktopTitle.textContent = s.name || "平面場 ISO";
+      if (desktopTitle) desktopTitle.textContent = s.name || BRAND.name;
       setPressed(this.topbar, "views", (b) => VIEWS[b].id === s.view);
-      setPressed(this.topbar, "flows", (b) => primaryWorkflows(this.app)[b]?.id === sess.workflow);
+      setPressed(this.topbar, "flows", (b) => primaryWorkflows()[b]?.id === sess.workflow);
       setPressed(this.topbar, "view2", (b) => (b === 0 ? sess.showLabels : false));
       if (this.snapSel && document.activeElement !== this.snapSel) this.snapSel.value = sess.snap;
     }
@@ -1344,9 +1329,10 @@ export class UI {
 
     // Smart layout + simulation live boxes.
     this.updateSmartBox();
-    // 模擬 is refreshed by rebuildLeft, which knows not to blow away a field
+    // 彩排 is refreshed by rebuildLeft, which knows not to blow away a field
     // the user is typing in — an extra refresh here would eat the caret.
     if (sess.workflow === "route") refreshFlowPanel(this.simPanelRoot, this.app);
+    if (sess.workflow === "sim") refreshFlowPanel(this.boothPanelRoot, this.app);
 
     // Partner Mode shell (replaces the editor chrome entirely).
     this.updatePartnerMode();

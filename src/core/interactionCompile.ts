@@ -17,6 +17,7 @@ import {
   BOOTH_DEFAULT_SEED,
   BOOTH_JOURNEY_ORDER,
   BOOTH_SKIP_RATE,
+  BOOTH_STOP_RATE,
   BOOTH_WALK_SPEED,
 } from "./boothCatalog";
 import type {
@@ -228,12 +229,12 @@ export function templateFromBooth(booth: BoothConfig, name = "攤位人流"): In
     stations,
     staff: [{ id: "talker", name: "顧攤位的人", count: Math.max(0, Math.floor(params.deskStaff)) }],
     audience: {
-      count: params.visitorCount,
+      // `visitorCount` is joiners ("people who come in"). Inflate to passers-by
+      // so stopRate < 1 is a real funnel, not a classroom compile in disguise.
+      count: Math.max(params.visitorCount, Math.round(params.visitorCount / BOOTH_STOP_RATE)),
       windowSeconds,
       profile: "uniform",
-      // `visitorCount` always meant "people who come in", never "people who
-      // walk past", so there is no funnel to invent here.
-      stopRate: 1,
+      stopRate: BOOTH_STOP_RATE,
       joinRate: 1,
       // The old engine gave each visitor `18 + rand*40` seconds of patience and
       // compared three times that against their wait: a median of 114 s. One

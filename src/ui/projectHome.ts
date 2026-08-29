@@ -12,6 +12,7 @@
 
 import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
 import { venuePresetById } from "../core/venues";
+import { BRAND } from "../core/brand";
 import { button, el } from "./dom";
 
 export interface ProjectHomeCallbacks {
@@ -67,6 +68,10 @@ export function buildProjectHome(cb: ProjectHomeCallbacks): ProjectHomeHandles {
   const root = el("div", { class: "projhome", style: "display:none" }, [
     el("div", { class: "projhome__inner" }, [
       el("header", { class: "projhome__head" }, [
+        el("div", { class: "projhome__brand" }, [
+          el("div", { class: "projhome__wordmark", text: BRAND.title }),
+          el("div", { class: "projhome__tagline", text: BRAND.tagline }),
+        ]),
         el("h1", { class: "projhome__title", text: "我的專案" }),
         button("＋ 新建專案", () => cb.onNew(), "btn btn--primary projhome__new"),
       ]),

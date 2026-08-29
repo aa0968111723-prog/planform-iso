@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("production bundle", () => {
+  test("browser title is PLANFORM, not 平面場 ISO", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveTitle("PLANFORM｜活動空間彩排");
+    const html = await page.content();
+    expect(html).not.toContain("平面場 ISO");
+  });
+
   test("opens with the e2e hook gated by the query flag", async ({ page }) => {
     await page.goto("/?e2e");
     await expect(page.locator("#app")).toBeVisible();

@@ -145,7 +145,7 @@ import { createAppAgentHost } from "./agentHost";
 import { LocalPlannerProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
-/** `sim` is the outdoor-booth crowd simulation; `check` still lives inside 分享. */
+/** `sim` is 彩排 (classroom or booth). `check` still lives inside 分享. */
 export type Workflow = "site" | "layout" | "route" | "sim" | "check" | "export";
 
 const TABLE_KINDS: ReadonlySet<string> = new Set(["table", "regTable"]);
@@ -1408,10 +1408,17 @@ export class App {
     return Math.hypot(c.b.x - c.a.x, c.b.z - c.a.z);
   }
   applyCalibration(action: CalibrationPath, actualMeters: number, note = ""): void {
-    if (!actualMeters || actualMeters <= 0) return;
+    if (!actualMeters || actualMeters <= 0) {
+      this.toast("請輸入有效的實際長度", false);
+      return;
+    }
     const measured = action === "classroom-length" ? this.getCalibrationDistance() ?? undefined : undefined;
     if (action === "classroom-length" && (!measured || measured <= 0)) {
       this.toast("請先在畫布點兩個已知距離的端點，再套用到教室長");
+      return;
+    }
+    if (action === "door" && !this.state.objects.some((o) => o.kind === "door" && !o.hidden)) {
+      this.toast("場上沒有門，無法套用門寬", false);
       return;
     }
     this.store.mutate((p) => applyCalibrationPath(p, action, actualMeters, measured, note));
@@ -1958,7 +1965,7 @@ export class App {
 
   // --- outdoor booth simulation ------------------------------------------
 
-  /** True when this project carries booth data, i.e. the 模擬 tab applies. */
+  /** True when this project carries booth data (戶外攤位). */
   isBoothPlan(): boolean {
     return isBoothProject(this.state);
   }

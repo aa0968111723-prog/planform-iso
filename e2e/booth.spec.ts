@@ -47,11 +47,11 @@ async function openBooth(page: Page): Promise<void> {
   await settle(page);
 }
 
-/** 模擬 lives in the bottom nav on compact layouts and the header on desktop. */
+/** 彩排 lives in the bottom nav on compact layouts and the header on desktop. */
 async function gotoSim(page: Page): Promise<void> {
   const nav = page.locator('.navbtn[data-nav="sim"]');
   if (await nav.isVisible()) await nav.click();
-  else await page.locator(".group--flows button", { hasText: "模擬" }).click();
+  else await page.locator(".group--flows button", { hasText: "彩排" }).click();
   await settle(page);
 }
 
@@ -92,20 +92,11 @@ test.describe("outdoor booth", () => {
     expect(p.scenarioId).toBe("normal");
   });
 
-  test("the bottom nav grows a 模擬 slot only for a booth plan", async ({ page }) => {
+  test("彩排 is a first-layer tab for a booth plan", async ({ page }) => {
     await openBooth(page);
     await expect(page.locator('.navbtn[data-nav="sim"]')).toHaveCount(1);
+    await expect(page.locator('.navbtn[data-nav="sim"]')).toContainText("彩排");
     await expect(page.locator(".navbtn")).toHaveCount(5);
-
-    // Strip the booth data and the slot goes away again.
-    await page.evaluate(() => {
-      const pf = (window as unknown as {
-        planform: { store: { mutate(fn: (p: Record<string, unknown>) => void): void } };
-      }).planform;
-      pf.store.mutate((p) => { delete p.booth; });
-    });
-    await expect(page.locator(".navbtn")).toHaveCount(4);
-    await expect(page.locator('.navbtn[data-nav="sim"]')).toHaveCount(0);
   });
 
   test("moving and rotating the booth table updates the plan", async ({ page }) => {
@@ -439,7 +430,7 @@ test.describe("outdoor booth on small screens", () => {
     ["phone", { width: 390, height: 844 }],
     ["tablet", { width: 820, height: 1180 }],
   ] as const) {
-    test(`${label}: header does not overflow and the 模擬 tab opens`, async ({ page }) => {
+    test(`${label}: header does not overflow and the 彩排 tab opens`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await openBooth(page);
       const overflow = await page.evaluate(() => {
