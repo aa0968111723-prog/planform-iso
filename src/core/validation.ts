@@ -214,13 +214,14 @@ export function validateProject(project: Project, settings?: ValidationSettings)
     }
   }
 
-  // Computer parent integrity.
+  // Tabletop parent integrity (computers, QR 立架, 名牌…).
   for (const o of project.objects) {
     if (o.kind !== "computer" || o.hidden || o.surface !== "tabletop") continue;
     const parent = o.parentId ? project.objects.find((p) => p.id === o.parentId) : null;
-    if (!parent) push("error", "orphan", "電腦懸空", "電腦沒有可放置的桌面", o.id, { x: o.x, z: o.z }, "放到桌面上或解除桌面關聯");
+    const label = propForAssetId(project.props, o.assetId)?.name ?? assetDef(o.kind).displayName;
+    if (!parent) push("error", "orphan", `${label}懸空`, `${label}沒有可放置的桌面`, o.id, { x: o.x, z: o.z }, "放到桌面上或解除桌面關聯");
     else if (!pointInRect(o.x, o.z, parent.x, parent.z, parent.width, parent.depth, parent.rotationDeg)) {
-      push("warning", "off-table", "電腦超出桌面", "電腦超出所在桌面範圍", o.id, { x: o.x, z: o.z }, "移回桌面內");
+      push("warning", "off-table", `${label}超出桌面`, `${label}超出所在桌面範圍`, o.id, { x: o.x, z: o.z }, "移回桌面內");
     }
   }
 

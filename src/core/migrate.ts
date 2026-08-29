@@ -553,6 +553,7 @@ function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | n
     }
   }
 
+  const print = migratePrintSpec(raw.print);
   return {
     id,
     name: raw.name,
@@ -577,6 +578,26 @@ function migratePropDefinition(raw: Partial<PropDefinition>): PropDefinition | n
     ...(typeof raw.visualFrom === "string" && raw.visualFrom
       ? { visualFrom: raw.visualFrom }
       : {}),
+    ...(raw.placement === "tabletop" || raw.placement === "floor"
+      ? { placement: raw.placement }
+      : {}),
+    ...(print ? { print } : {}),
+  };
+}
+
+function migratePrintSpec(raw: PropDefinition["print"] | undefined): PropDefinition["print"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  if (!Number.isFinite(raw.widthMm) || !Number.isFinite(raw.heightMm)) return undefined;
+  return {
+    widthMm: Number(raw.widthMm),
+    heightMm: Number(raw.heightMm),
+    ...(typeof raw.standard === "string" ? { standard: raw.standard } : {}),
+    orientation: raw.orientation === "landscape" ? "landscape" : "portrait",
+    sides: raw.sides === 2 ? 2 : 1,
+    material: typeof raw.material === "string" ? raw.material : "coated-paper",
+    quantity: Math.max(1, Math.round(Number(raw.quantity) || 1)),
+    bleedMm: Math.max(0, Number(raw.bleedMm) || 0),
+    ...(typeof raw.finishNote === "string" ? { finishNote: raw.finishNote } : {}),
   };
 }
 

@@ -121,6 +121,20 @@ describe("faces come from the options", () => {
     expect(Array.isArray(dice.material)).toBe(false);
   });
 
+  it("a box with a photo gets six materials so the picture can sit on the front", () => {
+    const g = buildPropGroup(def({
+      parts: [{
+        id: "plate", shape: "box",
+        size: { width: 0.2, depth: 0.04, height: 0.1 },
+        offset: { x: 0, y: 0, z: 0 },
+        imageBlobId: "art_test",
+      }],
+    }));
+    const plate = meshes(g)[0];
+    expect(Array.isArray(plate.material)).toBe(true);
+    expect((plate.material as unknown[]).length).toBe(6);
+  });
+
   it("two options wrap around six faces rather than leaving blanks", () => {
     const two = options.slice(0, 2);
     const g = buildPropGroup(def(), { faceOptions: two });

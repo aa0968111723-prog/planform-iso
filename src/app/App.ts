@@ -45,6 +45,7 @@ import {
   updateStep,
 } from "../core/interactionCompile";
 import { INTERACTION_PRESETS, interactionPreset } from "../core/interactionPresets";
+import { propPreset } from "../core/propPresets";
 import {
   applyTemplate,
   deleteTemplate,
@@ -55,6 +56,7 @@ import {
 } from "../state/templateLibrary";
 import { rehydrateAssetVisuals } from "../assets/rehydrate";
 import { propEntryId, propForAssetId, syncPropEntries } from "../core/propCatalog";
+import type { PropDraftKind } from "../core/propDraft";
 import { claimPropId, parsePropFile, propFileName, serializeProp } from "../export/propFile";
 import { downloadText } from "../export/exporters";
 import { clearPropGroupCache } from "../scene/propVisual";
@@ -308,6 +310,8 @@ export class App {
   notifyToast: ((msg: string, undo?: boolean) => void) | null = null;
   /** Set by the UI: open the Prop Studio on a definition. */
   openPropStudioHook: ((defId: string) => void) | null = null;
+  /** Set by the UI: open the Studio on a fresh draft (桌面小物 / 空白方塊). */
+  openNewPropStudioHook: ((starter?: PropDraftKind) => void) | null = null;
   /** UI hook: open the AI sheet with the 幫我改善 request (set by UI). */
   onImprove: (() => void) | null = null;
 
@@ -510,7 +514,24 @@ export class App {
     // Placement mode is otherwise silent: the ghost appears in the middle of
     // the room and nothing says the next tap puts it down. 「怎麼放到攤位」 was
     // a blind tester's second blocker.
-    this.toast(`點畫面選位置放下「${entry.name}」`);
+    this.toast(entry.placementType === "tabletop"
+      ? `點桌子放下「${entry.name}」`
+      : `點畫面選位置放下「${entry.name}」`);
+  }
+
+  /**
+   * Put a stall prop in the project's kit (once) and start placing it.
+   * The library tab calls this so a QR 立架 is one tap, not a Studio detour.
+   */
+  placeBoothProp(id: string): void {
+    const seed = propPreset(id);
+    if (!seed) {
+      this.toast("找不到這個道具", false);
+      return;
+    }
+    const existing = this.propDefinitions().find((d) => d.id === seed.id);
+    if (!existing) this.addPropToProject(seed, { place: true });
+    else this.beginPlacementByAssetId(propEntryId(existing));
   }
 
   /**
@@ -604,7 +625,11 @@ export class App {
     const g = this.session.ghost;
     const kind = this.session.placingKind;
     const entry = this.placingEntry();
-    if (!g || !kind || !entry || g.validity === "bad") return;
+    if (!g || !kind || !entry) return;
+    if (g.validity === "bad") {
+      if (entry.placementType === "tabletop") this.toast("點在桌子上才能放下", false);
+      return;
+    }
     const id = uid("obj");
     const obj: SceneObject = {
       id, kind, x: g.x, z: g.z, rotationDeg: g.rotationDeg,
@@ -656,6 +681,11 @@ export class App {
 
   openPropStudioFor(defId: string): void {
     this.openPropStudioHook?.(defId);
+  }
+
+  /** Open the Studio to design a new prop. The library's 自己做 uses tabletop. */
+  openNewPropStudio(starter: PropDraftKind = "tabletop"): void {
+    this.openNewPropStudioHook?.(starter);
   }
 
   /**

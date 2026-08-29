@@ -23,6 +23,9 @@ import { createPropPreview, type PreviewAngle, type PropPreview } from "./propPr
 import { FINISH_CHOICES } from "../scene/propVisual";
 import { overlappingParts, relatePartOffset } from "../core/propEdit";
 import { propPreset, PROP_PRESETS } from "../core/propPresets";
+import { boothPropsByCategory } from "../core/boothPropPresets";
+import { blankPropDraft, PROP_STUDIO_CATEGORIES, type PropDraftKind } from "../core/propDraft";
+import { getAssetBlobStore } from "../assets/idbStore";
 import { saveLibraryProp } from "../state/propLibrary";
 import { uid, type InteractionOption, type PropAnchor, type PropDefinition, type PropPart } from "../core/model";
 import { button, el, num, section, selectField, textField } from "./dom";
@@ -34,25 +37,13 @@ export interface PropStudioOptions {
   edit?: PropDefinition;
   /** How many placed objects share the edited definition (drives §71). */
   instanceCount?: number;
+  /**
+   * Fresh-draft seed when not editing. The library's 自己做 passes
+   * `"tabletop"` so the first thing you see is a 20 cm desk item, not a
+   * 60 cm game cube. Absent = restore the last draft or the interactive cube.
+   */
+  starter?: PropDraftKind;
   onClose: () => void;
-}
-
-function blankDraft(): PropDefinition {
-  return {
-    id: `prop_${uid("p")}`,
-    name: "我的道具",
-    category: "互動",
-    dimensions: { width: 0.6, depth: 0.6, height: 0.6 },
-    parts: [{
-      id: "part1", shape: "box",
-      size: { width: 0.6, depth: 0.6, height: 0.6 },
-      offset: { x: 0, y: 0, z: 0 },
-      color: "#8fb4c9", finish: "plastic-matte",
-    }],
-    anchors: [],
-    version: 1,
-    source: "user",
-  };
 }
 
 function readDraft(): PropDefinition | null {
@@ -103,10 +94,16 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
   overlay.append(card);
 
   const editing = !!opts.edit;
+  const defaultKind: PropDraftKind = opts.starter ?? "interactive";
+  let draftKind: PropDraftKind | "preset" = opts.edit ? "preset" : defaultKind;
   let draft: PropDefinition = opts.edit
     ? JSON.parse(JSON.stringify(opts.edit)) as PropDefinition
-    : readDraft() ?? blankDraft();
-  const restoredDraft = !opts.edit && !!readDraft();
+    : opts.starter
+      ? blankPropDraft(opts.starter)
+      : readDraft() ?? blankPropDraft("interactive");
+  // An explicit starter (自己做) is a new intent — do not revive last night's
+  // unfinished dice over the nameplate they just asked to make.
+  const restoredDraft = !opts.edit && !opts.starter && !!readDraft();
 
   let preview: PropPreview | null = null;
   let angle: PreviewAngle = "iso";
@@ -186,7 +183,7 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
   const hasTypedContent = (): boolean => {
     const step = draft.interaction?.steps.find((s) => s.branch?.kind === "chance");
     const opts = step?.branch?.kind === "chance" ? step.branch.options : [];
-    return opts.some((o) => o.prompt) || draft.parts.some((p) => p.text);
+    return opts.some((o) => o.prompt) || draft.parts.some((p) => p.text || p.imageBlobId);
   };
 
   const setFaceCount = (count: number) => {
@@ -256,7 +253,12 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
     if (restoredDraft && !editing) {
       card.append(el("div", { class: "row wrap" }, [
         el("span", { class: "hint", text: "已還原上次沒做完的草稿。" }),
-        button("丟掉重來", () => { writeDraft(null); draft = blankDraft(); render(); }, "chip chip--sm"),
+        button("丟掉重來", () => {
+          writeDraft(null);
+          draftKind = defaultKind;
+          draft = blankPropDraft(defaultKind);
+          render();
+        }, "chip chip--sm"),
       ]));
     }
 
@@ -267,25 +269,37 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
       // option with no chip: the presets filled the row and a blind tester,
       // told not to use the ready-made 抽卡箱, hunted for the nearest preset
       // instead of just starting. It is still the default draft — now it says so.
+      const startFrom = (kind: PropDraftKind) => {
+        if (hasTypedContent() && !window.confirm("會清掉你目前打的內容，確定？")) return;
+        draftKind = kind;
+        draft = { ...blankPropDraft(kind), id: draft.id };
+        touch();
+      };
       card.append(el("div", { class: "row wrap" }, [
-        button("⬜ 從空白開始（自己設計）", () => {
-          if (hasTypedContent() && !window.confirm("會清掉你目前打的內容，確定？")) return;
-          draft = { ...blankDraft(), id: draft.id };
-          touch();
-        }, "chip chip--sm chip--primary"),
+        button("⬜ 從空白開始（自己設計）", () => startFrom("interactive"),
+          draftKind === "interactive" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button("✦ 桌上小物（自己設計）", () => startFrom("tabletop"),
+          draftKind === "tabletop" ? "chip chip--sm chip--primary" : "chip chip--sm"),
         el("span", { class: "hint", text: "或從一個現成的開始改：" }),
       ]));
-      card.append(el("div", { class: "row wrap" }, PROP_PRESETS.map((p) =>
-        button(`${p.icon ?? "▦"} ${p.name}`, () => {
-          // Tapping a second chip replaces the whole draft. Someone who has
-          // typed six questions and then taps another chip just to SEE what it
-          // is used to lose all six, with no warning and no undo in here.
-          if (hasTypedContent()
-            && !window.confirm(`換成「${p.name}」會清掉你目前打的內容，確定？`)) return;
-          const seed = propPreset(p.id)!;
-          draft = { ...seed, id: draft.id, source: "user", version: 1 };
-          touch();
-        }, "chip chip--sm"))));
+      const seedFrom = (id: string, name: string) => {
+        // Tapping a second chip replaces the whole draft. Someone who has
+        // typed six questions and then taps another chip just to SEE what it
+        // is used to lose all six, with no warning and no undo in here.
+        if (hasTypedContent()
+          && !window.confirm(`換成「${name}」會清掉你目前打的內容，確定？`)) return;
+        const seed = propPreset(id)!;
+        draftKind = "preset";
+        draft = { ...seed, id: draft.id, source: "user", version: 1 };
+        touch();
+      };
+      const chipRow = (items: { id: string; name: string; icon?: string }[]) =>
+        el("div", { class: "row wrap" }, items.map((p) =>
+          button(`${p.icon ?? "▦"} ${p.name}`, () => seedFrom(p.id, p.name), "chip chip--sm")));
+      card.append(el("div", { class: "subhead", text: "互動" }), chipRow(PROP_PRESETS));
+      card.append(el("div", { class: "subhead", text: "文宣" }), chipRow(boothPropsByCategory("文宣")));
+      card.append(el("div", { class: "subhead", text: "擺攤小物" }), chipRow(boothPropsByCategory("擺攤小物")));
+      card.append(el("div", { class: "subhead", text: "背景" }), chipRow(boothPropsByCategory("背景")));
     }
 
     // --- preview -----------------------------------------------------------
@@ -305,6 +319,18 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
       num("寬 cm", Math.round(draft.dimensions.width * 100), 5, (v) => { scaleTo("width", Math.max(5, v) / 100); touch(); }, 5),
       num("深 cm", Math.round(draft.dimensions.depth * 100), 5, (v) => { scaleTo("depth", Math.max(5, v) / 100); touch(); }, 5),
       num("高 cm", Math.round(draft.dimensions.height * 100), 5, (v) => { scaleTo("height", Math.max(1, v) / 100); touch(); }, 1),
+    ]));
+    card.append(el("div", { class: "row wrap" }, [
+      el("span", { class: "hint", text: "放哪裡" }),
+      ...(["tabletop", "floor"] as const).map((place) =>
+        button(place === "tabletop" ? "桌面" : "地面", () => {
+          draft.placement = place;
+          touch();
+        }, (draft.placement ?? "floor") === place ? "chip chip--sm chip--primary" : "chip chip--sm")),
+      el("span", { class: "hint", text: "分類" }),
+      ...PROP_STUDIO_CATEGORIES.map((cat) =>
+        button(cat, () => { draft.category = cat; touch(); },
+          draft.category === cat ? "chip chip--sm chip--primary" : "chip chip--sm")),
     ]));
 
     // --- 零件 ---------------------------------------------------------------
@@ -329,6 +355,29 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
         // question went here or in the face table below, and the two do very
         // different things. This one is paint.
         textField("印在這塊上的字", part.text ?? "", (v) => { part.text = v || undefined; touch(); }),
+        button(part.imageBlobId ? "換這塊上的照片" : "貼一張照片", () => {
+          const input = el("input", { type: "file", accept: "image/*" }) as HTMLInputElement;
+          input.addEventListener("change", () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            void (async () => {
+              const blobId = `art_${uid("img")}`;
+              await getAssetBlobStore().putBlob(blobId, await file.arrayBuffer(), {
+                kind: "sourceImage",
+                mimeType: file.type || "image/jpeg",
+              });
+              part.imageBlobId = blobId;
+              touch();
+            })();
+          });
+          input.click();
+        }, "chip chip--sm"),
+        ...(part.imageBlobId
+          ? [
+            el("span", { class: "hint", text: "已貼圖" }),
+            button("拿掉照片", () => { delete part.imageBlobId; touch(); }, "chip chip--sm"),
+          ]
+          : []),
         ...(overlaps.has(part.id) ? [el("span", { class: "hint", text: "⚠ 和別的零件穿插" })] : []),
         ...(draft.parts.length > 1
           ? [button("刪", () => { draft.parts.splice(i, 1); touch(); }, "chip chip--sm")]

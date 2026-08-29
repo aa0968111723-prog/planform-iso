@@ -73,6 +73,7 @@ function printedOnStand(
     quantity?: number;
     panelColor?: string;
     text?: string;
+    placement?: PropDefinition["placement"];
   },
 ): PropDefinition {
   const spec = specFromStandard(standardId, {
@@ -116,6 +117,7 @@ function printedOnStand(
     version: 1,
     source: id,
     print: spec,
+    ...(opts.placement ? { placement: opts.placement } : {}),
   };
 }
 
@@ -132,11 +134,15 @@ function tableItem(
   dims: { width: number; depth: number; height: number },
   parts: PropPart[],
   icon: string,
+  extra: Partial<Pick<PropDefinition, "placement">> = {},
 ): PropDefinition {
   return {
     id,
     name,
     category: "擺攤小物",
+    // Small stall kit lives on a desk unless the caller says otherwise
+    // (桌巾 drapes from the floor up; 垃圾桶 stands on the ground).
+    placement: extra.placement ?? "tabletop",
     dimensions: dims,
     parts,
     anchors: [],
@@ -172,7 +178,7 @@ export const BOOTH_PROP_PRESETS: readonly PropDefinition[] = [
   }),
   printedOnStand("prop_table_tent_a5", "桌上立牌 A5", "A5", {
     icon: "🔺", footHeight: 0.0, footDepth: 0.08, material: "coated-paper",
-    text: "說明",
+    text: "說明", placement: "tabletop",
   }),
   printedOnStand("prop_table_runner", "桌前布條", "table-runner", {
     // 1800 × 600 is already landscape; the standard's numbers are as-ordered.
@@ -312,7 +318,64 @@ export const BOOTH_PROP_PRESETS: readonly PropDefinition[] = [
       { color: "#1e3a5f", finish: "fabric" }),
     part("skirt", "plane", { width: 1.82, depth: 0.006, height: 0.74 }, { x: 0, y: 0, z: 0.39 },
       { color: "#1e3a5f", finish: "fabric", text: "社團名稱" }),
-  ], "🟦"),
+  ], "🟦", { placement: "floor" }),
+
+  tableItem("prop_nameplate", "名牌", { width: 0.2, depth: 0.06, height: 0.12 }, [
+    part("foot", "box", { width: 0.2, depth: 0.06, height: 0.012 }, { x: 0, y: 0, z: 0 },
+      { color: "#475569", finish: "plastic-matte" }),
+    part("card", "plane", { width: 0.2, depth: 0.004, height: 0.1 }, { x: 0, y: 0.012, z: 0 },
+      { color: "#f8fafc", finish: "paper", text: "名牌" }),
+  ], "🏷"),
+
+  tableItem("prop_pen_cup", "筆筒", { width: 0.08, depth: 0.08, height: 0.12 }, [
+    part("cup", "cylinder", { width: 0.08, depth: 0.08, height: 0.1 }, { x: 0, y: 0, z: 0 },
+      { color: "#94a3b8", finish: "plastic-matte" }),
+    part("pen", "cylinder", { width: 0.012, depth: 0.012, height: 0.12 }, { x: 0.012, y: 0, z: 0 },
+      { color: "#38bdf8", finish: "plastic-gloss" }),
+  ], "✏"),
+
+  tableItem("prop_cash_box", "零錢盒", { width: 0.22, depth: 0.14, height: 0.06 }, [
+    part("body", "box", { width: 0.22, depth: 0.14, height: 0.05 }, { x: 0, y: 0, z: 0 },
+      { color: "#334155", finish: "plastic-matte" }),
+    part("lid", "box", { width: 0.22, depth: 0.14, height: 0.01 }, { x: 0, y: 0.05, z: 0 },
+      { color: "#475569", finish: "plastic-matte" }),
+  ], "🪙"),
+
+  tableItem("prop_power_strip", "延長線盤", { width: 0.28, depth: 0.1, height: 0.055 }, [
+    part("body", "box", { width: 0.28, depth: 0.1, height: 0.04 }, { x: 0, y: 0, z: 0 },
+      { color: "#1e293b", finish: "plastic-matte" }),
+    part("socket-a", "box", { width: 0.04, depth: 0.04, height: 0.015 }, { x: -0.07, y: 0.04, z: 0 },
+      { color: "#94a3b8", finish: "plastic-gloss" }),
+    part("socket-b", "box", { width: 0.04, depth: 0.04, height: 0.015 }, { x: 0, y: 0.04, z: 0 },
+      { color: "#94a3b8", finish: "plastic-gloss" }),
+    part("socket-c", "box", { width: 0.04, depth: 0.04, height: 0.015 }, { x: 0.07, y: 0.04, z: 0 },
+      { color: "#94a3b8", finish: "plastic-gloss" }),
+  ], "⚡"),
+
+  tableItem("prop_table_flag", "桌旗", { width: 0.22, depth: 0.08, height: 0.28 }, [
+    part("base", "box", { width: 0.08, depth: 0.08, height: 0.02 }, { x: 0, y: 0, z: 0 },
+      { color: "#475569", finish: "plastic-matte" }),
+    part("pole", "cylinder", { width: 0.012, depth: 0.012, height: 0.26 }, { x: 0, y: 0.02, z: 0 },
+      { color: "#64748b", finish: "brushed-metal" }),
+    part("flag", "plane", { width: 0.12, depth: 0.004, height: 0.08 }, { x: 0.05, y: 0.18, z: 0 },
+      { color: "#e0f2fe", finish: "fabric", text: "社" }),
+  ], "🚩"),
+
+  tableItem("prop_document_tray", "文件盤", { width: 0.33, depth: 0.24, height: 0.05 }, [
+    part("base", "box", { width: 0.33, depth: 0.24, height: 0.02 }, { x: 0, y: 0, z: 0 },
+      { color: "#e2e8f0", finish: "plastic-matte" }),
+    part("front", "box", { width: 0.33, depth: 0.012, height: 0.05 }, { x: 0, y: 0, z: 0.114 },
+      { color: "#cbd5e1", finish: "plastic-matte" }),
+  ], "📁"),
+
+  tableItem("prop_trash_bin", "垃圾桶", { width: 0.32, depth: 0.32, height: 0.7 }, [
+    part("body", "cylinder", { width: 0.3, depth: 0.3, height: 0.62 }, { x: 0, y: 0, z: 0 },
+      { color: "#64748b", finish: "plastic-matte" }),
+    part("rim", "cylinder", { width: 0.32, depth: 0.32, height: 0.04 }, { x: 0, y: 0.62, z: 0 },
+      { color: "#475569", finish: "plastic-matte" }),
+    part("liner", "cylinder", { width: 0.26, depth: 0.26, height: 0.04 }, { x: 0, y: 0.66, z: 0 },
+      { color: "#1e293b", finish: "plastic-matte" }),
+  ], "🗑", { placement: "floor" }),
 ];
 
 meta("prop_xbanner", { sizeNote: "60 × 160 cm，市售 X 展架標準品", use: "攤位側邊主視覺" });
@@ -334,6 +397,13 @@ meta("prop_qr_stand", { sizeNote: "市售小型壓克力立架", use: "掃碼加
 meta("prop_stamp_station", { sizeNote: "市售印台與印章", use: "集章活動" });
 meta("prop_prize_shelf", { sizeNote: "市售兩層小陳列架", use: "獎品陳列" });
 meta("prop_tablecloth", { sizeNote: "配合 180 × 75 cm 折疊桌", use: "桌巾＋桌前主視覺" });
+meta("prop_nameplate", { sizeNote: "20 × 10 cm 桌面名牌，市售常見尺寸", use: "報到桌／攤位工作人員名牌" });
+meta("prop_pen_cup", { sizeNote: "市售圓形筆筒常見尺寸", use: "放筆、簽字筆" });
+meta("prop_cash_box", { sizeNote: "市售小型零錢盒", use: "現場收費找零" });
+meta("prop_power_strip", { sizeNote: "市售三孔延長線盤", use: "筆電、收費機電源" });
+meta("prop_table_flag", { sizeNote: "市售小型桌旗座", use: "社團名／活動名" });
+meta("prop_document_tray", { sizeNote: "A4 文件盤，市售常見尺寸", use: "報名表、問卷" });
+meta("prop_trash_bin", { sizeNote: "市售小型垃圾桶常見尺寸", use: "攤位旁垃圾" });
 
 const BY_ID = new Map(BOOTH_PROP_PRESETS.map((p) => [p.id, p]));
 

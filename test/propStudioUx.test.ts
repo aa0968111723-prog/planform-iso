@@ -114,6 +114,22 @@ describe("a hand-built prop can do what a preset can", () => {
     expect(PROP_STUDIO).toContain("要顯示各個面");
     expect(PROP_STUDIO).toContain("part.facesFromOptions");
   });
+
+  it("you can pick desk or floor, and put a photo on a face", () => {
+    expect(PROP_STUDIO).toContain("桌上小物（自己設計）");
+    expect(PROP_STUDIO).toContain('"桌面"');
+    expect(PROP_STUDIO).toContain("貼一張照片");
+    expect(PROP_STUDIO).toContain("putBlob");
+  });
+});
+
+describe("the booth library lets you start from nothing", () => {
+  it("自己做 is a card, not buried behind 新增道具", () => {
+    const lib = read("src/ui/library.ts");
+    expect(lib).toContain("自己做");
+    expect(lib).toContain("我做的");
+    expect(lib).toContain("openNewPropStudio");
+  });
 });
 
 describe("an assembly says what is inside it", () => {

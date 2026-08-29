@@ -727,9 +727,13 @@ export class SceneManager {
             m.receiveShadow = true;
           }
         });
-        // Enlarged invisible pick proxy for thin wall assets (easier touch targets).
-        if (catalogEntry.placementType === "wall") {
-          const pw = Math.max(o.width, 0.5), ph = Math.max(o.height, 1.0), pd = Math.max(o.depth, 0.45);
+        // Enlarged invisible pick proxy for thin wall assets and the small
+        // tabletop kit (a 8 cm 筆筒 is otherwise un-tappable on a phone).
+        const tinyTabletop = catalogEntry.placementType === "tabletop" && (o.width < 0.45 || o.depth < 0.45);
+        if (catalogEntry.placementType === "wall" || tinyTabletop) {
+          const pw = Math.max(o.width, catalogEntry.placementType === "wall" ? 0.5 : 0.28);
+          const ph = Math.max(o.height, catalogEntry.placementType === "wall" ? 1.0 : 0.2);
+          const pd = Math.max(o.depth, catalogEntry.placementType === "wall" ? 0.45 : 0.28);
           const proxy = new Mesh(new BoxGeometry(pw, ph, pd), new MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }));
           proxy.position.y = ph / 2;
           proxy.userData = { type: "object", id: o.id };

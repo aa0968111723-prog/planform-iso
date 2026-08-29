@@ -686,6 +686,12 @@ export interface PropDefinition {
   name: string;
   /** 素材庫分類：互動 / 家具 / 指示 / 我的道具…. */
   category: string;
+  /**
+   * Where a fresh copy lands. Tabletop items snap onto a desk; everything
+   * else stands on the floor. Optional so older files and interactive
+   * presets keep the floor default without a PROJECT_VERSION bump.
+   */
+  placement?: "floor" | "tabletop";
   /** Overall footprint, metres — the mirrored catalog entry's dimensions. */
   dimensions: { width: number; depth: number; height: number };
   parts: PropPart[];
