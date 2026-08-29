@@ -293,6 +293,51 @@ export class AgentExecutor {
         return ok({ propId: def.id, summary: describeRecipe(def) });
       }
 
+      case "setPropArtwork": {
+        const propId = str(args.propId);
+        const def = (draft.props ?? []).find((d) => d.id === propId);
+        if (!def) return fail(`找不到道具 ${propId}`);
+
+        // A blob id can be given directly, but nobody knows one by heart. The
+        // useful path is 「用剛剛匯入的那張圖」: name the asset, and its stored
+        // source image is found for you.
+        let blobId = str(args.imageBlobId);
+        if (!blobId) {
+          const assetId = str(args.assetId);
+          if (!assetId) return fail("setPropArtwork 需要 assetId 或 imageBlobId");
+          const entry = (draft.catalogExtras ?? []).find((e) => e.id === assetId);
+          if (!entry) return fail(`找不到素材 ${assetId}`);
+          blobId = entry.blobIds?.sourceImage ?? "";
+          if (!blobId) return fail(`素材「${entry.name}」沒有來源圖片，無法當作圖稿。`);
+        }
+
+        // The printable face is the last part for every printed preset (foot
+        // first, panel last). A named part wins when the caller knows better.
+        const wantedPart = str(args.partId);
+        const index = wantedPart
+          ? def.parts.findIndex((p) => p.id === wantedPart)
+          : def.parts.length - 1;
+        if (index < 0) return fail(`道具「${def.name}」沒有零件 ${wantedPart}`);
+        const target = def.parts[index];
+        if (target.shape !== "plane") {
+          return fail(`零件「${target.id}」不是平面，貼圖只能貼在印刷面上。`);
+        }
+
+        this.tx.mutate((p) => {
+          p.props = (p.props ?? []).map((d) => (d.id === propId
+            ? {
+              ...d,
+              // The catalog entry mirrors this number and the scene's rebuild
+              // signature reads it; without the bump the artwork never appears.
+              version: (d.version ?? 1) + 1,
+              parts: d.parts.map((part, i) => (i === index ? { ...part, imageBlobId: blobId } : part)),
+            }
+            : d));
+          p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+        });
+        return ok({ propId, partId: target.id, imageBlobId: blobId });
+      }
+
       case "importAsset": {
         // Reading a file needs a picker, and a picker needs the user. The agent
         // can place an asset the import UI already produced, but it cannot open

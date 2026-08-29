@@ -250,6 +250,16 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     },
   },
   {
+    name: "setPropArtwork", category: "object", mutates: true,
+    summary: "把已匯入的圖片貼到道具的印刷面（海報、展架、背景牆）",
+    params: {
+      propId: id("道具 id"),
+      assetId: id("已匯入、帶有來源圖片的素材 id", false),
+      imageBlobId: id("直接指定圖片 blob id", false),
+      partId: id("要貼的零件 id；省略時用主要印刷面", false),
+    },
+  },
+  {
     name: "importAsset", category: "object", mutates: true, summary: "匯入已解析的 GLB/GLTF 素材",
     needsHost: true,
     params: {

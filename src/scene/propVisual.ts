@@ -33,7 +33,9 @@ import {
   Quaternion,
   SphereGeometry,
   Vector3,
+  type Texture,
 } from "three";
+import { getAssetBlobStore } from "../assets/idbStore";
 import { materialFromPreset, MATERIAL_PRESETS, type MaterialPresetId } from "./materials";
 import type { InteractionOption, PropDefinition, PropPart } from "../core/model";
 
@@ -108,6 +110,76 @@ function paintedMaterial(text: string, background: string, halfTurn = false): Me
     map: paintedTexture(text, background, undefined, halfTurn),
     roughness: 0.85,
     metalness: 0.02,
+  });
+}
+
+/**
+ * Artwork painted on a face, from a blob the user imported.
+ *
+ * `PropPart.imageBlobId` was documented as "image blob painted on the front
+ * face" and the plane branch even TESTED for it — then called
+ * `paintedMaterial(part.text ?? "", …)` and dropped it on the floor. The field
+ * existed, the check existed, and nothing ever loaded an image. That is the
+ * same shape of lie as a tool returning ok:true without doing anything.
+ *
+ * Loading is async (IndexedDB, then decode) while the scene graph is built
+ * synchronously, so the mesh is created with the painted fallback and the map
+ * is swapped in when the bytes arrive. A missing or undecodable blob keeps the
+ * fallback: a backdrop with no artwork yet should look like a blank backdrop,
+ * not vanish.
+ */
+const artworkCache = new Map<string, Promise<Texture | null>>();
+
+async function loadArtwork(blobId: string): Promise<Texture | null> {
+  const rec = await getAssetBlobStore().getBlob(blobId);
+  if (!rec) return null;
+  const blob = new Blob([rec.data], { type: rec.mimeType || "image/png" });
+  try {
+    // createImageBitmap decodes off the main thread and needs no object URL.
+    const bitmap = await createImageBitmap(blob);
+    const texture = new CanvasTexture(bitmap as unknown as HTMLCanvasElement);
+    texture.minFilter = LinearFilter;
+    texture.needsUpdate = true;
+    return texture;
+  } catch {
+    return null;
+  }
+}
+
+function artworkTexture(blobId: string): Promise<Texture | null> {
+  let pending = artworkCache.get(blobId);
+  if (!pending) {
+    // A failed load is cached too: retrying on every rebuild would hammer IDB
+    // for a blob that is not coming back.
+    pending = loadArtwork(blobId).catch(() => null);
+    artworkCache.set(blobId, pending);
+  }
+  return pending;
+}
+
+/** Drop cached artwork, so a re-imported image is picked up. */
+export function clearArtworkCache(): void {
+  for (const pending of artworkCache.values()) {
+    void pending.then((t) => t?.dispose());
+  }
+  artworkCache.clear();
+}
+
+/**
+ * Paint `part`'s artwork onto `material` once it loads.
+ *
+ * Fire-and-forget by design: the caller has already returned a usable mesh.
+ */
+function applyArtwork(material: MeshStandardMaterial, part: PropPart): void {
+  if (!part.imageBlobId) return;
+  const blobId = part.imageBlobId;
+  void artworkTexture(blobId).then((texture) => {
+    if (!texture) return;
+    material.map = texture;
+    // Artwork carries its own colour; leaving the panel tint multiplied over
+    // it turns a white backdrop grey.
+    material.color.set("#ffffff");
+    material.needsUpdate = true;
   });
 }
 
@@ -196,10 +268,12 @@ function buildPart(part: PropPart, options: readonly InteractionOption[] | undef
       break;
     }
     case "plane": {
-      // A standing face (poster, sign board). Painted when it carries content.
+      // A standing face (poster, sign board, backdrop). Painted when it carries
+      // content; artwork is swapped in over the top once its blob loads.
       const material = part.text || part.imageBlobId
         ? paintedMaterial(part.text ?? "", part.color ?? "#f8fafc")
         : baseMaterial(part);
+      applyArtwork(material, part);
       mesh = new Mesh(new PlaneGeometry(width, height), material);
       break;
     }

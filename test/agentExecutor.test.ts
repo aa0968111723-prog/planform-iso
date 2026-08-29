@@ -201,6 +201,67 @@ describe("object tools", () => {
     expect(draft().props!.length).toBe(1);
   });
 
+  it("puts an imported image on a prop's printable face", async () => {
+    const { run, draft } = makeExecutor();
+    const created = await run("createPropFromRecipe", { name: "背景牆", kind: "背景牆" });
+    const propId = (created.data as { propId: string }).propId;
+    // An imported photo asset carries its source image blob id.
+    draft().catalogExtras = [...(draft().catalogExtras ?? []), {
+      id: "custom:photo", name: "社團合照", semanticType: "other", sourceType: "photo",
+      category: "custom", placementType: "floor",
+      dimensions: { width: 1, depth: 1, height: 1 },
+      defaultFacingDeg: 0, clearanceFront: 0, blocksFlow: false, kind: "table",
+      icon: "🖼", color: "#fff", visualRef: "proxy:box", tags: [],
+      createdBy: "photo", version: 1, blobIds: { sourceImage: "img_custom_photo" },
+    } as never];
+
+    const r = await run("setPropArtwork", { propId, assetId: "custom:photo" });
+    expect(r.ok, r.error).toBe(true);
+    const def = draft().props!.find((d) => d.id === propId)!;
+    expect(def.parts[def.parts.length - 1].imageBlobId).toBe("img_custom_photo");
+    // The catalog mirrors the version, and the scene's rebuild key reads it —
+    // without the bump the artwork never appears on an already-placed prop.
+    expect(def.version).toBe(2);
+  });
+
+  it("reports an asset that has no image rather than attaching nothing", async () => {
+    const { run, draft } = makeExecutor();
+    const created = await run("createPropFromRecipe", { name: "海報", kind: "海報" });
+    const propId = (created.data as { propId: string }).propId;
+    draft().catalogExtras = [...(draft().catalogExtras ?? []), {
+      id: "custom:noimg", name: "沒有圖的素材", semanticType: "table", sourceType: "import",
+      category: "custom", placementType: "floor",
+      dimensions: { width: 1, depth: 1, height: 1 },
+      defaultFacingDeg: 0, clearanceFront: 0, blocksFlow: false, kind: "table",
+      icon: "▫", color: "#fff", visualRef: "proxy:box", tags: [],
+      createdBy: "import", version: 1,
+    } as never];
+    const r = await run("setPropArtwork", { propId, assetId: "custom:noimg" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("沒有來源圖片");
+  });
+
+  it("refuses to paint artwork onto something that is not a printable face", async () => {
+    const { run, draft } = makeExecutor();
+    const created = await run("createPropFromRecipe", { name: "抽獎箱", kind: "抽獎箱" });
+    const propId = (created.data as { propId: string }).propId;
+    const def = draft().props!.find((d) => d.id === propId)!;
+    const boxPart = def.parts.find((p) => p.shape === "box")!;
+    const r = await run("setPropArtwork", { propId, imageBlobId: "img_x", partId: boxPart.id });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("平面");
+  });
+
+  it("reports a missing prop and a missing asset honestly", async () => {
+    const { run } = makeExecutor();
+    expect((await run("setPropArtwork", { propId: "nope", imageBlobId: "i" })).ok).toBe(false);
+    const created = await run("createPropFromRecipe", { name: "海報", kind: "海報" });
+    const propId = (created.data as { propId: string }).propId;
+    const r = await run("setPropArtwork", { propId, assetId: "custom:ghost" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("ghost");
+  });
+
   it("importAsset says a file picker is needed rather than pretending", async () => {
     const { run } = makeExecutor();
     const r = await run("importAsset", { assetId: "custom:nothere" });
