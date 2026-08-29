@@ -74,6 +74,9 @@ describe("the six target sentences", () => {
     const brief = p.steps[1].call.args!;
     expect(brief.eventType).toBe("booth");
     expect(brief.objectives).toContain("increase-interaction");
+    // 「不能阻擋主要通道」 has to reach the brief, or the front-open stall
+    // layout stays eligible despite doing exactly what the sentence forbade.
+    expect(brief.objectives).toContain("keep-aisle-clear");
   });
 
   it("3 — moves the two named desks to opposite sides and checks the gap", () => {
