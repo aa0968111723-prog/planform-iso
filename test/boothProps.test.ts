@@ -2,7 +2,9 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BOOTH_PROP_META, BOOTH_PROP_PRESETS, boothPropPreset, boothPropsByCategory } from "../src/core/boothPropPresets";
+import { migrateProps } from "../src/core/migrate";
 import { metersFromTrim } from "../src/core/printSpec";
+import { entryFromProp } from "../src/core/propCatalog";
 import { propPreset } from "../src/core/propPresets";
 import { describeRecipe, propFromRecipe } from "../src/core/propRecipe";
 import { MATERIAL_PRESETS } from "../src/scene/materials";
@@ -55,6 +57,39 @@ describe("stall props and collateral", () => {
     const a = boothPropPreset("prop_raffle_box")!;
     a.name = "改過了";
     expect(boothPropPreset("prop_raffle_box")!.name).toBe("抽獎箱");
+  });
+
+  it("puts the small kit on a table, not on the floor", () => {
+    for (const id of [
+      "prop_flyer_stand", "prop_card_holder", "prop_raffle_box", "prop_donation_box",
+      "prop_sample_tray", "prop_qr_stand", "prop_stamp_station", "prop_prize_shelf",
+      "prop_table_tent_a5", "prop_nameplate", "prop_pen_cup", "prop_cash_box",
+      "prop_power_strip", "prop_table_flag", "prop_document_tray",
+    ]) {
+      const def = boothPropPreset(id)!;
+      expect(def.placement, id).toBe("tabletop");
+      const entry = entryFromProp(def);
+      expect(entry.placementType, id).toBe("tabletop");
+      expect(entry.kind, id).toBe("computer");
+      expect(entry.allowedParents, id).toEqual(["table", "regTable"]);
+      expect(entry.blocksFlow, id).toBe(false);
+    }
+    expect(boothPropPreset("prop_tablecloth")!.placement).toBe("floor");
+    expect(boothPropPreset("prop_trash_bin")!.placement).toBe("floor");
+    expect(entryFromProp(boothPropPreset("prop_rollup")!).placementType).toBe("floor");
+  });
+
+  it("survives migration with placement and print intact", () => {
+    // Thin planes are clamped to 1 cm on the way in — that is older migrate
+    // behaviour, not this change. What must not be lost is the tabletop bit
+    // and the order line.
+    const back = migrateProps(JSON.parse(JSON.stringify(BOOTH_PROP_PRESETS)))!;
+    expect(back.map((d) => d.id)).toEqual(BOOTH_PROP_PRESETS.map((d) => d.id));
+    for (const original of BOOTH_PROP_PRESETS) {
+      const loaded = back.find((d) => d.id === original.id)!;
+      expect(loaded.placement, original.id).toBe(original.placement);
+      expect(loaded.print, original.id).toEqual(original.print);
+    }
   });
 });
 

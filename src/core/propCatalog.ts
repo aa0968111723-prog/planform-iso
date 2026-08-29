@@ -36,6 +36,10 @@ export function propVisualRef(def: Pick<PropDefinition, "id">): string {
  * which is what a grey-box prop degrades to.
  */
 function kindForProp(def: PropDefinition): ProjectCatalogExtra["kind"] {
+  // Tabletop kit degrades to "computer" on old builds — the same bucket the
+  // booth catalog already uses for 傳單展示區 / 桌面物件, so parenting and
+  // the orphan-table check still apply.
+  if (def.placement === "tabletop") return "computer";
   const flat = def.dimensions.height <= 0.1;
   if (flat) return "mat";
   return "table";
@@ -48,17 +52,18 @@ function kindForProp(def: PropDefinition): ProjectCatalogExtra["kind"] {
  */
 export function entryFromProp(def: PropDefinition): AssetCatalogEntry {
   const kind = kindForProp(def);
+  const tabletop = def.placement === "tabletop";
   return {
     id: propEntryId(def),
     name: def.name,
     semanticType: "other",
     sourceType: "generated-procedural",
     category: "custom",
-    placementType: "floor",
+    placementType: tabletop ? "tabletop" : "floor",
     dimensions: { ...def.dimensions },
     defaultFacingDeg: 0,
     clearanceFront: def.clearance ?? 0,
-    blocksFlow: def.dimensions.height > 0.1,
+    blocksFlow: tabletop ? false : def.dimensions.height > 0.1,
     serviceRole: "none",
     kind,
     icon: def.icon ?? "🎲",
@@ -72,6 +77,9 @@ export function entryFromProp(def: PropDefinition): AssetCatalogEntry {
     createdBy: "studio",
     version: def.version,
     allowCustomSize: false,
+    ...(tabletop
+      ? { allowedParents: ["table", "regTable"] as const, defaultElevation: 0.74 }
+      : {}),
   };
 }
 

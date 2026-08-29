@@ -121,6 +121,17 @@ const KIND_PRESETS: Record<string, string> = {
   獎品架: "prop_prize_shelf",
   陳列架: "prop_prize_shelf",
   桌巾: "prop_tablecloth",
+  名牌: "prop_nameplate",
+  名牌架: "prop_nameplate",
+  筆筒: "prop_pen_cup",
+  零錢盒: "prop_cash_box",
+  收銀盒: "prop_cash_box",
+  延長線: "prop_power_strip",
+  延長線盤: "prop_power_strip",
+  桌旗: "prop_table_flag",
+  文件盤: "prop_document_tray",
+  資料盤: "prop_document_tray",
+  垃圾桶: "prop_trash_bin",
 };
 
 const DEFAULT_FACE_COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#f472b6", "#a78bfa", "#fb923c"];

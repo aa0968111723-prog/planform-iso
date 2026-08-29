@@ -2,6 +2,7 @@ import type { App } from "../app/App";
 import { CATALOG_CATEGORIES } from "../core/assets";
 import type { AssetCatalogEntry, CatalogCategory } from "../core/catalog";
 import { BOOTH_ZONE_ROLES, BOOTH_ZONE_ROLE_IDS } from "../core/boothCatalog";
+import { BOOTH_PROP_PRESETS } from "../core/boothPropPresets";
 import { planSymbolForEntry, renderPlanThumbDataUrl } from "../core/planSymbol";
 import { ZONE_DEFAULTS, type ZoneType } from "../core/model";
 import { metersToCm } from "../core/units";
@@ -85,6 +86,23 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     });
   }
 
+  // Always offered: a classroom plan still needs a 招生桌, and burying these
+  // behind 「＋ 新增道具」 meant nobody could find a QR 立架.
+  if (!opts.categories || opts.zones) {
+    const groups = [
+      { label: "文宣", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "文宣") },
+      { label: "擺攤小物", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "擺攤小物") },
+      { label: "背景", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "背景") },
+    ];
+    panels.push({
+      label: "攤位道具",
+      body: el("div", {}, groups.map((g) => el("div", {}, [
+        el("div", { class: "subhead", text: g.label }),
+        el("div", { class: "cardgrid" }, g.items.map((p) => boothPropCard(app, p, opts))),
+      ]))),
+    });
+  }
+
   for (const c of CATALOG_CATEGORIES) {
     if (!cats.includes(c.id)) continue;
     const defs = catalog.list({ category: c.id });
@@ -131,6 +149,20 @@ function thumbFor(d: AssetCatalogEntry): string | null {
   } catch {
     return null;
   }
+}
+
+function boothPropCard(app: App, def: (typeof BOOTH_PROP_PRESETS)[number], opts: LibraryOptions = {}): HTMLButtonElement {
+  const w = Math.round(metersToCm(def.dimensions.width));
+  const dep = Math.round(metersToCm(def.dimensions.depth));
+  const place = def.placement === "tabletop" ? "桌面" : "地面";
+  const c = card(
+    def.icon ?? "▦",
+    def.name,
+    `${w}×${dep}cm · ${place}`,
+    () => { app.placeBoothProp(def.id); opts.onPick?.(); },
+  );
+  c.dataset.name = def.name.toLowerCase();
+  return c;
 }
 
 function catalogCard(app: App, d: AssetCatalogEntry, opts: LibraryOptions = {}): HTMLButtonElement {

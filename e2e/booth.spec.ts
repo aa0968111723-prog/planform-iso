@@ -306,6 +306,42 @@ test.describe("outdoor booth", () => {
     expect(top.visible).toBe(0);
   });
 
+  test("攤位道具 sit on the booth table, not on the grass", async ({ page }) => {
+    await openBooth(page);
+    const layoutNav = page.locator('.navbtn[data-nav="layout"]');
+    if (await layoutNav.isVisible()) await layoutNav.click();
+    else await page.locator(".group--flows button", { hasText: "場佈" }).click();
+    await settle(page);
+
+    await page.locator(".left .libtabs .libtab", { hasText: "攤位道具" }).click();
+    await expect(page.locator(".left .library")).toContainText("QR 立架");
+    await page.locator(".left .library .card", { hasText: "QR 立架" }).click();
+    await expect(page.locator(".placebar-wrap")).toBeVisible();
+
+    const click = await page.evaluate(() => {
+      const pf = (window as unknown as {
+        planform: {
+          store: { getState(): { objects: { assetId?: string; x: number; z: number }[] } };
+          app: { scene: { project(x: number, z: number): { x: number; y: number } } };
+        };
+      }).planform;
+      const table = pf.store.getState().objects.find((o) => o.assetId === "custom:booth-table")!;
+      return pf.app.scene.project(table.x, table.z);
+    });
+    await page.mouse.click(click.x, click.y);
+    await page.locator(".placebar", { hasText: "完成" }).getByText("完成").click();
+
+    const placed = await page.evaluate(() => {
+      const objects = (window as unknown as {
+        planform: { store: { getState(): { objects: { assetId?: string; surface: string; parentId?: string }[] } } };
+      }).planform.store.getState().objects;
+      return objects.find((o) => o.assetId === "custom:prop_qr_stand") ?? null;
+    });
+    expect(placed).toBeTruthy();
+    expect(placed!.surface).toBe("tabletop");
+    expect(placed!.parentId).toBeTruthy();
+  });
+
   test("the plan survives a reload", async ({ page }) => {
     await openBooth(page);
     const before = await probe(page);

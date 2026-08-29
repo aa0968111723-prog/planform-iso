@@ -23,6 +23,7 @@ import { createPropPreview, type PreviewAngle, type PropPreview } from "./propPr
 import { FINISH_CHOICES } from "../scene/propVisual";
 import { overlappingParts, relatePartOffset } from "../core/propEdit";
 import { propPreset, PROP_PRESETS } from "../core/propPresets";
+import { boothPropsByCategory } from "../core/boothPropPresets";
 import { saveLibraryProp } from "../state/propLibrary";
 import { uid, type InteractionOption, type PropAnchor, type PropDefinition, type PropPart } from "../core/model";
 import { button, el, num, section, selectField, textField } from "./dom";
@@ -275,17 +276,23 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
         }, "chip chip--sm chip--primary"),
         el("span", { class: "hint", text: "或從一個現成的開始改：" }),
       ]));
-      card.append(el("div", { class: "row wrap" }, PROP_PRESETS.map((p) =>
-        button(`${p.icon ?? "▦"} ${p.name}`, () => {
-          // Tapping a second chip replaces the whole draft. Someone who has
-          // typed six questions and then taps another chip just to SEE what it
-          // is used to lose all six, with no warning and no undo in here.
-          if (hasTypedContent()
-            && !window.confirm(`換成「${p.name}」會清掉你目前打的內容，確定？`)) return;
-          const seed = propPreset(p.id)!;
-          draft = { ...seed, id: draft.id, source: "user", version: 1 };
-          touch();
-        }, "chip chip--sm"))));
+      const seedFrom = (id: string, name: string) => {
+        // Tapping a second chip replaces the whole draft. Someone who has
+        // typed six questions and then taps another chip just to SEE what it
+        // is used to lose all six, with no warning and no undo in here.
+        if (hasTypedContent()
+          && !window.confirm(`換成「${name}」會清掉你目前打的內容，確定？`)) return;
+        const seed = propPreset(id)!;
+        draft = { ...seed, id: draft.id, source: "user", version: 1 };
+        touch();
+      };
+      const chipRow = (items: { id: string; name: string; icon?: string }[]) =>
+        el("div", { class: "row wrap" }, items.map((p) =>
+          button(`${p.icon ?? "▦"} ${p.name}`, () => seedFrom(p.id, p.name), "chip chip--sm")));
+      card.append(el("div", { class: "subhead", text: "互動" }), chipRow(PROP_PRESETS));
+      card.append(el("div", { class: "subhead", text: "文宣" }), chipRow(boothPropsByCategory("文宣")));
+      card.append(el("div", { class: "subhead", text: "擺攤小物" }), chipRow(boothPropsByCategory("擺攤小物")));
+      card.append(el("div", { class: "subhead", text: "背景" }), chipRow(boothPropsByCategory("背景")));
     }
 
     // --- preview -----------------------------------------------------------
