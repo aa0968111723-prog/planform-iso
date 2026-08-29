@@ -580,6 +580,57 @@ function seatingFor(b: NormalizedBrief, bounds: Bounds, aisle: number, preferId:
   };
 }
 
+/**
+ * Draw the queue and staff areas each scheme already reserves.
+ *
+ * Every builder leaves a `serviceBand` of depth in front of the desks — that
+ * band IS the queue, and the strip behind the desks IS where staff stand. Both
+ * were implicit: the geometry accounted for them, and nobody setting up the
+ * room could see them. A construction plan that does not show where the line
+ * forms is a plan the volunteers have to guess at.
+ *
+ * They are `type: "custom"` zones, not new ZoneType members, so an older build
+ * reads them as ordinary areas and still draws them correctly — the same
+ * contract the booth zones use.
+ */
+function serviceAreaZones(
+  b: NormalizedBrief,
+  desks: SceneObject[],
+  bandDepth: number,
+): Zone[] {
+  if (!desks.length) return [];
+  const south = entranceSide(b) === "south";
+  const out: Zone[] = [];
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+  for (const desk of desks) {
+    // The queue forms on the side the visitors arrive from.
+    const queueDepth = Math.max(1.2, bandDepth - DESK_D);
+    const queueZ = south
+      ? desk.z + DESK_D / 2 + queueDepth / 2
+      : desk.z - DESK_D / 2 - queueDepth / 2;
+    const z = clamp(queueZ, b.usable.minZ + queueDepth / 2, b.usable.maxZ - queueDepth / 2);
+    const zone = makeZone("custom", desk.x, z, DESK_W + 0.6, queueDepth, null);
+    zone.name = desk.serviceRole === "payment" ? "收費排隊區" : "報到排隊區";
+    zone.icon = "🚶";
+    out.push(zone);
+  }
+
+  // One staff strip behind the whole desk row.
+  const minX = Math.min(...desks.map((d) => d.x)) - DESK_W / 2;
+  const maxX = Math.max(...desks.map((d) => d.x)) + DESK_W / 2;
+  const deskZ = desks[0].z;
+  const staffDepth = 0.9;
+  const staffZ = south ? deskZ - DESK_D / 2 - staffDepth / 2 : deskZ + DESK_D / 2 + staffDepth / 2;
+  const sz = clamp(staffZ, b.usable.minZ + staffDepth / 2, b.usable.maxZ - staffDepth / 2);
+  const staff = makeZone("custom", (minX + maxX) / 2, sz, maxX - minX, staffDepth, b.staffCount || null);
+  staff.name = "工作人員站位";
+  staff.icon = "🧑‍💼";
+  out.push(staff);
+
+  return out;
+}
+
 /** A — one desk doing everything, right beside the entrance. */
 const buildCombined: SchemeBuilder = (b) => {
   const band = DESK_D + 1.2;
@@ -605,6 +656,8 @@ const buildCombined: SchemeBuilder = (b) => {
       { x: (sb.minX + sb.maxX) / 2, z: (sb.minZ + sb.maxZ) / 2 },
     ]),
   ];
+
+  zones.push(...serviceAreaZones(b, [desk], band));
 
   return {
     objects: [desk],
@@ -671,6 +724,8 @@ const buildSplit: SchemeBuilder = (b) => {
     ]),
   ];
 
+  zones.push(...serviceAreaZones(b, [checkin, payment], band));
+
   return {
     objects: [checkin, payment],
     zones,
@@ -736,6 +791,8 @@ const buildCirculation: SchemeBuilder = (b) => {
       { x: right.x, z: right.z + (entranceSide(b) === "south" ? -1.0 : 1.0) },
     ]),
   ];
+
+  zones.push(...serviceAreaZones(b, [checkin, payment], band));
 
   return {
     objects: [checkin, payment],

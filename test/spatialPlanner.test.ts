@@ -8,6 +8,7 @@ import {
 } from "../src/core/spatialPlanner";
 import { validateProject, issueCounts } from "../src/core/validation";
 import { createDefaultProject, type Project, type SceneObject } from "../src/core/model";
+import { areaBounds } from "../src/core/placement";
 
 function obj(over: Partial<SceneObject> & { id: string }): SceneObject {
   return {
@@ -138,6 +139,70 @@ describe("scheme measurement is honest", () => {
       for (const st of s.stations) {
         if (st.type === "checkin") expect(st.parallelServers).toBeGreaterThanOrEqual(1);
       }
+    }
+  });
+});
+
+describe("the queue and staff areas the scheme already reserves", () => {
+  it("every scheme draws them, so the plan shows where the line forms", () => {
+    // The geometry always accounted for a service band; nobody setting up the
+    // room could see it. A construction plan that does not show where people
+    // queue is a plan the volunteers have to guess at.
+    const r = generateLayoutSchemes(bigRoom(), { participants: 40, staffCount: 4 });
+    for (const s of r.schemes) {
+      const names = s.zones.map((z) => z.name);
+      expect(names.some((n) => n.includes("排隊")), s.id).toBe(true);
+      expect(names, s.id).toContain("工作人員站位");
+    }
+  });
+
+  it("names the queue after the desk it belongs to", () => {
+    const r = generateLayoutSchemes(bigRoom(), {
+      participants: 40, staffCount: 4, objectives: ["separate-checkin-payment"],
+    });
+    const split = r.schemes.find((s) => s.id === "scheme-b")!;
+    const names = split.zones.map((z) => z.name);
+    expect(names).toContain("報到排隊區");
+    expect(names).toContain("收費排隊區");
+  });
+
+  it("puts the queue on the side people arrive from", () => {
+    // Entering from the south wall, the queue has to form south of the desk —
+    // putting it behind means the line runs through the staff.
+    const r = generateLayoutSchemes(bigRoom(), { participants: 40, staffCount: 4 });
+    const a = r.schemes.find((s) => s.id === "scheme-a")!;
+    const desk = a.objects.find((o) => o.serviceRole === "checkin")!;
+    const queue = a.zones.find((z) => z.name.includes("排隊"))!;
+    const staff = a.zones.find((z) => z.name === "工作人員站位")!;
+    expect(queue.z).toBeGreaterThan(desk.z);
+    expect(staff.z).toBeLessThan(desk.z);
+  });
+
+  it("adds them without creating validation problems", () => {
+    const r = generateLayoutSchemes(bigRoom(), { participants: 40, staffCount: 4 });
+    for (const s of r.schemes) {
+      expect(s.validation.errors, s.id).toBe(0);
+    }
+  });
+
+  it("keeps them inside the room", () => {
+    const room = bigRoom();
+    const b = areaBounds(room.classroom);
+    const r = generateLayoutSchemes(room, { participants: 40, staffCount: 4 });
+    for (const s of r.schemes) {
+      for (const z of s.zones) {
+        expect(z.z - z.depth / 2, `${s.id} ${z.name}`).toBeGreaterThanOrEqual(b.minZ - 1e-6);
+        expect(z.z + z.depth / 2, `${s.id} ${z.name}`).toBeLessThanOrEqual(b.maxZ + 1e-6);
+      }
+    }
+  });
+
+  it("uses type custom so an older build still reads them", () => {
+    // Adding a ZoneType member would be a data-format change; the booth zones
+    // set the precedent of riding on `custom` with a descriptive name.
+    const r = generateLayoutSchemes(bigRoom(), { participants: 40, staffCount: 4 });
+    for (const z of r.schemes[0].zones.filter((x) => x.name.includes("排隊") || x.name === "工作人員站位")) {
+      expect(z.type).toBe("custom");
     }
   });
 });
