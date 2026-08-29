@@ -1,10 +1,9 @@
 /**
  * Agent provider abstraction.
  *
- * The shipping provider is the local deterministic phrase → intent planner —
- * no network, no credential, same result every time. A cloud LLM provider can
- * implement AgentProvider later; the tool layer, preview and commit gates stay
- * identical either way.
+ * Default: offline phrase → intent planner. When the user pastes an
+ * OpenAI-compatible key, RoutingProvider tries the cloud first and falls
+ * back here. Tools, preview and commit stay identical either way.
  */
 
 import type { AgentIntent, AgentRequest, AgentResponse, AgentToolCall } from "./types";
@@ -150,6 +149,28 @@ export class MockProvider implements AgentProvider {
   }
 }
 
+export class RoutingProvider implements AgentProvider {
+  readonly id = "routing";
+  private readonly local = new MockProvider();
+
+  async complete(request: AgentRequest): Promise<AgentResponse> {
+    const { hasLlmKey } = await import("./llmSettings");
+    if (!hasLlmKey()) return this.local.complete(request);
+    try {
+      const { OpenAICompatibleProvider } = await import("./cloudProvider");
+      return await new OpenAICompatibleProvider().complete(request);
+    } catch (e) {
+      const fallback = await this.local.complete(request);
+      const why = e instanceof Error ? e.message : "error";
+      return {
+        ...fallback,
+        message: `雲端模型失敗（${why}），改用離線規則。 ${fallback.message}`,
+        provider: "mock-fallback",
+      };
+    }
+  }
+}
+
 export function createDefaultProvider(): AgentProvider {
-  return new MockProvider();
+  return new RoutingProvider();
 }

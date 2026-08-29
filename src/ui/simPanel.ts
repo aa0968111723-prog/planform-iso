@@ -7,6 +7,7 @@
  */
 
 import type { App } from "../app/App";
+import { WIZARD_PATTERNS, WIZARD_SPLITS } from "../core/registrationWizard";
 import { button, el, num, section } from "./dom";
 
 export function buildSimPanel(app: App): HTMLElement {
@@ -40,7 +41,7 @@ function render(app: App): HTMLElement {
   const setup = section("模擬活動", [
     el("p", {
       class: "hint",
-      text: "填人數與人力，按「▶ 模擬」看會不會塞車。不用網路、不用 AI。沒有 A–E 報到流程精靈或一鍵分流。",
+      text: "可選 A–E 報到模板與一鍵分流，再按「▶ 模擬」看會不會塞車。不用網路。",
     }),
     el("div", { class: "row wrap" }, [
       num("人數", q.participants, 5, (v) => app.updateSimQuick({ participants: Math.max(1, Math.round(v)) }), 1),
@@ -150,6 +151,27 @@ function render(app: App): HTMLElement {
     );
   }
 
+  const wizard = el("div", { class: "wizard" }, [
+    el("p", { class: "hint", text: "報到流程精靈（V2 A–E）" }),
+    el("div", { class: "row wrap" }, WIZARD_PATTERNS.map((p) =>
+      button(
+        `${app.session.simWizardPattern === p.id ? "✓ " : ""}${p.id} ${p.name}`,
+        () => app.setSimWizard(p.id),
+        app.session.simWizardPattern === p.id ? "chip chip--sm chip--primary" : "chip chip--sm",
+      ))),
+    el("p", { class: "hint", text: WIZARD_PATTERNS.find((p) => p.id === app.session.simWizardPattern)?.summary ?? "" }),
+    el("div", { class: "row wrap" }, WIZARD_SPLITS.map((s) =>
+      button(
+        `${app.session.simWizardSplit === s.id ? "✓ " : ""}${s.name}`,
+        () => app.setSimWizard(undefined, s.id),
+        app.session.simWizardSplit === s.id ? "chip chip--sm chip--primary" : "chip chip--sm",
+      ))),
+    button("套用精靈並模擬", () => {
+      app.applyRegistrationWizard();
+      app.runEventSimulation();
+    }, "btn btn--ghost"),
+  ]);
+
   const advancedBody: HTMLElement[] = [
     el("div", { class: "row wrap" }, [
       button("建立／更新流程站點", () => {
@@ -184,6 +206,7 @@ function render(app: App): HTMLElement {
       ]),
     );
   }
+  body.push(wizard);
   body.push(section("進階（站點與數據）", advancedBody, false));
 
   return el("div", {}, body);

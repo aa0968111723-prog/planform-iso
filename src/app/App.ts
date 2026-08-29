@@ -57,6 +57,7 @@ import {
 import { applyCalibrationPath, type CalibrationPath } from "../core/calibration";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
+import { applyRegistrationWizard, type WizardPatternId, type WizardSplitId } from "../core/registrationWizard";
 import { applyVenuePreset, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
 import {
   agentPositions,
@@ -88,7 +89,7 @@ import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName 
 import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
 import { normalizeEventDate } from "../core/productLimitations";
 import { QuickAgent } from "../agent/quickAgent";
-import { MockProvider } from "../agent/provider";
+import { createDefaultProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
 export type Workflow = "site" | "layout" | "route" | "check" | "export";
@@ -144,6 +145,8 @@ export interface Session {
     checkinStaff: number;
     paymentStaff: number;
   };
+  simWizardPattern: WizardPatternId;
+  simWizardSplit: WizardSplitId;
 }
 
 /** Live state of Partner Mode — the visual-first, read-only view of a plan. */
@@ -242,6 +245,8 @@ export class App {
       checkinStaff: 1,
       paymentStaff: 1,
     },
+    simWizardPattern: "D",
+    simWizardSplit: "split-table",
   };
 
   readonly quickAgent: QuickAgent;
@@ -282,7 +287,7 @@ export class App {
     // Light by default; a stored preference wins. Applied before the first
     // paint so the canvas and the panels never disagree for a frame.
     this.applyTheme(loadTheme(), false);
-    this.quickAgent = new QuickAgent(store, new MockProvider());
+    this.quickAgent = new QuickAgent(store, createDefaultProvider());
     this.store.subscribe(() => {
       this.syncScene();
       if (!this.dragging) {
@@ -1178,7 +1183,7 @@ export class App {
 
   // --- smart layout (participant-driven mats) ---------------------------
 
-  computeMatCandidates(participants: number, opts?: { centralAisleWidth?: number; matWidth?: number; matDepth?: number; gap?: number; mode?: "individual" | "field" }): LayoutCandidate[] {
+  computeMatCandidates(participants: number, opts?: { centralAisleWidth?: number; matWidth?: number; matDepth?: number; gap?: number; mode?: "individual" | "field" | "family" }): LayoutCandidate[] {
     this.session.participants = participants;
     const vs = this.state.validationSettings;
     const zone = this.getSelectedZone();
@@ -1211,22 +1216,47 @@ export class App {
     this.store.mutate((p) => {
       replaced = p.groups.filter((g) => g.sourceKind === "mat").length;
       p.groups = p.groups.filter((g) => g.sourceKind !== "mat");
+      if (cand.mode === "family") {
+        p.zones = p.zones.filter((z) => !(z.type === "group" && z.name.startsWith("家族")));
+      }
       cand.groups.forEach((g, i) => {
         const gid = uid("grp");
         newIds.push(gid);
+        const familyName = cand.mode === "family" && cand.familyZones?.[i]
+          ? cand.familyZones[i].name
+          : `地墊區 ${cand.groups.length > 1 ? String.fromCharCode(65 + i) : ""}`.trim() || "地墊區";
         p.groups.push({
-          id: gid, name: `地墊區 ${cand.groups.length > 1 ? String.fromCharCode(65 + i) : ""}`.trim() || "地墊區",
+          id: gid, name: familyName,
           sourceKind: "mat", rows: g.rows, cols: g.cols, itemWidth: g.itemWidth, itemDepth: g.itemDepth,
           itemHeight: 0.04, gapX: g.gapX, gapZ: g.gapZ, rotationDeg: g.rotationDeg, anchorX: g.anchorX, anchorZ: g.anchorZ,
           locked: false, hidden: false, numberPrefix: cand.groups.length > 1 ? String.fromCharCode(65 + i) : "M", numberOrder: "row", numberStart: "nw",
         });
       });
+      for (const z of cand.familyZones ?? []) {
+        const def = ZONE_DEFAULTS.group;
+        p.zones.push({
+          id: uid("zone"),
+          type: "group",
+          name: z.name,
+          x: z.x,
+          z: z.z,
+          width: z.width,
+          depth: z.depth,
+          color: def.color,
+          locked: false,
+          hidden: false,
+          icon: def.icon,
+          capacity: z.capacity,
+        });
+      }
     });
     this.session.matCandidates = [];
     this.toast(
       replaced
         ? `已取代原有 ${replaced} 組地墊，可按「復原」回到上一版`
-        : (cand.mode === "field" ? `已套用巧拼座區（可坐 ${cand.count} 人）` : `已套用 ${cand.count} 張地墊`),
+        : (cand.mode === "family"
+          ? `已套用 ${cand.groups.length} 個家族圈（可坐 ${cand.count} 人）`
+          : (cand.mode === "field" ? `已套用巧拼座區（可坐 ${cand.count} 人）` : `已套用 ${cand.count} 張地墊`)),
       true,
     );
     if (newIds.length) this.setSelection(newIds);
@@ -1347,6 +1377,36 @@ export class App {
     this.session.simCompare = null;
     this.notifyUi();
     return result;
+  }
+
+  setSimWizard(pattern?: WizardPatternId, split?: WizardSplitId): void {
+    if (pattern) this.session.simWizardPattern = pattern;
+    if (split) this.session.simWizardSplit = split;
+    this.notifyUi();
+  }
+
+  applyRegistrationWizard(pattern?: WizardPatternId, split?: WizardSplitId): EventScenario {
+    if (pattern) this.session.simWizardPattern = pattern;
+    if (split) this.session.simWizardSplit = split;
+    const q = this.session.simQuick;
+    const scn = applyRegistrationWizard(this.state, {
+      pattern: this.session.simWizardPattern,
+      split: this.session.simWizardSplit,
+      participants: q.participants,
+      prepaidRatio: q.prepaidRatio,
+      arrivalWindowSeconds: q.arrivalWindowSeconds,
+      arrivalProfile: q.arrivalProfile,
+      checkinStaff: q.checkinStaff,
+      paymentStaff: q.paymentStaff,
+      hasOnsitePayment: q.hasOnsitePayment,
+    });
+    this.store.mutate((p) => {
+      p.scenarios = [scn, ...p.scenarios.filter((s) => s.id !== scn.id)];
+      p.activeScenarioId = scn.id;
+    });
+    this.toast(`已套用「${scn.name}」`, true);
+    this.notifyUi();
+    return scn;
   }
 
   compareCheckinPayment(): ScenarioVariantCompareResult {

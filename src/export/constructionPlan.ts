@@ -152,6 +152,15 @@ export function inventoryLines(project: Project): InventoryLine[] {
     const named = preset && /[\u4e00-\u9fff]/.test(preset.label);
     add(entry.icon, named ? preset.label : preset ? `${entry.name} ${preset.label}` : entry.name, g.rows * g.cols);
   }
+  const hasCheckin = project.objects.some((o) =>
+    !o.hidden && (o.serviceRole === "checkin" || o.kind === "regTable" || o.assetId === "builtin:regTable"),
+  );
+  if (hasCheckin) {
+    const fromScenario = project.scenarios[0]?.participantCount;
+    const fromDesc = Number((project.description.match(/(\d+)\s*人/) ?? [])[1]);
+    const n = fromScenario && fromScenario > 0 ? fromScenario : fromDesc > 0 ? fromDesc : 1;
+    add("🪪", "名牌", n);
+  }
   return [...byName.values()].sort((a, b) => b.count - a.count);
 }
 
@@ -414,6 +423,17 @@ function drawPhoneFooter(ctx: CanvasRenderingContext2D, project: Project, width:
   const calibration = calibrationFooterText(project);
   const text = `${PRESET_TITLE[preset]} · 圖例精簡 · 地磚 ${Math.round(project.tile.width * 100)}×${Math.round(project.tile.depth * 100)} cm · 1 m 比例尺${calibration ? ` · ${calibration}` : ""}`;
   ctx.fillText(fitText(ctx, text, width - 48), 24, height - 28);
+}
+
+/** Card preview after save. Returns null when there is no document/canvas. */
+export function renderProjectThumbnail(project: Project, w = 320, h = 180): string | null {
+  if (typeof document === "undefined") return null;
+  try {
+    const canvas = renderMiniPlan(project, w, h);
+    return canvas.toDataURL("image/jpeg", 0.72);
+  } catch {
+    return null;
+  }
 }
 
 /** Bare-bones top view used as a locator thumbnail (no header/footer). */

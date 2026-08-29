@@ -5,6 +5,7 @@ import { Store } from "./state/store";
 import { ProjectRepository } from "./state/projectRepository";
 import { createDefaultProject } from "./core/model";
 import { exportProjectJson } from "./export/exporters";
+import { initPwaInstall } from "./pwa/install";
 
 const canvas = document.getElementById("scene");
 const root = document.getElementById("app");
@@ -28,6 +29,8 @@ else ProjectRepository.setActiveProjectId(null);
 
 const app = new App(canvas, store);
 const ui = new UI(app, root);
+initPwaInstall();
+store.announceOpen();
 
 if (opened && !opened.ok) {
   app.notifyToast?.("上次開著的專案讀不出來，已回到「我的專案」", false);
@@ -51,6 +54,36 @@ store.onStorageError = () => {
 store.onStorageRecovered = () => {
   autosaveBanner?.remove();
   autosaveBanner = null;
+};
+
+let conflictBanner: HTMLElement | null = null;
+store.onWriteConflict = (remote) => {
+  if (conflictBanner) conflictBanner.remove();
+  conflictBanner = document.createElement("div");
+  conflictBanner.className = "update-banner conflict-banner";
+  conflictBanner.dataset.conflict = "1";
+  const label = document.createElement("span");
+  label.textContent = "另一個分頁已寫入這份專案";
+  const loadBtn = document.createElement("button");
+  loadBtn.className = "chip chip--accent";
+  loadBtn.textContent = "載入最新";
+  loadBtn.addEventListener("click", () => {
+    store.adoptRemote(remote);
+    conflictBanner?.remove();
+    conflictBanner = null;
+    app.notifyToast?.("已載入另一個分頁的版本");
+  });
+  const keepBtn = document.createElement("button");
+  keepBtn.className = "chip chip--sm";
+  keepBtn.textContent = "繼續用這一頁";
+  keepBtn.addEventListener("click", () => {
+    store.takeWritePriority(remote.revision ?? 0);
+    conflictBanner?.remove();
+    conflictBanner = null;
+    app.notifyToast?.("下一筆儲存會蓋過另一個分頁");
+  });
+  conflictBanner.append(label, loadBtn, keepBtn);
+  root.append(conflictBanner);
 };
 
 // Flush the debounced autosave when the tab is backgrounded or closed so the

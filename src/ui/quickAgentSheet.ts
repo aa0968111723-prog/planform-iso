@@ -11,6 +11,7 @@ import type { App } from "../app/App";
 import type { QuickAgentResult } from "../agent/quickAgent";
 import { buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
 import { venuePresetById, venuePresetFromProject } from "../core/venues";
+import { llmHonestyLine } from "../agent/llmSettings";
 import { button, el } from "./dom";
 
 export interface QuickAgentSheetHandles {
@@ -103,7 +104,7 @@ export function buildQuickAgentSheet(app: App, hooks: QuickAgentHooks = {}): Qui
     el("div", { class: "agent-sheet__title", text: "✦ AI 幫我" }),
     el("p", {
       class: "hint",
-      text: "離線規則／關鍵字，不是雲端模型。沒金鑰也能用。先看預覽再決定要不要套用。例：「入口這邊要報到，20 個人會現場繳費」。",
+      text: `${llmHonestyLine()} 例：「入口這邊要報到，20 個人會現場繳費」。`,
     }),
     actions,
     input,

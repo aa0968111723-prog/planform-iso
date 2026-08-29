@@ -104,7 +104,10 @@ function tableObject(x: number, z: number): SceneObject {
   };
 }
 
-function tabletopObject(assetId: "builtin:computer" | "builtin:payment-box", parent: SceneObject): SceneObject {
+function tabletopObject(
+  assetId: "builtin:computer" | "builtin:payment-box" | "builtin:name-badge-box",
+  parent: SceneObject,
+): SceneObject {
   const entry = BUILTIN_CATALOG.find((e) => e.id === assetId)!;
   return {
     id: uid("obj"), kind: entry.kind, x: parent.x, z: parent.z, rotationDeg: 0,
@@ -374,8 +377,16 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
     : { x: project.classroom.x + project.classroom.length / 2, z: project.classroom.z + 4 };
   const checkinObj = project.objects.find((o) => o.serviceRole === "checkin");
   const paymentObj = project.objects.find((o) => o.serviceRole === "payment");
-  if (checkinObj) project.objects.push(tabletopObject("builtin:computer", checkinObj));
+  if (checkinObj) {
+    project.objects.push(tabletopObject("builtin:computer", checkinObj));
+    project.objects.push(tabletopObject("builtin:name-badge-box", checkinObj));
+  }
   if (paymentObj) project.objects.push(tabletopObject("builtin:payment-box", paymentObj));
+  const lectern = project.objects.find((o) => o.assetId === "builtin:lectern");
+  const avX = lectern ? lectern.x - 1.4 : project.classroom.x + 3.0;
+  const pptX = lectern ? lectern.x + 2.8 : project.classroom.x + 7.8;
+  const avZ = lectern ? lectern.z + 1.1 : 1.6;
+  project.zones.push(makeZone("av", avX, avZ), makeZone("ppt", pptX, avZ));
   // 實際要搬的現場物資也擺進範例，物資清單才數得出鞋架/欄杆/立牌。
   const prop = (assetId: string, x: number, z: number, rotationDeg = 0): SceneObject => {
     const entry = BUILTIN_CATALOG.find((e) => e.id === assetId)!;
@@ -393,6 +404,8 @@ export function buildE310GoldenProject(venue: VenuePreset): Project {
     prop("builtin:queue-barrier", queue.x, queue.z + 0.45),
     prop("builtin:queue-barrier", queue.x + 1.1, queue.z + 0.45),
     prop("builtin:signage-stand", guide.x + 0.5, guide.z, 180),
+    prop("builtin:av-mixer", avX, avZ),
+    prop("builtin:ppt-control", pptX, avZ),
   );
   const stations: ServiceStation[] = [
     entrance, guide, queue,

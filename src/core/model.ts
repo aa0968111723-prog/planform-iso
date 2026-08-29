@@ -161,6 +161,8 @@ export type ZoneType =
   | "meditation"
   | "shoe"
   | "backpack"
+  | "av"
+  | "ppt"
   | "custom";
 
 export interface Zone {
@@ -337,6 +339,8 @@ export interface Project {
   /** v6: event-flow simulation scenarios (DES). */
   scenarios: EventScenario[];
   activeScenarioId: string | null;
+  /** Monotonic write counter for same-project multi-tab conflict detection. */
+  revision?: number;
 }
 
 let idCounter = 0;
@@ -356,6 +360,8 @@ export const ZONE_DEFAULTS: Record<
   meditation: { label: "講師禪定區", color: "#f472b6", width: 2, depth: 2, icon: "🧘" },
   shoe: { label: "鞋子擺放區", color: "#fbbf24", width: 2, depth: 1, icon: "👟" },
   backpack: { label: "背包放置區", color: "#fb923c", width: 2, depth: 1, icon: "🎒" },
+  av: { label: "音控區", color: "#67e8f9", width: 1.6, depth: 1.2, icon: "🎛" },
+  ppt: { label: "控 PPT 區", color: "#c4b5fd", width: 1.4, depth: 1.2, icon: "🖥" },
   custom: { label: "自訂區", color: "#94a3b8", width: 2, depth: 2, icon: "📦" },
 };
 

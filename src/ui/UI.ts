@@ -26,6 +26,9 @@ import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } fr
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, dateField, el, num, section, selectField, textField } from "./dom";
+import { getLlmSettings, setLlmSettings } from "../agent/llmSettings";
+import { createDefaultProvider } from "../agent/provider";
+import { canPromptInstall, installHowTo, isStandalone, promptInstall } from "../pwa/install";
 
 const VIEWS: { id: ViewName; label: string }[] = [
   { id: "top", label: "俯視" }, { id: "iso", label: "立體" }, { id: "front", label: "正視" },
@@ -437,8 +440,18 @@ export class UI {
         items: [
           {
             label: "已知限制",
-            sub: "1.1 待辦、只有欄位、掃描／AI 是示範",
+            sub: "剩下的環境限制（遠端主機）",
             onSelect: () => this.limitations.open(),
+          },
+          {
+            label: "加到主畫面",
+            sub: "安裝成 PWA，第一次開啟後可離線用",
+            onSelect: () => void this.promptPwaInstall(),
+          },
+          {
+            label: "雲端 AI（選用）",
+            sub: this.app.quickAgent.getProviderId() === "routing" ? "沒金鑰用離線規則；有金鑰走雲端" : "設定 OpenAI 相容金鑰",
+            onSelect: () => this.promptLlmSettings(),
           },
           {
             label: `版本 ${BUILD_INFO.version}`,
@@ -469,6 +482,34 @@ export class UI {
     const cur = this.app.store.getState().name;
     const next = window.prompt("活動名稱", cur);
     if (next !== null) this.app.store.mutate((p) => (p.name = next.trim() || cur), { history: false });
+  }
+
+  private async promptPwaInstall(): Promise<void> {
+    if (isStandalone()) {
+      this.showToast("已經在主畫面裡");
+      return;
+    }
+    if (!canPromptInstall()) {
+      this.showToast(installHowTo());
+      return;
+    }
+    const outcome = await promptInstall();
+    if (outcome === "accepted") this.showToast("已加到主畫面");
+    else if (outcome === "dismissed") this.showToast("已取消安裝");
+    else this.showToast(installHowTo());
+  }
+
+  private promptLlmSettings(): void {
+    const s = getLlmSettings();
+    const key = window.prompt("雲端 AI API 金鑰（OpenAI 相容；留空則離線規則）", s.apiKey);
+    if (key === null) return;
+    const endpoint = window.prompt("API endpoint", s.endpoint);
+    if (endpoint === null) return;
+    const model = window.prompt("模型", s.model);
+    if (model === null) return;
+    setLlmSettings({ apiKey: key.trim(), endpoint: endpoint.trim(), model: model.trim() });
+    this.app.quickAgent.setProvider(createDefaultProvider());
+    this.showToast(key.trim() ? "已設定雲端 AI，失敗會退回離線規則" : "已清掉金鑰，改用離線規則");
   }
 
   // --- bottom navigation --------------------------------------------------
@@ -795,11 +836,12 @@ export class UI {
   /** 排地墊 options: 直向/橫向 and 相黏（gap 0）/留縫. */
   private matOrient: "v" | "h" = "v";
   private matSnug = true;
-  private matMode: "individual" | "field" = "individual";
+  private matMode: "individual" | "field" | "family" = "individual";
   /** Venue the matMode default was last derived from — manual choices stick until the venue changes. */
   private matModeVenue: string | undefined;
 
-  private matOpts(): { matWidth: number; matDepth: number; gap: number; mode: "individual" | "field" } {
+  private matOpts(): { matWidth: number; matDepth: number; gap: number; mode: "individual" | "field" | "family" } {
+    if (this.matMode === "family") return { matWidth: 0.6, matDepth: 0.6, gap: 0.15, mode: "family" };
     if (this.matMode === "field") return { matWidth: 0.6, matDepth: 0.6, gap: 0, mode: "field" };
     const w = this.matOrient === "v" ? 0.6 : 1.8;
     const d = this.matOrient === "v" ? 1.8 : 0.6;
@@ -840,6 +882,7 @@ export class UI {
       el("div", { class: "row wrap" }, [
         button(this.matMode === "field" ? "✓ 巧拼整片" : "巧拼整片", () => { this.matMode = "field"; regen(); this.update(); }, this.matMode === "field" ? "chip chip--sm chip--primary" : "chip chip--sm"),
         button(this.matMode === "individual" ? "✓ 個人墊" : "個人墊", () => { this.matMode = "individual"; regen(); this.update(); }, this.matMode === "individual" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(this.matMode === "family" ? "✓ 家族圈" : "家族圈", () => { this.matMode = "family"; regen(); this.update(); }, this.matMode === "family" ? "chip chip--sm chip--primary" : "chip chip--sm"),
       ]),
       quick,
       ...(this.matMode === "individual" ? [el("div", { class: "row wrap" }, [orientChip("v", "直向"), orientChip("h", "橫向"), snugChip])] : []),
@@ -875,7 +918,7 @@ export class UI {
       this.smartBox.append(el("div", { class: `card smart ${c.fits ? "" : "smart--warn"}` }, [
         matCandidateThumb(c),
         el("span", { class: "card__body" }, [
-          el("span", { class: "card__title", text: c.mode === "field" ? c.label : `${c.label}（${c.count} 張）` }),
+          el("span", { class: "card__title", text: c.mode === "field" || c.mode === "family" ? c.label : `${c.label}（${c.count} 張）` }),
           el("span", { class: "card__sub", text: `${c.footprint.width.toFixed(1)} × ${c.footprint.depth.toFixed(1)} m${warn}` }),
         ]),
         button("套用", () => { this.app.applyMatCandidate(c.id); if (this.compact) this.setSheet("none"); }, "chip chip--sm chip--primary"),
@@ -1081,7 +1124,7 @@ export class UI {
       el("div", { class: "subhead", text: "這個專案的版本（方案 A／方案 B／最後版）" }),
       el("p", {
         class: "hint",
-        text: "名稱存在本機共用清單，不是專案內版本。同名會蓋掉其他專案存的方案。",
+        text: "存在這個專案裡。換專案看不到另一份的方案。",
       }),
       el("div", { class: "row" }, [layoutName, button("儲存", () => {
         const saved = this.app.store.saveNamedLayout(layoutName.value.trim() || state().name);

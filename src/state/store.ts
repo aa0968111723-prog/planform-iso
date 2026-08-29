@@ -1,11 +1,19 @@
 import { createDefaultProject, type Project } from "../core/model";
 import { migrateProject } from "../core/migrate";
 import { ProjectRepository } from "./projectRepository";
+import { createTabSync, type TabSyncHandle } from "./tabSync";
+import { renderProjectThumbnail } from "../export/constructionPlan";
 
 const AUTOSAVE_KEY = "planform-iso:autosave";
 const AUTOSAVE_BACKUP_KEY = "planform-iso:autosave-backup";
 const LAYOUTS_KEY = "planform-iso:layouts";
+const SNAPSHOT_PREFIX = "planform-iso:snapshots:";
 const MAX_HISTORY = 100;
+const THUMBNAIL_MS = 1200;
+
+export function snapshotStorageKey(projectId: string): string {
+  return `${SNAPSHOT_PREFIX}${projectId}`;
+}
 
 function clone<T>(v: T): T {
   return structuredClone(v);
@@ -33,9 +41,12 @@ export class Store {
   private listeners = new Set<Listener>();
   private pending: Project | null = null;
   private autosaveTimer: number | null = null;
+  private thumbnailTimer: number | null = null;
+  private tabSync: TabSyncHandle | null = null;
 
   constructor(initial?: Project) {
     this.project = initial ?? createDefaultProject();
+    this.attachTabSync();
   }
 
   getState(): Project {
@@ -50,6 +61,7 @@ export class Store {
     if (id === this.projectId) return;
     if (this.projectId) this.flushAutosave();
     this.projectId = id;
+    if (id) this.announceOpen();
   }
 
   getProjectId(): string | null {
@@ -67,6 +79,7 @@ export class Store {
     this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
+    this.announceOpen();
     this.emit();
   }
 
@@ -178,13 +191,40 @@ export class Store {
   onStorageError: (() => void) | null = null;
   onStorageRecovered: (() => void) | null = null;
   onLayoutError: ((action: "save" | "delete") => void) | null = null;
+  /** Another tab wrote a newer revision of this project. */
+  onWriteConflict: ((remote: Project) => void) | null = null;
+  /** Another tab has the same project open (heartbeat). */
+  onPeerOpen: ((projectId: string) => void) | null = null;
   private storageErrorReported = false;
 
   saveAutosave(): void {
     if (typeof localStorage === "undefined") return;
-    const ok = this.projectId
-      ? ProjectRepository.saveProject(this.projectId, this.project)
-      : this.writeLegacyAutosave();
+    if (this.projectId) {
+      const result = ProjectRepository.trySaveProject(this.projectId, this.project);
+      if (result.ok) {
+        if (this.storageErrorReported) {
+          this.storageErrorReported = false;
+          this.onStorageRecovered?.();
+        }
+        this.tabSync?.post({
+          type: "saved",
+          projectId: this.projectId,
+          revision: this.project.revision ?? 0,
+        });
+        this.scheduleThumbnail();
+        return;
+      }
+      if (result.reason === "conflict") {
+        this.onWriteConflict?.(result.remote);
+        return;
+      }
+      if (!this.storageErrorReported) {
+        this.storageErrorReported = true;
+        this.onStorageError?.();
+      }
+      return;
+    }
+    const ok = this.writeLegacyAutosave();
     if (ok) {
       if (this.storageErrorReported) {
         this.storageErrorReported = false;
@@ -215,6 +255,57 @@ export class Store {
       this.autosaveTimer = null;
     }
     this.saveAutosave();
+    this.flushThumbnail();
+  }
+
+  /** Adopt the disk copy after a conflict (「載入最新」). */
+  adoptRemote(remote: Project): void {
+    this.project = migrateProject(remote);
+    this.undoStack = [];
+    this.redoStack = [];
+    this.pending = null;
+    this.emit();
+  }
+
+  /** Keep this tab's edits and take the next write (「繼續用這一頁」). */
+  takeWritePriority(remoteRevision: number): void {
+    this.project.revision = remoteRevision;
+  }
+
+  private attachTabSync(): void {
+    this.tabSync = createTabSync({
+      onRemoteSave: (msg) => {
+        if (!this.projectId || msg.projectId !== this.projectId) return;
+        if (msg.revision <= (this.project.revision ?? 0)) return;
+        const opened = ProjectRepository.openProject(msg.projectId);
+        if (opened.ok) this.onWriteConflict?.(opened.project);
+      },
+      onPeerOpen: (msg) => {
+        if (this.projectId && msg.projectId === this.projectId) this.onPeerOpen?.(msg.projectId);
+      },
+    });
+  }
+
+  announceOpen(): void {
+    if (this.projectId) this.tabSync?.post({ type: "open", projectId: this.projectId });
+  }
+
+  private scheduleThumbnail(): void {
+    if (!this.projectId || typeof document === "undefined") return;
+    if (typeof window === "undefined") return;
+    if (this.thumbnailTimer !== null) window.clearTimeout(this.thumbnailTimer);
+    this.thumbnailTimer = window.setTimeout(() => this.flushThumbnail(), THUMBNAIL_MS);
+  }
+
+  private flushThumbnail(): void {
+    if (this.thumbnailTimer !== null && typeof window !== "undefined") {
+      window.clearTimeout(this.thumbnailTimer);
+      this.thumbnailTimer = null;
+    }
+    const id = this.projectId;
+    if (!id || typeof document === "undefined") return;
+    const url = renderProjectThumbnail(this.project);
+    if (url) ProjectRepository.setThumbnail(id, url);
   }
 
   static loadAutosave(): Project | null {
@@ -259,16 +350,17 @@ export class Store {
   // --- named layouts -----------------------------------------------------
 
   listLayouts(): string[] {
-    return Object.keys(readLayouts()).sort();
+    return Object.keys(readLayouts(this.layoutsKey())).sort();
   }
 
   saveNamedLayout(name: string): boolean {
     try {
-      const layouts = readLayouts();
+      const key = this.layoutsKey();
+      const layouts = readLayouts(key);
       const project = clone(this.project);
       project.name = name;
       layouts[name] = project;
-      localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+      localStorage.setItem(key, JSON.stringify(layouts));
       this.mutate((p) => {
         p.name = name;
       }, { history: false });
@@ -280,7 +372,7 @@ export class Store {
   }
 
   loadNamedLayout(name: string): boolean {
-    const layouts = readLayouts();
+    const layouts = readLayouts(this.layoutsKey());
     const project = layouts[name];
     if (!project) return false;
     this.loadProject(project, { undoBeforeLoad: true });
@@ -289,20 +381,26 @@ export class Store {
 
   deleteNamedLayout(name: string): boolean {
     try {
-      const layouts = readLayouts();
+      const key = this.layoutsKey();
+      const layouts = readLayouts(key);
       delete layouts[name];
-      localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+      localStorage.setItem(key, JSON.stringify(layouts));
       return true;
     } catch {
       this.onLayoutError?.("delete");
       return false;
     }
   }
+
+  /** Bound projects keep snapshots under their own key; unbound uses the legacy global list. */
+  private layoutsKey(): string {
+    return this.projectId ? snapshotStorageKey(this.projectId) : LAYOUTS_KEY;
+  }
 }
 
-function readLayouts(): Record<string, Project> {
+function readLayouts(key: string): Record<string, Project> {
   try {
-    const raw = localStorage.getItem(LAYOUTS_KEY);
+    const raw = localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as Record<string, Project>) : {};
   } catch {
     return {};

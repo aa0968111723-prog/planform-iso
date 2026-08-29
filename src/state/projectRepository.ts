@@ -273,8 +273,15 @@ export const ProjectRepository = {
     }
   },
 
-  /** Persist a project body and refresh its card. Returns false if storage is full. */
+  /**
+   * Persist a project body and refresh its card.
+   * Always overwrites (tests and first bind). Use `trySaveProject` when a
+   * stale tab must not clobber a newer revision.
+   */
   saveProject(id: string, project: Project, now = Date.now()): boolean {
+    const existing = peekBody(id);
+    const existingRev = typeof existing?.revision === "number" ? existing.revision : 0;
+    project.revision = existingRev + 1;
     if (!writeBody(id, project)) return false;
     const index = readIndex();
     const entry = index.entries.find((e) => e.id === id);
@@ -295,6 +302,26 @@ export const ProjectRepository = {
     }
     writeIndex(index);
     return true;
+  },
+
+  /**
+   * Same as saveProject, but refuse a silent overwrite when the disk copy is
+   * newer than the in-memory revision (another tab already wrote).
+   */
+  trySaveProject(id: string, project: Project, now = Date.now()):
+    | { ok: true }
+    | { ok: false; reason: "storage" }
+    | { ok: false; reason: "conflict"; remote: Project } {
+    const existing = peekBody(id);
+    const remoteRev = typeof existing?.revision === "number" ? existing.revision : 0;
+    const localRev = typeof project.revision === "number" ? project.revision : 0;
+    if (existing && remoteRev > localRev) {
+      return { ok: false, reason: "conflict", remote: existing };
+    }
+    if (!ProjectRepository.saveProject(id, project, now)) {
+      return { ok: false, reason: "storage" };
+    }
+    return { ok: true };
   },
 
   renameProject(id: string, name: string, now = Date.now()): ProjectMeta | null {
@@ -513,6 +540,18 @@ function markMigrated(): void {
     storage()?.setItem(MIGRATED_KEY, "1");
   } catch {
     /* ignore */
+  }
+}
+
+function peekBody(id: string): Project | null {
+  const s = storage();
+  if (!s) return null;
+  try {
+    const raw = s.getItem(bodyKey(id));
+    if (!raw) return null;
+    return JSON.parse(raw) as Project;
+  } catch {
+    return null;
   }
 }
 

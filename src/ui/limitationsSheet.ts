@@ -28,7 +28,7 @@ export function buildLimitationsSheet(): LimitationsSheetHandles {
     el("div", { class: "menusheet__title", id: "limitsheet-title", text: "已知限制" }),
     el("p", {
       class: "hint",
-      text: "文件標成 1.1／limitation，或程式裡只有欄位、產品還沒做完的入口。不是故障清單。",
+      text: "先前標成 1.1／只有欄位的入口已補上。剩下的是環境限制，不是產品沒做。",
     }),
     list,
   ]);

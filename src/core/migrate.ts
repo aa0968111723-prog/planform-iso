@@ -477,6 +477,8 @@ export function migrateProject(input: Partial<Project>): Project {
     p.activeScenarioId = p.scenarios[0]?.id ?? null;
   }
 
+  p.revision = typeof input.revision === "number" && input.revision >= 0 ? input.revision : 0;
+
   return p;
 }
 

@@ -4,15 +4,15 @@
 
 import type { App } from "../app/App";
 import {
-  MockVenueProvider,
   applyVenueCalibration,
   createVenueSession,
   type VenueCaptureSession,
   type VenueDetection,
 } from "../assets/venueCapture";
+import { createDefaultVenueProvider } from "../assets/venueVision";
 import { button, el, section } from "./dom";
 
-const provider = new MockVenueProvider();
+const provider = createDefaultVenueProvider();
 
 export function buildVenueCaptureFlow(app: App): HTMLElement {
   const host = el("div", { class: "venue-capture" });
@@ -37,7 +37,7 @@ export function buildVenueCaptureFlow(app: App): HTMLElement {
         }),
         el("p", {
           class: "hint venue-capture__limit",
-          text: "目前是示範偵測（假資料），不會真的認照片裡的門桌。",
+          text: "有照片時用本機影像分析（亮度／邊緣），不是雲端視覺模型。沒照片才用示範偵測。",
         }),
         button("📷 掃描場地", () => fileInput.click(), "btn"),
       );

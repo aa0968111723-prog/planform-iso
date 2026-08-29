@@ -6,6 +6,7 @@
  */
 
 import type { Bounds } from "./placement";
+import { generateFamilyLayouts } from "./familySeating";
 
 export interface LayoutInput {
   participants: number;
@@ -15,8 +16,8 @@ export interface LayoutInput {
   aisleWidth: number; // central aisle width (meters)
   bounds: Bounds; // usable area (already inset from walls if desired)
   rotationDeg?: number;
-  /** "field" is a contiguous 0.6 × 0.6 mat field; default keeps legacy mats. */
-  mode?: "individual" | "field";
+  /** "field" is a contiguous 0.6 × 0.6 mat field; "family" is R-06 circles. */
+  mode?: "individual" | "field" | "family";
 }
 
 export interface GroupSpec {
@@ -39,9 +40,11 @@ export interface LayoutCandidate {
   footprint: { width: number; depth: number };
   warnings: string[];
   fits: boolean;
-  mode?: "individual" | "field";
+  mode?: "individual" | "field" | "family";
   /** Seats represented by a field; one person occupies two 0.6 m cells. */
   capacity?: number;
+  /** R-06: named 家族 zones to place with the mat clusters. */
+  familyZones?: { name: string; x: number; z: number; width: number; depth: number; capacity: number }[];
 }
 
 function capacityAlong(avail: number, size: number, gap: number): number {
@@ -58,6 +61,7 @@ function blockDepth(rows: number, d: number, gap: number): number {
 
 /** Generate up to 3 candidate mat layouts for the given headcount. */
 export function generateLayouts(input: LayoutInput): LayoutCandidate[] {
+  if (input.mode === "family") return generateFamilyLayouts(input);
   if (input.mode === "field") return generateFieldLayouts(input);
   const { participants: n, matWidth: w, matDepth: d, gap, aisleWidth, bounds } = input;
   const rot = input.rotationDeg ?? 0;
