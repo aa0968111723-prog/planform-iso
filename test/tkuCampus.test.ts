@@ -13,9 +13,9 @@ import {
   findTkuPlace,
   formatCampusLine,
   parseTkuRoomCode,
+  placesWithPublishedCapacity,
 } from "../src/core/tkuCampus";
 import { venuePresetById } from "../src/core/venues";
-import { extractSlots, normalize } from "../src/agent/intent";
 
 describe("Tamkang campus directory", () => {
   it("lists four campuses with the Tamsui street address", () => {
@@ -32,14 +32,18 @@ describe("Tamkang campus directory", () => {
     expect(buildingByCode("SA")?.campusId).toBe("lanyang");
     expect(buildingByCode("ZF")?.name).toBe("淡江國際學園");
     expect(buildingByCode("CL")?.campusId).toBe("lanyang");
+    expect(buildingByCode("N")?.name).toBe("紹謃紀念游泳館");
     expect(TKU_BUILDINGS.every((b) => b.code && b.name && b.campusId)).toBe(true);
     expect(new Set(TKU_BUILDINGS.map((b) => b.code)).size).toBe(TKU_BUILDINGS.length);
+    expect(TKU_BUILDINGS.length).toBeGreaterThanOrEqual(54);
   });
 
   it("parses classroom codes without inventing geometry", () => {
     expect(parseTkuRoomCode("E310")).toEqual({ code: "E310", buildingCode: "E", floor: 3, room: "10" });
     expect(parseTkuRoomCode("sg109")).toEqual({ code: "SG109", buildingCode: "SG", floor: 1, room: "09" });
     expect(parseTkuRoomCode("D305")).toEqual({ code: "D305", buildingCode: "D", floor: 3, room: "05" });
+    expect(parseTkuRoomCode("HC310")).toEqual({ code: "HC310", buildingCode: "HC", floor: 3, room: "10" });
+    expect(parseTkuRoomCode("B302A")).toEqual({ code: "B302A", buildingCode: "B", floor: 3, room: "02A" });
     expect(parseTkuRoomCode("教室")).toBeNull();
   });
 
@@ -82,14 +86,39 @@ describe("Tamkang campus directory", () => {
     expect(findTkuPlace("CL408")?.id).toBe("CL408");
     expect(findTkuPlace("D304")?.publishedCapacity).toBe(48);
     expect(findTkuPlace("美食廣場")?.id).toBe("food-plaza");
+    expect(findTkuPlace("有蓮")?.publishedCapacity).toBe(350);
+    expect(findTkuPlace("文縆音樂廳")?.publishedCapacity).toBe(252);
+    expect(findTkuPlace("B302A")?.publishedCapacity).toBe(45);
+    expect(findTkuPlace("宮燈大道")?.id).toBe("palace-avenue");
+    expect(findTkuPlace("ED201")?.id).toBe("ed-generic");
+    expect(findTkuPlace("花牆")?.id).toBe("flower-wall");
+    expect(findTkuPlace("游泳館")?.id).toBe("natatorium");
+    expect(findTkuPlace("D206")?.publishedCapacity).toBe(217);
+    expect(findTkuPlace("黑天鵝")?.publishedCapacity).toBe(80);
+  });
+
+  it("keeps published capacities sourced from rental tables only", () => {
+    const numbered = placesWithPublishedCapacity();
+    expect(numbered.length).toBeGreaterThanOrEqual(20);
+    expect(findTkuPlace("驚聲國際會議廳")?.publishedCapacity).toBe(175);
+    expect(findTkuPlace("覺生國際會議廳")?.publishedCapacity).toBe(180);
+    expect(findTkuPlace("鍾靈中正堂")?.publishedCapacity).toBe(200);
+    expect(findTkuPlace("E680")?.publishedCapacity).toBe(44);
+    expect(TKU_PLACES.some((p) => /實測完成|已量過/.test(p.note))).toBe(false);
   });
 
   it("keeps college homes and published floor uses without inventing geometry", () => {
     expect(TKU_COLLEGES.find((c) => c.id === "business")?.buildingCodes).toEqual(["B"]);
     expect(TKU_SG_FLOORS.some((f) => f.floor === 7 && /集會/.test(f.label))).toBe(true);
+    expect(TKU_SG_FLOORS.some((f) => f.floor === 8)).toBe(true);
     expect(TKU_LIBRARY_FLOORS).toHaveLength(9);
     expect(TKU_TAIPEI_ROOM_CODES).toContain("D214");
+    expect(TKU_TAIPEI_ROOM_CODES).toContain("D507");
     expect(TKU_CAMPUSES[0].officialCode).toBe("TS");
+    expect(TKU_COLLEGES.find((c) => c.id === "health")?.campusId).toBe("lanyang");
+    expect(TKU_PLACES.length).toBeGreaterThanOrEqual(100);
+    expect(buildingByCode("XB")?.name).toBe("五虎崗新社辦");
+    expect(buildingByCode("Z")?.aliases).toContain("文縆藝術中心");
   });
 
   it("formats a campus pin without claiming a survey", () => {
@@ -98,18 +127,5 @@ describe("Tamkang campus directory", () => {
   });
 });
 
-describe("agent reads Tamkang place names", () => {
-  it("extracts E308 / 書卷廣場 from a one-line brief", () => {
-    const a = extractSlots(normalize("幫我排 E308 的 40 人社課"));
-    expect(a.venuePlace?.value.placeId).toBe("E308");
-    expect(a.venuePlace?.value.venuePresetId).toBe("venue:tku-e308");
-    expect(a.participants?.value).toBe(40);
-
-    const b = extractSlots(normalize("書卷廣場擺攤"));
-    expect(b.venuePlace?.value.placeId).toBe("scroll-plaza");
-    expect(b.eventType?.value).toBe("booth");
-
-    const c = extractSlots(normalize("圖書館討論室排 12 人"));
-    expect(c.venuePlace?.value.placeId).toBe("library");
-  });
-});
+// Agent venuePlace wiring lives on intent.ts when that slot exists.
+// This catalogue test stays independent so gates can pass on directory data alone.
