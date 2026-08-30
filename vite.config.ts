@@ -71,9 +71,9 @@ export default defineConfig({
         globIgnores: ["version.json"],
       },
       manifest: {
-        name: "平面場 ISO",
-        short_name: "平面場 ISO",
-        description: "快速製作活動場刊圖、場佈圖與動線圖",
+        name: "PLANFORM｜活動空間彩排",
+        short_name: "Planform",
+        description: "活動開始前，把場地、3D 道具、人流與互動先排好、先彩排，再把清楚的場刊圖交給夥伴。",
         lang: "zh-Hant",
         theme_color: "#eef2f7",
         background_color: "#eef2f7",

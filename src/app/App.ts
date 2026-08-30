@@ -77,6 +77,7 @@ import {
   nearestWallSnap,
   wallAnchorToPosition,
   areaBounds,
+  clampPointToAreas,
 } from "../core/placement";
 import { groupCenter, groupFootprint, groupMembers, setGroupCenter } from "../core/arrays";
 import { validateProject, type Issue } from "../core/validation";
@@ -145,7 +146,7 @@ import { createAppAgentHost } from "./agentHost";
 import { LocalPlannerProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
-/** `sim` is the outdoor-booth crowd simulation; `check` still lives inside 分享. */
+/** `sim` is 彩排 (classroom or booth). `check` still lives inside 分享. */
 export type Workflow = "site" | "layout" | "route" | "sim" | "check" | "export";
 
 const TABLE_KINDS: ReadonlySet<string> = new Set(["table", "regTable"]);
@@ -622,12 +623,24 @@ export class App {
   }
 
   private confirmPlacement(): void {
-    const g = this.session.ghost;
     const kind = this.session.placingKind;
     const entry = this.placingEntry();
-    if (!g || !kind || !entry) return;
+    if (!this.session.ghost || !kind || !entry) return;
+    // A tap that looks like it hit the canvas can still raycast into the void
+    // around the building (landscape tablet, chrome-trimmed iso view). Snap
+    // floor furniture into the venue instead of silently no-op'ing.
+    if (entry.placementType === "floor" && this.session.ghost.validity === "bad") {
+      const snapped = clampPointToAreas(
+        this.session.ghost.x, this.session.ghost.z,
+        [this.state.classroom, this.state.corridor],
+      );
+      this.updateGhostAt(snapped.x, snapped.z);
+    }
+    const g = this.session.ghost;
+    if (!g) return;
     if (g.validity === "bad") {
       if (entry.placementType === "tabletop") this.toast("點在桌子上才能放下", false);
+      else this.toast("點在教室或走廊裡才能放下", false);
       return;
     }
     const id = uid("obj");
@@ -1408,10 +1421,17 @@ export class App {
     return Math.hypot(c.b.x - c.a.x, c.b.z - c.a.z);
   }
   applyCalibration(action: CalibrationPath, actualMeters: number, note = ""): void {
-    if (!actualMeters || actualMeters <= 0) return;
+    if (!actualMeters || actualMeters <= 0) {
+      this.toast("請輸入有效的實際長度", false);
+      return;
+    }
     const measured = action === "classroom-length" ? this.getCalibrationDistance() ?? undefined : undefined;
     if (action === "classroom-length" && (!measured || measured <= 0)) {
       this.toast("請先在畫布點兩個已知距離的端點，再套用到教室長");
+      return;
+    }
+    if (action === "door" && !this.state.objects.some((o) => o.kind === "door" && !o.hidden)) {
+      this.toast("場上沒有門，無法套用門寬", false);
       return;
     }
     this.store.mutate((p) => applyCalibrationPath(p, action, actualMeters, measured, note));
@@ -1958,7 +1978,7 @@ export class App {
 
   // --- outdoor booth simulation ------------------------------------------
 
-  /** True when this project carries booth data, i.e. the 模擬 tab applies. */
+  /** True when this project carries booth data (戶外攤位). */
   isBoothPlan(): boolean {
     return isBoothProject(this.state);
   }
@@ -2626,7 +2646,16 @@ export class App {
 
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 
-    if (this.session.mode === "place") { this.confirmPlacement(); return; }
+    if (this.session.mode === "place") {
+      // Honour the tap location, not whatever the ghost last was. Clamp into
+      // the visible canvas so a finger on the sheet-trimmed view still lands
+      // on the plan, not under the header or behind the bottom nav.
+      const pt = this.scene.clampClientToVisible(e.clientX, e.clientY);
+      const ground = this.scene.groundPoint(pt.x, pt.y);
+      if (ground) this.updateGhostAt(ground.x, ground.z);
+      this.confirmPlacement();
+      return;
+    }
 
     if (this.session.mode === "measure" && ground) {
       const snapped = snapMeasurePoint(ground.x, ground.z, this.state, 0.35);

@@ -61,9 +61,12 @@ for (const vp of VIEWPORTS) {
         expect(leftVisible).toBe(false);
         expect(rightVisible).toBe(false);
         expect(navVisible).toBe(true);
-        // The four primary workflows live in the bottom navigation
-        // (檢查 folds into 分享 as the pre-export checklist).
-        await expect(page.locator(".bottomnav .navbtn")).toHaveCount(4);
+        // Five first-layer workflows live in the bottom navigation
+        // (場地 / 場佈 / 動線／互動 / 彩排 / 分享).
+        await expect(page.locator(".bottomnav .navbtn")).toHaveCount(5);
+        await expect(page.locator('.navbtn[data-nav="sim"]')).toHaveCount(1);
+        await expect(page.locator('.navbtn[data-nav="sim"]')).toContainText("彩排");
+        await expect(page.locator('.navbtn[data-nav="route"]')).toContainText("動線／互動");
       }
     });
 
@@ -95,9 +98,9 @@ for (const vp of VIEWPORTS) {
 
       if (vp.mode === "desktop") {
         expect(header.compact).toBe(false);
-        // Desktop keeps the five views and the four-step primary flow.
+        // Desktop keeps the five views and the five-step primary flow.
         expect(header.viewChips).toBe(5);
-        expect(header.flowChips).toBe(4);
+        expect(header.flowChips).toBe(5);
       } else {
         expect(header.compact).toBe(true);
         expect(header.wrapped).toBe(false);

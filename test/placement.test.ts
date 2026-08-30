@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AreaConfig, SceneObject } from "../src/core/model";
 import {
+  clampPointToAreas,
   doorSweep,
   facingVec,
   findParentTable,
@@ -12,6 +13,27 @@ import {
 } from "../src/core/placement";
 
 const classroom: AreaConfig = { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 };
+const corridor: AreaConfig = { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8 };
+
+describe("a tap that misses the room still lands in the venue", () => {
+  it("keeps a point that is already inside", () => {
+    const p = clampPointToAreas(5, 4, [classroom, corridor]);
+    expect(p).toEqual({ x: 5, z: 4, clamped: false });
+  });
+
+  it("snaps a void tap onto the nearest room edge, not a silent no-op", () => {
+    const p = clampPointToAreas(5, -2, [classroom, corridor]);
+    expect(p.clamped).toBe(true);
+    expect(p.x).toBeCloseTo(5);
+    expect(p.z).toBeCloseTo(0);
+  });
+
+  it("prefers the closer of classroom and corridor", () => {
+    const p = clampPointToAreas(5, 12, [classroom, corridor]);
+    expect(p.clamped).toBe(true);
+    expect(p.z).toBeCloseTo(10);
+  });
+});
 
 describe("facing vector", () => {
   it("maps yaw to a direction (sin, cos)", () => {

@@ -22,6 +22,38 @@ export function areaBounds(a: AreaConfig): Bounds {
   return { minX: a.x, maxX: a.x + a.length, minZ: a.z, maxZ: a.z + a.width };
 }
 
+/**
+ * Keep a tap inside the venue. A landscape tablet shows a lot of void around
+ * the classroom; a tap that looks like "on the canvas" was mapping outside
+ * the room, `validity === "bad"`, and floor placement silently did nothing.
+ */
+export function clampPointToAreas(
+  px: number,
+  pz: number,
+  areas: Pick<AreaConfig, "x" | "z" | "length" | "width">[],
+): { x: number; z: number; clamped: boolean } {
+  if (!areas.length) return { x: px, z: pz, clamped: false };
+  for (const a of areas) {
+    if (px >= a.x && px <= a.x + a.length && pz >= a.z && pz <= a.z + a.width) {
+      return { x: px, z: pz, clamped: false };
+    }
+  }
+  let bestX = areas[0].x + areas[0].length / 2;
+  let bestZ = areas[0].z + areas[0].width / 2;
+  let bestD = Infinity;
+  for (const a of areas) {
+    const x = Math.min(Math.max(px, a.x), a.x + a.length);
+    const z = Math.min(Math.max(pz, a.z), a.z + a.width);
+    const d = (x - px) ** 2 + (z - pz) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      bestX = x;
+      bestZ = z;
+    }
+  }
+  return { x: bestX, z: bestZ, clamped: true };
+}
+
 export function facingVec(rotationDeg: number): { x: number; z: number } {
   const r = rotationDeg * D2R;
   return { x: Math.sin(r), z: Math.cos(r) };

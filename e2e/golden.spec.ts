@@ -268,7 +268,7 @@ test.describe("Golden Flow 5 — E310 60 人壓力流程", () => {
     await nameProject(page, "E310 壓力測試");
     await page.locator(".quickstart__card button", { hasText: "直接用 E310 演講範例（60 人）" }).click();
     await settle(page);
-    await page.locator(".topbar .chip", { hasText: "動線" }).first().click();
+    await page.locator(".topbar .chip", { hasText: "彩排" }).first().click();
     await settle(page);
     await page.locator(".left button", { hasText: "▶ 開始彩排" }).click();
     await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible({ timeout: 20_000 });

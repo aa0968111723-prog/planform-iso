@@ -4,18 +4,18 @@ import { wallAnchorToPosition } from "./placement";
 export type CalibrationPath = "record" | "tile" | "door" | "classroom-length";
 
 /** Apply one of the three plain-language field calibration paths in place. */
-export function applyCalibrationPath(project: Project, path: CalibrationPath, actualMeters: number, measuredModelMeters?: number, note = ""): void {
-  if (!Number.isFinite(actualMeters) || actualMeters <= 0) return;
+export function applyCalibrationPath(project: Project, path: CalibrationPath, actualMeters: number, measuredModelMeters?: number, note = ""): boolean {
+  if (!Number.isFinite(actualMeters) || actualMeters <= 0) return false;
   if (path === "tile") {
     project.tile.width = actualMeters;
     project.tile.depth = actualMeters;
     project.calibration.referenceLength = actualMeters;
     project.calibration.confirmed.tile = true;
-    return;
+    return true;
   }
   if (path === "door") {
     const door = project.objects.find((o) => o.kind === "door" && !o.hidden);
-    if (!door) return;
+    if (!door) return false;
     door.width = actualMeters;
     if (door.wallAnchor) {
       const wallLen = door.wallAnchor.edge === "n" || door.wallAnchor.edge === "s"
@@ -23,7 +23,10 @@ export function applyCalibrationPath(project: Project, path: CalibrationPath, ac
       door.wallAnchor.offset = Math.min(Math.max(door.wallAnchor.offset, actualMeters / 2), wallLen - actualMeters / 2);
     }
     project.calibration.confirmed.door = true;
-    return;
+    return true;
+  }
+  if (path === "classroom-length" && (!measuredModelMeters || measuredModelMeters <= 0)) {
+    return false;
   }
   project.calibration.referenceLength = actualMeters;
   // An empty note must not overwrite one. The booth preset ships its estimate
@@ -36,9 +39,9 @@ export function applyCalibrationPath(project: Project, path: CalibrationPath, ac
   if (path === "classroom-length") {
     // Only proportional scaling against a real on-canvas measurement is safe.
     // Absolute assignment turned 「120 cm」 into a 1.2 m-long classroom.
-    if (!measuredModelMeters || measuredModelMeters <= 0) return;
     const oldClassroomEnd = project.classroom.z + project.classroom.width;
-    const ratio = actualMeters / measuredModelMeters;
+    const measured = measuredModelMeters as number;
+    const ratio = actualMeters / measured;
     project.classroom.length *= ratio;
     project.classroom.width *= ratio;
     // The corridor runs along the room, so it has to grow with it — otherwise
@@ -68,4 +71,5 @@ export function applyCalibrationPath(project: Project, path: CalibrationPath, ac
     // merely recording a measurement must not clear the badge.
     project.calibration.confirmed.room = true;
   }
+  return true;
 }

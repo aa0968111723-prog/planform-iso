@@ -8,6 +8,7 @@
 
 import { assetDef } from "../core/assets";
 import { catalogFromProject } from "../core/migrate";
+import { BRAND } from "../core/brand";
 import { drawPlanSymbolOverlay, planSymbolForObject } from "../core/planSymbol";
 import { calibrationComplete, venueNeedsCalibration, type PropDefinition, type Project, type SceneObject } from "../core/model";
 import { propForAssetId } from "../core/propCatalog";
@@ -632,7 +633,7 @@ function drawPhoneFooter(ctx: CanvasRenderingContext2D, project: Project, width:
   ctx.fillStyle = TEXT;
   ctx.font = font("700 20px");
   const calibration = calibrationFooterText(project);
-  const text = `${PRESET_TITLE[preset]} · 圖例精簡 · 地磚 ${Math.round(project.tile.width * 100)}×${Math.round(project.tile.depth * 100)} cm · 1 m 比例尺${calibration ? ` · ${calibration}` : ""}`;
+  const text = `${BRAND.name} · ${PRESET_TITLE[preset]} · 圖例精簡 · 地磚 ${Math.round(project.tile.width * 100)}×${Math.round(project.tile.depth * 100)} cm · 1 m 比例尺${calibration ? ` · ${calibration}` : ""}`;
   ctx.fillText(fitText(ctx, text, width - 48), 24, height - 28);
 }
 
@@ -1139,7 +1140,11 @@ function drawHeader(ctx: CanvasRenderingContext2D, p: Project, width: number, su
   const dateStr = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
   ctx.fillText(fitText(ctx, `${subtitle} · ${dateStr}`, Math.max(260, width - 330)), 24, 66);
   ctx.textAlign = "right";
-  ctx.fillText(`地磚 ${Math.round(p.tile.width * 100)}×${Math.round(p.tile.depth * 100)} cm`, width - 24, 62);
+  ctx.fillText(
+    fitText(ctx, `${BRAND.title} · 地磚 ${Math.round(p.tile.width * 100)}×${Math.round(p.tile.depth * 100)} cm`, 420),
+    width - 24,
+    62,
+  );
   ctx.textAlign = "left";
 }
 
