@@ -11,6 +11,7 @@ import {
   buildingByCode,
   featuredTkuPlaces,
   findTkuPlace,
+  findTkuPlaceInText,
   formatCampusLine,
   parseTkuRoomCode,
   placesWithPublishedCapacity,
@@ -25,14 +26,14 @@ describe("Tamkang campus directory", () => {
 
   it("resolves published building codes", () => {
     expect(buildingByCode("E")?.name).toBe("工學大樓");
-    expect(buildingByCode("SG")?.name).toBe("紹謃紀念體育館");
+    expect(buildingByCode("SG")?.name).toBe("紹\u8b03紀念體育館");
     expect(buildingByCode("D")?.campusId).toBe("taipei");
     expect(buildingByCode("GB")?.name).toBe("藍白小鎮");
-    expect(buildingByCode("SA")?.name).toBe("紹謃紀念活動中心");
+    expect(buildingByCode("SA")?.name).toBe("紹\u8b03紀念活動中心");
     expect(buildingByCode("SA")?.campusId).toBe("lanyang");
     expect(buildingByCode("ZF")?.name).toBe("淡江國際學園");
     expect(buildingByCode("CL")?.campusId).toBe("lanyang");
-    expect(buildingByCode("N")?.name).toBe("紹謃紀念游泳館");
+    expect(buildingByCode("N")?.name).toBe("紹\u8b03紀念游泳館");
     expect(TKU_BUILDINGS.every((b) => b.code && b.name && b.campusId)).toBe(true);
     expect(new Set(TKU_BUILDINGS.map((b) => b.code)).size).toBe(TKU_BUILDINGS.length);
     expect(TKU_BUILDINGS.length).toBeGreaterThanOrEqual(54);
@@ -87,7 +88,8 @@ describe("Tamkang campus directory", () => {
     expect(findTkuPlace("D304")?.publishedCapacity).toBe(48);
     expect(findTkuPlace("美食廣場")?.id).toBe("food-plaza");
     expect(findTkuPlace("有蓮")?.publishedCapacity).toBe(350);
-    expect(findTkuPlace("文縆音樂廳")?.publishedCapacity).toBe(252);
+    expect(findTkuPlace("文\u932b音樂廳")?.publishedCapacity).toBe(252);
+    expect(findTkuPlace("文\u7e26音樂廳")?.id).toBe("carrie-chang-hall");
     expect(findTkuPlace("B302A")?.publishedCapacity).toBe(45);
     expect(findTkuPlace("宮燈大道")?.id).toBe("palace-avenue");
     expect(findTkuPlace("ED201")?.id).toBe("ed-generic");
@@ -95,6 +97,22 @@ describe("Tamkang campus directory", () => {
     expect(findTkuPlace("游泳館")?.id).toBe("natatorium");
     expect(findTkuPlace("D206")?.publishedCapacity).toBe(217);
     expect(findTkuPlace("黑天鵝")?.publishedCapacity).toBe(80);
+    expect(findTkuPlace("D305")?.publishedCapacity).toBe(46);
+    expect(findTkuPlace("D509")?.publishedCapacity).toBe(60);
+    expect(findTkuPlace("軍刀戰鬥機")?.id).toBe("f100-sabre");
+    expect(findTkuPlace("蘭陽克難坡")?.id).toBe("lanyang-slope");
+    expect(findTkuPlace("龜山日出")?.id).toBe("turtle-island-view");
+    expect(findTkuPlace("建軒")?.id).toBe("chien-hsuan");
+    expect(findTkuPlace("文苑")?.id).toBe("wen-yuan");
+    expect(findTkuPlace("覺軒會館")?.id).toBe("chueh-hsuan-house");
+    expect(findTkuPlace("宮燈道")?.id).toBe("palace-avenue");
+    expect(findTkuPlace("SG201")?.id).toBe("sg-generic");
+    expect(findTkuPlace("CL439")?.publishedCapacity).toBe(100);
+    expect(findTkuPlace("CL302")?.publishedCapacity).toBe(64);
+    expect(findTkuPlace("CL506")?.publishedCapacity).toBe(32);
+    expect(findTkuPlace("柔道室")?.publishedCapacity).toBe(100);
+    expect(findTkuPlace("游泳池")?.publishedCapacity).toBe(200);
+    expect(findTkuPlace("蘭陽戶外觀景平台")?.publishedCapacity).toBe(100);
   });
 
   it("keeps published capacities sourced from rental tables only", () => {
@@ -118,7 +136,15 @@ describe("Tamkang campus directory", () => {
     expect(TKU_COLLEGES.find((c) => c.id === "health")?.campusId).toBe("lanyang");
     expect(TKU_PLACES.length).toBeGreaterThanOrEqual(100);
     expect(buildingByCode("XB")?.name).toBe("五虎崗新社辦");
-    expect(buildingByCode("Z")?.aliases).toContain("文縆藝術中心");
+    expect(buildingByCode("Z")?.aliases).toContain("文\u932b藝術中心");
+    expect(buildingByCode("Z")?.aliases).toContain("文\u7e26藝術中心");
+  });
+
+  it("picks a place out of a brief without inventing a room", () => {
+    expect(findTkuPlaceInText("幫我排 E308 的 40 人社課")?.place.id).toBe("E308");
+    expect(findTkuPlaceInText("書卷廣場擺 9 攤")?.place.id).toBe("scroll-plaza");
+    expect(findTkuPlaceInText("文\u932b音樂廳彩排")?.place.id).toBe("carrie-chang-hall");
+    expect(findTkuPlaceInText("")).toBeNull();
   });
 
   it("formats a campus pin without claiming a survey", () => {
