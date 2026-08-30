@@ -16,7 +16,7 @@ export const TKU_CAMPUSES: TkuCampus[] = [
   },
   {
     id: "lanyang", name: "蘭陽校園", nameEn: "Lanyang Campus", officialCode: "LY",
-    address: "262308 宜蘭縣礎溪鄉林美村林尾路 180 號", phone: "(03) 987-3088", fax: "(03) 987-3066",
+    address: "262308 宜蘭縣礁溪鄉林美村林尾路 180 號", phone: "(03) 987-3088", fax: "(03) 987-3066",
     url: "https://www.lanyang.tku.edu.tw", hectares: 40.45,
     note: "教學以建邦教學大樓（CL）為主。沒有現場照片，只用通用矩形。",
   },
