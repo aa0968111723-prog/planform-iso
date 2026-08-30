@@ -175,6 +175,48 @@ export function findTkuPlace(query: string): TkuPlace | null {
   return null;
 }
 
+/**
+ * Pick a place out of a whole sentence (「幫我排 E308 的 40 人社課」).
+ * Room codes win; then the longest non-generic name / alias.
+ */
+export function findTkuPlaceInText(query: string): { place: TkuPlace; evidence: string } | null {
+  const q = query.trim();
+  if (!q) return null;
+
+  const codes = q.match(/[A-Za-z]{1,2}\d\d{2}[A-Za-z]?/g) ?? [];
+  for (const raw of codes) {
+    const parsed = parseTkuRoomCode(raw);
+    if (!parsed) continue;
+    const exact = TKU_PLACES.find((p) => p.id.toUpperCase() === parsed.code);
+    if (exact) return { place: exact, evidence: raw };
+  }
+
+  const named = [...TKU_PLACES].sort((a, b) => {
+    const ga = a.kind === "generic" ? 1 : 0;
+    const gb = b.kind === "generic" ? 1 : 0;
+    if (ga !== gb) return ga - gb;
+    return b.name.length - a.name.length;
+  });
+  const compact = q.replace(/\s+/g, "");
+  for (const p of named) {
+    const needles = [p.name, ...(p.aliases ?? [])];
+    for (const needle of needles) {
+      const nn = needle.replace(/\s+/g, "");
+      if (nn.length < 2) continue;
+      if (/^[A-Za-z0-9]+$/.test(nn) && nn.length < 4) continue;
+      if (compact.includes(nn) || q.includes(needle)) {
+        return { place: p, evidence: needle };
+      }
+    }
+  }
+
+  for (const raw of codes) {
+    const hit = findTkuPlace(raw);
+    if (hit) return { place: hit, evidence: raw };
+  }
+  return null;
+}
+
 export function featuredTkuPlaces(): TkuPlace[] {
   const order = ["E308", "E310", "SG320", "SG109", "scroll-plaza"];
   return order.map(placeById).filter((p): p is TkuPlace => !!p);
