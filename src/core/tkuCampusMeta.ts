@@ -1,0 +1,142 @@
+/** Campuses, colleges, buildings, official map links. Geometry is not stored here. */
+import type { TkuBuilding, TkuCampus, TkuCollege, TkuFloorUse, TkuMapLink } from "./tkuCampus";
+
+export const TKU_CAMPUSES: TkuCampus[] = [
+  {
+    id: "tamsui", name: "淡水校園", nameEn: "Tamsui Campus", officialCode: "TS",
+    address: "251301 新北市淡水區英專路 151 號", phone: "(02) 2621-5656", fax: "(02) 2622-3204",
+    url: "https://www.tku.edu.tw", hectares: 21.71,
+    note: "主校園。捷運淡水站轉紅 27／紅 28；淡海輕軌淡江大學站。",
+  },
+  {
+    id: "taipei", name: "臺北校園", nameEn: "Taipei Campus", officialCode: "TP",
+    address: "106302 臺北市大安區金華街 199 巷 5 號", phone: "(02) 3393-3833",
+    url: "https://tpcampus.tku.edu.tw/", hectares: 0.32,
+    note: "樓館代碼 D。教室代碼與公開容納人數出自試場平面圖與外借表，長寬未實測。",
+  },
+  {
+    id: "lanyang", name: "蘭陽校園", nameEn: "Lanyang Campus", officialCode: "LY",
+    address: "262308 宜蘭縣礁溪鄉林美村林尾路 180 號", phone: "(03) 987-3088", fax: "(03) 987-3066",
+    url: "https://www.lanyang.tku.edu.tw", hectares: 40.45,
+    note: "教學以建邦教學大樓（CL）為主。沒有現場照片，只用通用矩形。",
+  },
+  {
+    id: "cyber", name: "網路校園", nameEn: "Cyber Campus", url: "https://cyber.tku.edu.tw",
+    note: "沒有實體場地。",
+  },
+];
+
+export const TKU_COLLEGES: TkuCollege[] = [
+  { id: "liberal-arts", name: "文學院", nameEn: "College of Liberal Arts", campusId: "tamsui", buildingCodes: ["L"], note: "文學館為主；傳播見 O／Q。" },
+  { id: "science", name: "理學院", nameEn: "College of Science", campusId: "tamsui", buildingCodes: ["S", "C"], note: "科學館、鍾靈化學館。" },
+  { id: "engineering", name: "工學院", nameEn: "College of Engineering", campusId: "tamsui", buildingCodes: ["E", "G", "K"], note: "工學大樓、工學館、建築系館。" },
+  { id: "business", name: "商管學院", nameEn: "College of Business and Management", campusId: "tamsui", buildingCodes: ["B"], note: "商管大樓。門口進去是 3 樓。" },
+  { id: "foreign-lang", name: "外國語文學院", nameEn: "College of Foreign Languages and Literatures", campusId: "tamsui", buildingCodes: ["FL"], note: "外國語文大樓。" },
+  { id: "international", name: "國際事務學院", nameEn: "College of International Affairs", campusId: "tamsui", buildingCodes: ["T"], note: "驚聲紀念大樓。" },
+  { id: "education", name: "教育學院", nameEn: "College of Education", campusId: "tamsui", buildingCodes: ["ED"], note: "教育大樓。" },
+  { id: "ai", name: "AI 創智學院", nameEn: "College of AI Innovative Studies", campusId: "tamsui", buildingCodes: ["E"], note: "與工學院同區。" },
+  { id: "health", name: "精準健康學院", nameEn: "College of Precision Health", campusId: "tamsui", buildingCodes: ["E"], note: "與工學院同區。" },
+  { id: "lanyang-global", name: "全球發展學院（蘭陽）", nameEn: "College of Global Development", campusId: "lanyang", buildingCodes: ["CL"], note: "蘭陽建邦教學大樓。" },
+];
+
+export const TKU_SG_FLOORS: TkuFloorUse[] = [
+  { buildingCode: "SG", floor: 0, label: "B1 武術／柔道", note: "地下一樓。" },
+  { buildingCode: "SG", floor: 1, label: "1F 社團辦公室", note: "社辦 SG109 在這一層。" },
+  { buildingCode: "SG", floor: 2, label: "2F 諮輔／韻律", note: "" },
+  { buildingCode: "SG", floor: 3, label: "3F 桌球／重訓／教室", note: "SG320 在這一層。" },
+  { buildingCode: "SG", floor: 4, label: "4F 排球／羽球", note: "校慶趣味競賽常用。" },
+  { buildingCode: "SG", floor: 5, label: "5F 教室", note: "" },
+  { buildingCode: "SG", floor: 6, label: "6F 運動傷害防護", note: "SG603 在這一層。" },
+  { buildingCode: "SG", floor: 7, label: "7F 籃球／集會場", note: "開學典禮、校慶大會。" },
+];
+
+export const TKU_LIBRARY_FLOORS: TkuFloorUse[] = [
+  { buildingCode: "U", floor: 1, label: "1F 自習室／密集書庫", note: "" },
+  { buildingCode: "U", floor: 2, label: "2F 流通櫃臺／閱報／文物", note: "" },
+  { buildingCode: "U", floor: 3, label: "3F 檢索區", note: "" },
+  { buildingCode: "U", floor: 4, label: "4F 期刊閱覽", note: "" },
+  { buildingCode: "U", floor: 5, label: "5F 未來學／論文／歐盟資訊", note: "" },
+  { buildingCode: "U", floor: 6, label: "6F 應用科學／社會科學", note: "" },
+  { buildingCode: "U", floor: 7, label: "7F 中國史地／語言文學", note: "" },
+  { buildingCode: "U", floor: 8, label: "8F 哲學／歷史／社會科學", note: "" },
+  { buildingCode: "U", floor: 9, label: "9F 建築設計／語言文學／理工", note: "" },
+];
+
+export const TKU_TAIPEI_ROOM_CODES = [
+  "D201", "D202", "D203", "D204", "D205", "D206", "D207", "D208", "D209", "D210", "D211", "D212", "D213", "D214", "D215", "D216",
+  "D301", "D302", "D303", "D304", "D305", "D306", "D307", "D308", "D309", "D310", "D311", "D312", "D313", "D314", "D315", "D316", "D317", "D318", "D319", "D320", "D321", "D322", "D323", "D324",
+  "D401", "D402", "D403", "D404", "D405", "D406", "D407", "D408", "D409", "D410", "D411", "D412", "D413",
+  "D501", "D502", "D503", "D504", "D505", "D506", "D508", "D509", "D510",
+] as const;
+
+export const TKU_BUILDINGS: TkuBuilding[] = [
+  { code: "A", name: "行政大樓", nameEn: "Administration Building", campusId: "tamsui", kind: "admin", lat: 25.175, lng: 121.449, osmWay: 235418117 },
+  { code: "B", name: "商管大樓", nameEn: "Business and Management Building", campusId: "tamsui", kind: "academic", aliases: ["商館"], lat: 25.1765, lng: 121.45, note: "門口進去是 3 樓。" },
+  { code: "C", name: "鍾靈化學館", nameEn: "Chung-ling Chemistry Hall", campusId: "tamsui", kind: "academic", lat: 25.1752, lng: 121.449, osmWay: 235418085 },
+  { code: "CH", name: "覺軒會館", nameEn: "Chueh-hsuan House", campusId: "tamsui", kind: "landmark", aliases: ["覺軒"], osmWay: 294124216 },
+  { code: "CL", name: "建邦教學大樓", nameEn: "Clement Chang Building Complex", campusId: "lanyang", kind: "academic", aliases: ["蘭陽教學大樓"] },
+  { code: "D", name: "臺北校園大樓", nameEn: "Taipei Campus Building", campusId: "taipei", kind: "campus", aliases: ["臺北校園", "城區部"], lat: 25.03111, lng: 121.52861 },
+  { code: "DR", name: "白樓", nameEn: "White Hall", campusId: "tamsui", kind: "landmark", osmWay: 294123966 },
+  { code: "E", name: "工學大樓", nameEn: "Main Engineering Building", campusId: "tamsui", kind: "academic", aliases: ["工館"], lat: 25.1761, lng: 121.452, osmWay: 235418107 },
+  { code: "ED", name: "教育大樓", nameEn: "Education Building", campusId: "tamsui", kind: "academic", lat: 25.1758, lng: 121.453, osmWay: 235418109 },
+  { code: "F", name: "會文館", nameEn: "Hwei-wen Hall", campusId: "tamsui", kind: "academic", lat: 25.17576, lng: 121.44961, osmWay: 235418091 },
+  { code: "FF", name: "剛棟學人宿舍", nameEn: "Firmness Faculty Residences", campusId: "tamsui", kind: "dorm" },
+  { code: "FL", name: "外國語文大樓", nameEn: "Foreign Languages and Literature Building", campusId: "tamsui", kind: "academic", aliases: ["外語大樓"], lat: 25.1749, lng: 121.452, osmWay: 235418154 },
+  { code: "FP", name: "毅棟學人宿舍", nameEn: "Perseverance Faculty Residences", campusId: "tamsui", kind: "dorm" },
+  { code: "FS", name: "樸棟學人宿舍", nameEn: "Simplicity Faculty Residences", campusId: "tamsui", kind: "dorm" },
+  { code: "FT", name: "實棟學人宿舍", nameEn: "Truthfulness Faculty Residences", campusId: "tamsui", kind: "dorm" },
+  { code: "G", name: "工學館", nameEn: "Engineering Building", campusId: "tamsui", kind: "academic", lat: 25.1763, lng: 121.451, osmWay: 235418104 },
+  { code: "GA", name: "大門管制站", nameEn: "Main Entrance Guardhouse", campusId: "tamsui", kind: "service", osmWay: 971523384 },
+  { code: "GB", name: "藍白小鎮", nameEn: "Sidi Bou Said", campusId: "tamsui", kind: "service", aliases: ["藍白小鎮"], osmWay: 295946611 },
+  { code: "GC", name: "松濤館旁警衛室", nameEn: "Sung-tao Guardhouse", campusId: "tamsui", kind: "service" },
+  { code: "GE", name: "大忠管制站", nameEn: "Dazhong Guardhouse", campusId: "tamsui", kind: "service", osmWay: 642840343 },
+  { code: "GO", name: "勤務監控管制中心", nameEn: "Guard Control Station", campusId: "tamsui", kind: "service", osmWay: 294125483 },
+  { code: "GS", name: "水源街警衛室", nameEn: "Shuiyuan Street Guardhouse", campusId: "tamsui", kind: "service" },
+  { code: "H", name: "宮燈教室", nameEn: "Chinese Palace-style Classrooms", campusId: "tamsui", kind: "landmark", aliases: ["宮燈"], lat: 25.1746, lng: 121.449, note: "1954 年興建。" },
+  { code: "HC", name: "守謙國際會議中心", nameEn: "Hsu Shou-chlien International Conference Center", campusId: "tamsui", kind: "hall", aliases: ["守謙"], lat: 25.1746692, lng: 121.4478627, osmWay: 964267202 },
+  { code: "I", name: "覺生綜合大樓", nameEn: "Chueh-sheng Memorial Hall", campusId: "tamsui", kind: "academic", aliases: ["綜大", "覺生"], lat: 25.1743, lng: 121.4509, osmWay: 235418151, note: "1F 中庭為同舟廣場。" },
+  { code: "J", name: "麗澤國際學舍", nameEn: "Reitaku International House", campusId: "tamsui", kind: "dorm", lat: 25.1763, lng: 121.448, osmWay: 235418071 },
+  { code: "K", name: "建築系館", nameEn: "Architecture Hall", campusId: "tamsui", kind: "academic", lat: 25.17644, lng: 121.45102, osmWay: 294126064 },
+  { code: "L", name: "文學館", nameEn: "Liberal Arts Hall", campusId: "tamsui", kind: "academic", lat: 25.176275, lng: 121.44942, osmWay: 285904595 },
+  { code: "LH", name: "建邦國際會議廳", nameEn: "Clement Chang International Conference Hall", campusId: "lanyang", kind: "hall", aliases: ["建邦國際廳"], note: "蘭陽外借表 286 人。目錄代號不是課表代碼。" },
+  { code: "LW", name: "文苑一館", nameEn: "Wen-yuan Hall I", campusId: "lanyang", kind: "dorm", note: "蘭陽女生宿舍。目錄代號。" },
+  { code: "LX", name: "建軒一館", nameEn: "Chien-hsuan Hall I", campusId: "lanyang", kind: "dorm", note: "蘭陽男生宿舍。目錄代號。" },
+  { code: "M", name: "海事博物館", nameEn: "Maritime Museum", campusId: "tamsui", kind: "landmark", aliases: ["海博"], lat: 25.17618, lng: 121.45041 },
+  { code: "N", name: "紹謃紀念游泳館", nameEn: "Shao-mo Memorial Natatorium Complex", campusId: "tamsui", kind: "sport", aliases: ["游泳館"], lat: 25.1745, lng: 121.447 },
+  { code: "O", name: "傳播 O 館", nameEn: "Communication Hall O", campusId: "tamsui", kind: "academic", lat: 25.1756, lng: 121.449 },
+  { code: "P", name: "司令臺", nameEn: "Reviewing Stand", campusId: "tamsui", kind: "sport", aliases: ["操場司令臺", "操場"] },
+  { code: "Q", name: "傳播 Q 館", nameEn: "Communication Hall Q", campusId: "tamsui", kind: "academic", aliases: ["前教育館"], lat: 25.1756, lng: 121.449 },
+  { code: "R", name: "學生活動中心", nameEn: "Student Activity Center", campusId: "tamsui", kind: "service", aliases: ["活動中心"], lat: 25.1748, lng: 121.45 },
+  { code: "RT", name: "網球場", nameEn: "Tennis Court", campusId: "tamsui", kind: "sport", lat: 25.175, lng: 121.45 },
+  { code: "S", name: "騮先紀念科學館", nameEn: "Liu-hsien Memorial Science Hall", campusId: "tamsui", kind: "academic", aliases: ["科學館"], lat: 25.1754, lng: 121.448 },
+  { code: "SA", name: "紹謃紀念活動中心", nameEn: "Shao-mo Memorial Activity Center", campusId: "lanyang", kind: "sport", lat: 24.82278, lng: 121.72941, note: "蘭陽，不是淡水 SG。" },
+  { code: "SG", name: "紹謃紀念體育館", nameEn: "Shao-mo Memorial Gymnasium", campusId: "tamsui", kind: "sport", aliases: ["體育館"], lat: 25.176222, lng: 121.44875, osmWay: 964229634, note: "B1–8F。1F 社辦、7F 集會。" },
+  { code: "SS", name: "溜冰場", nameEn: "Skating Rink", campusId: "tamsui", kind: "sport" },
+  { code: "T", name: "驚聲紀念大樓", nameEn: "Ching-sheng Memorial Hall", campusId: "tamsui", kind: "academic", aliases: ["驚聲"], lat: 25.1755, lng: 121.451, note: "前方為書卷廣場。" },
+  { code: "TH", name: "校史館暨張建邦創辦人紀念館", nameEn: "Gallery of Tamkang History and Founder Memorial Hall", campusId: "tamsui", kind: "landmark", aliases: ["校史館"] },
+  { code: "U", name: "覺生紀念圖書館", nameEn: "Chueh-sheng Memorial Library", campusId: "tamsui", kind: "landmark", aliases: ["圖書館", "總館"], lat: 25.17475, lng: 121.45097, osmWay: 235418149 },
+  { code: "V", name: "視聽教育館", nameEn: "Audiovisual Education Building", campusId: "tamsui", kind: "academic", lat: 25.17503, lng: 121.44943 },
+  { code: "W", name: "風洞實驗室", nameEn: "Wind Tunnel Laboratory", campusId: "tamsui", kind: "academic" },
+  { code: "X", name: "五虎崗停車場", nameEn: "Five-tiger Hill Parking", campusId: "tamsui", kind: "service", aliases: ["五虎崗"] },
+  { code: "XC", name: "五虎崗綜合球場", nameEn: "Five-tiger Hill Court", campusId: "tamsui", kind: "sport", aliases: ["綜合球場"], lat: 25.17552, lng: 121.45366 },
+  { code: "Y", name: "自強館", nameEn: "Tzu-chiang Hall", campusId: "tamsui", kind: "academic", note: "現為教育大樓用途。" },
+  { code: "YY", name: "瀛苑", nameEn: "Ying Yuan House", campusId: "tamsui", kind: "landmark", note: "舊址已整修為校史館 TH。" },
+  { code: "Z", name: "松濤館", nameEn: "Sung-tao Hall", campusId: "tamsui", kind: "academic", aliases: ["文鎘藝術中心"] },
+  { code: "ZF", name: "淡江國際學園", nameEn: "Tamkang International Hall", campusId: "tamsui", kind: "dorm", aliases: ["國際學園"] },
+];
+
+export const TKU_MAP_LINKS: TkuMapLink[] = [
+  { title: "認識淡江｜四個校園", url: "https://about.tku.edu.tw/campus.html", kind: "official" },
+  { title: "總務處｜校園地圖下載", url: "http://163.13.102.26:1745/Front/map/Archive.aspx?id=zVsBtC5G%2Bw0=", kind: "official", campusId: "tamsui" },
+  { title: "淡江人共筆｜空間代碼", url: "https://tku.miraheze.org/wiki/zh-Hant/淡江大學空間代碼", kind: "index", campusId: "tamsui" },
+  { title: "Wikidata｜淡江樓館座標", url: "https://www.wikidata.org/wiki/Wikidata:WikiProject_Taiwan/Tamkang_University/Reports", kind: "index", campusId: "tamsui" },
+  { title: "臺北校園試場平面圖 PDF", url: "https://adms.tku.edu.tw/File/Userfiles/0000000095/files/%E5%8F%B0%E5%8C%97%E6%A0%A1%E5%9C%92%E8%A9%A6%E5%A0%B4%E5%B9%B3%E9%9D%A2%E5%9C%96.pdf", kind: "floorplan", campusId: "taipei" },
+  { title: "維基共享｜2025 淡水校園地圖", url: "https://commons.wikimedia.org/wiki/File:Tamkang_University_Tamsui_Campus_Map_01.jpg", kind: "photo", campusId: "tamsui" },
+  { title: "臺北校園", url: "https://tpcampus.tku.edu.tw/", kind: "official", campusId: "taipei" },
+  { title: "蘭陽校園", url: "https://www.lanyang.tku.edu.tw", kind: "official", campusId: "lanyang" },
+  { title: "圖書館總館平面", url: "https://www.lib.tku.edu.tw/FrontPointOfEntry.aspx?Sn=63", kind: "floorplan", campusId: "tamsui" },
+  { title: "海事博物館／文鎘", url: "https://www.finearts.tku.edu.tw/", kind: "official", campusId: "tamsui" },
+  { title: "對外場地借用", url: "https://spacerental.tku.edu.tw/spaceflow.aspx", kind: "official" },
+  { title: "淡江文化手冊 PDF", url: "https://classic.tku.edu.tw/doc/TKU_culture.pdf", kind: "index" },
+  { title: "蘭陽場地外借一覽 PDF", url: "https://sa.tku.edu.tw/spirit/uploads/2024/12/%E8%98%AD%E9%99%BD%E6%A0%A1%E5%9C%92_113%E5%90%84%E9%A1%9E%E5%A0%B4%E5%9C%B0%E5%8F%8A%E8%A8%AD%E5%82%99%E5%99%A8%E6%9D%90%E5%80%9F%E7%94%A8%E7%B6%AD%E8%AD%B7%E8%B2%BB%E6%94%B6%E8%B2%BB%E4%B8%80%E8%A6%BD%E8%A1%A8.pdf", kind: "index", campusId: "lanyang" },
+];
