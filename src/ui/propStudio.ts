@@ -355,23 +355,32 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
         // question went here or in the face table below, and the two do very
         // different things. This one is paint.
         textField("印在這塊上的字", part.text ?? "", (v) => { part.text = v || undefined; touch(); }),
-        button(part.imageBlobId ? "換這塊上的照片" : "貼一張照片", () => {
-          const input = el("input", { type: "file", accept: "image/*" }) as HTMLInputElement;
-          input.addEventListener("change", () => {
-            const file = input.files?.[0];
-            if (!file) return;
+        (() => {
+          const file = el("input", {
+            type: "file",
+            accept: "image/*",
+            class: "propstudio__photo",
+            style: "position:absolute;width:1px;height:1px;opacity:0",
+          }) as HTMLInputElement;
+          file.addEventListener("change", () => {
+            const picked = file.files?.[0];
+            if (!picked) return;
             void (async () => {
               const blobId = `art_${uid("img")}`;
-              await getAssetBlobStore().putBlob(blobId, await file.arrayBuffer(), {
+              await getAssetBlobStore().putBlob(blobId, await picked.arrayBuffer(), {
                 kind: "sourceImage",
-                mimeType: file.type || "image/jpeg",
+                mimeType: picked.type || "image/jpeg",
               });
               part.imageBlobId = blobId;
               touch();
             })();
           });
-          input.click();
-        }, "chip chip--sm"),
+          const lab = el("label", { class: "chip chip--sm", style: "position:relative;display:inline-flex;align-items:center;cursor:pointer" }, [
+            el("span", { text: part.imageBlobId ? "換這塊上的照片" : "貼一張照片" }),
+            file,
+          ]);
+          return lab;
+        })(),
         ...(part.imageBlobId
           ? [
             el("span", { class: "hint", text: "已貼圖" }),

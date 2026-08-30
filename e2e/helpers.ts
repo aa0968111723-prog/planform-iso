@@ -114,6 +114,55 @@ export async function probe(page: Page): Promise<WorkspaceProbe> {
   });
 }
 
+/** First-layer workflow tab: bottom nav on compact, header chips on desktop. */
+export async function gotoWorkflow(
+  page: Page,
+  id: "site" | "layout" | "route" | "sim" | "export",
+): Promise<void> {
+  const labels: Record<typeof id, string> = {
+    site: "場地", layout: "場佈", route: "動線／互動", sim: "彩排", export: "分享",
+  };
+  const current = await page.evaluate(() =>
+    (window as unknown as { planform: { app: { session: { workflow: string } } } })
+      .planform.app.session.workflow);
+  const sheet = await page.locator("#app").getAttribute("data-sheet");
+  const compact = (await page.locator("#app").getAttribute("data-ws-mode")) !== "desktop";
+  // Re-tapping the active compact tab CLOSES the sheet. Don't do that when
+  // the caller wants the panel.
+  if (current === id && (!compact || sheet === "workflow")) {
+    await settle(page);
+    return;
+  }
+  const clickTab = async (): Promise<void> => {
+    const nav = page.locator(`.navbtn[data-nav="${id}"]`);
+    if (await nav.isVisible()) await nav.click();
+    else await page.locator(".group--flows button", { hasText: labels[id] }).click();
+  };
+  await clickTab();
+  await settle(page);
+  // Closing the inspector leaves the sheet at "none". A volunteer who wants
+  // 場佈 / 彩排 has to tap the tab again — do that for them here so callers
+  // always get the panel.
+  if (compact && (await page.locator("#app").getAttribute("data-sheet")) !== "workflow") {
+    await clickTab();
+    await settle(page);
+  }
+}
+
+/**
+ * Click the centre of the visible canvas (safeRect), not a corner that chrome
+ * or the iso void can swallow. Move first so the placement ghost follows.
+ */
+export async function clickSafeCanvas(page: Page): Promise<{ x: number; y: number }> {
+  const safe = (await probe(page)).safeRect;
+  const x = Math.round(safe.x + safe.width / 2);
+  const y = Math.round(safe.y + safe.height / 2);
+  await page.mouse.move(x, y);
+  await page.waitForTimeout(80);
+  await page.mouse.click(x, y);
+  return { x, y };
+}
+
 /** Visible on screen (not translated off the fold, not display:none). */
 export async function isOnScreen(page: Page, selector: string): Promise<boolean> {
   return page.evaluate((sel) => {

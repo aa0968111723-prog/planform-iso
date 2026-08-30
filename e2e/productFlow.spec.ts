@@ -1,14 +1,15 @@
 /**
- * First-layer product path at every named viewport:
- *   建專案 → 放道具 → 上傳圖 → 改 Prop → 動線 → 彩排 → Export
+ * First-layer product path at every named viewport, driven as a volunteer
+ * would: tap the library, tap the visible canvas, open Prop Studio, draw a
+ * route, press ▶ 開始彩排, export a 場刊.
  *
- * Assertions are the RESULTS of those steps (id in the index, object/prop/
- * artwork still there after reload, route points, rehearsal numbers from the
- * shipped engine, export bytes), not mere element presence.
+ * Assertions are RESULTS (new object, artwork blob, renamed prop, route
+ * points, rehearsal numbers, export bytes), not mere element presence.
  */
 
 import { expect, test, type Page } from "@playwright/test";
-import { openProjectHome, settle } from "./helpers";
+import { mkdirSync } from "node:fs";
+import { clickSafeCanvas, gotoWorkflow, openProjectHome, probe, settle } from "./helpers";
 
 const RED_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==",
@@ -23,19 +24,6 @@ const VIEWPORTS = [
   { name: "800×1280", width: 800, height: 1280, mode: "tablet" },
   { name: "1024×768", width: 1024, height: 768, mode: "tablet" },
 ] as const;
-
-async function gotoWorkflow(page: Page, id: "site" | "layout" | "route" | "sim" | "export"): Promise<void> {
-  const nav = page.locator(`.navbtn[data-nav="${id}"]`);
-  if (await nav.isVisible()) {
-    await nav.click();
-  } else {
-    const labels: Record<typeof id, string> = {
-      site: "場地", layout: "場佈", route: "動線／互動", sim: "彩排", export: "分享",
-    };
-    await page.locator(".group--flows button", { hasText: labels[id] }).click();
-  }
-  await settle(page);
-}
 
 async function createProject(page: Page, name: string): Promise<void> {
   const wizard = page.locator(".quickstart");
@@ -58,7 +46,9 @@ interface Snapshot {
   name: string;
   objects: number;
   routes: number;
+  routePoints: number;
   props: number;
+  propNames: string[];
   artwork: number;
   extras: number;
 }
@@ -72,8 +62,8 @@ async function snapshot(page: Page): Promise<Snapshot> {
           getState(): {
             name: string;
             objects: unknown[];
-            routes: unknown[];
-            props?: { parts: { imageBlobId?: string }[] }[];
+            routes: { points: unknown[] }[];
+            props?: { name: string; parts: { imageBlobId?: string }[] }[];
             catalogExtras?: { blobIds?: { sourceImage?: string } }[];
           };
         };
@@ -85,37 +75,46 @@ async function snapshot(page: Page): Promise<Snapshot> {
       name: s.name,
       objects: s.objects.length,
       routes: s.routes.length,
+      routePoints: s.routes.reduce((n, r) => n + r.points.length, 0),
       props: (s.props ?? []).length,
+      propNames: (s.props ?? []).map((p) => p.name),
       artwork: (s.props ?? []).filter((d) => d.parts.some((p) => p.imageBlobId)).length,
       extras: (s.catalogExtras ?? []).filter((e) => e.blobIds?.sourceImage).length,
     };
   });
 }
 
+/** Whole drawing buffer, not a 64×64 corner. */
 async function canvasProbe(page: Page): Promise<{
   mode: string | null;
   canvasWidth: number;
   canvasHeight: number;
   cssW: number;
   cssH: number;
+  innerW: number;
+  innerH: number;
+  dpr: number;
   fill: number;
 }> {
   return page.evaluate(() => {
     const canvas = document.querySelector("#scene") as HTMLCanvasElement | null;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let fill = 0;
     if (canvas) {
       const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
-      if (gl) {
-        const w = Math.min(canvas.width, 64);
-        const h = Math.min(canvas.height, 64);
+      if (gl && canvas.width > 0 && canvas.height > 0) {
+        const w = canvas.width;
+        const h = canvas.height;
         const pixels = new Uint8Array(w * h * 4);
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
         let painted = 0;
-        for (let i = 0; i < pixels.length; i += 4) {
-          const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2], a = pixels[i + 3];
+        const n = w * h;
+        for (let i = 0; i < n; i++) {
+          const o = i * 4;
+          const r = pixels[o], g = pixels[o + 1], b = pixels[o + 2], a = pixels[o + 3];
           if (a > 8 && (r > 8 || g > 8 || b > 8) && !(r > 240 && g > 240 && b > 240)) painted++;
         }
-        fill = painted / (w * h);
+        fill = painted / n;
       }
     }
     return {
@@ -124,9 +123,22 @@ async function canvasProbe(page: Page): Promise<{
       canvasHeight: canvas?.height ?? 0,
       cssW: canvas?.clientWidth ?? 0,
       cssH: canvas?.clientHeight ?? 0,
+      innerW: window.innerWidth,
+      innerH: window.innerHeight,
+      dpr,
       fill,
     };
   });
+}
+
+async function screenshotViewport(page: Page, name: string, tag: string): Promise<void> {
+  mkdirSync("test-results/viewports", { recursive: true });
+  await page.screenshot({ path: `test-results/viewports/${name}-${tag}.png`, fullPage: false });
+  const extra = process.env.PLANFORM_VIEWPORT_SHOTS;
+  if (extra) {
+    mkdirSync(extra, { recursive: true });
+    await page.screenshot({ path: `${extra}/${name}-${tag}.png`, fullPage: false });
+  }
 }
 
 for (const vp of VIEWPORTS) {
@@ -134,133 +146,133 @@ for (const vp of VIEWPORTS) {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
     test("建專案 → 放道具 → 上傳圖 → 改 Prop → 動線 → 彩排 → Export survives reload", async ({ page }) => {
+      test.setTimeout(120_000);
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
 
       await openProjectHome(page, { keepWizard: true });
       const projectName = `流程 ${vp.name}`;
       await createProject(page, projectName);
-
       await expect(page.locator("#app")).toHaveAttribute("data-ws-mode", vp.mode);
+      await screenshotViewport(page, vp.name, "01-created");
 
       const before = await snapshot(page);
       expect(before.projectId).toMatch(/^prj_/);
       expect(before.name).toBe(projectName);
 
-      // 放道具 — write through the shipped Store mutate (same path a library
-      // drop uses after the ghost commits). A canvas tap is too easy to miss
-      // on a landscape tablet where chrome covers the click target.
+      // --- 放道具: library card → visible canvas tap -----------------------
       await gotoWorkflow(page, "layout");
-      await page.evaluate(() => {
-        const pf = (window as unknown as {
-          planform: { store: { mutate(fn: (p: Record<string, unknown>) => void): void } };
-        }).planform;
-        pf.store.mutate((p) => {
-          const objects = p.objects as Record<string, unknown>[];
-          objects.push({
-            id: "e2e_placed_table",
-            kind: "table",
-            assetId: "builtin:table",
-            x: 4, z: 4, rotationDeg: 0,
-            width: 1.2, depth: 0.6, height: 0.74,
-            locked: false, hidden: false, surface: "floor", elevation: 0,
-          });
-        });
-      });
+      const tableCard = page.locator(".left .cardgrid .card").filter({ hasText: "桌子" }).first();
+      await expect(tableCard).toBeVisible();
+      await tableCard.click();
+      await settle(page);
+      await expect(page.locator(".placebar-wrap")).toBeVisible();
+      const afterPick = await snapshot(page);
+      await clickSafeCanvas(page);
+      await settle(page);
+      await expect.poll(async () => (await snapshot(page)).objects, { timeout: 8_000 })
+        .toBeGreaterThan(afterPick.objects);
+      const done = page.locator(".placebar-wrap button", { hasText: "完成" });
+      if (await done.isVisible()) await done.click();
       await settle(page);
       const afterPlace = await snapshot(page);
       expect(afterPlace.objects).toBeGreaterThan(before.objects);
-      expect(afterPlace.objects).toBeGreaterThanOrEqual(before.objects + 1);
+      await screenshotViewport(page, vp.name, "02-placed");
 
-      // 上傳圖 — real file input on 場佈.
+      // --- 上傳圖: 場佈 file input ------------------------------------------
       await gotoWorkflow(page, "layout");
       await page.locator('.left input[type="file"][accept="image/*"]').setInputFiles({
         name: "社團合照.png", mimeType: "image/png", buffer: RED_PNG,
       });
       await expect.poll(() => snapshot(page).then((s) => s.extras), { timeout: 20_000 }).toBeGreaterThan(0);
 
-      // 改 Prop — add a backdrop and edit it through the shipped updater.
-      const propEdit = await page.evaluate(() => {
-        const app = (window as unknown as {
-          planform: {
-            app: {
-              addPropToProject: (def: unknown, opts?: { place?: boolean }) => void;
-              updatePropDefinition: (def: unknown) => void;
-              store: { getState(): { props?: { id: string; name: string; version: number; parts: { imageBlobId?: string }[] }[] } };
-            };
-          };
-        }).planform.app;
-        const def = {
-          id: "prop_flow_backdrop",
-          name: "合照背景牆",
-          category: "背景",
-          dimensions: { width: 2.4, depth: 0.6, height: 2.4 },
-          parts: [{
-            id: "fabric", shape: "plane",
-            size: { width: 2.4, depth: 0.006, height: 2.4 },
-            offset: { x: 0, y: 0, z: 0 },
-            color: "#f1f5f9", finish: "fabric",
-          }],
-          anchors: [{ id: "photo", role: "player", x: 0, z: 1.2 }],
-          icon: "🖼", version: 1, source: "user",
-        };
-        app.addPropToProject(def, { place: false });
-        const extras = (app.store.getState() as {
-          catalogExtras?: { blobIds?: { sourceImage?: string } }[];
-        }).catalogExtras ?? [];
-        const blobId = extras.find((e) => e.blobIds?.sourceImage)?.blobIds?.sourceImage;
-        const current = app.store.getState().props!.find((p) => p.id === "prop_flow_backdrop")!;
-        app.updatePropDefinition({
-          ...current,
-          name: "改過的背景牆",
-          parts: current.parts.map((p) => blobId ? { ...p, imageBlobId: blobId } : p),
-        });
-        const after = app.store.getState().props!.find((p) => p.id === "prop_flow_backdrop")!;
-        return { name: after.name, version: after.version, artwork: after.parts.some((p) => !!p.imageBlobId) };
+      // --- 改 Prop: Studio UI, photo, save, then 編輯 rename ----------------
+      await gotoWorkflow(page, "layout");
+      await page.locator(".left button", { hasText: "＋ 新增道具" }).scrollIntoViewIfNeeded();
+      await page.locator(".left button", { hasText: "＋ 新增道具" }).click();
+      const studio = page.locator(".propstudio");
+      await expect(studio).toBeVisible();
+      if (await studio.locator("button", { hasText: "丟掉重來" }).count()) {
+        await studio.locator("button", { hasText: "丟掉重來" }).click();
+      }
+      await studio.locator("button", { hasText: "地面" }).click();
+      const nameField = studio.locator(".field", { hasText: "名稱" }).locator("input");
+      await nameField.fill("合照背景牆");
+      await nameField.blur();
+      await studio.locator("input.propstudio__photo").first().setInputFiles({
+        name: "社團合照.png", mimeType: "image/png", buffer: RED_PNG,
       });
-      expect(propEdit.name).toBe("改過的背景牆");
-      expect(propEdit.version).toBeGreaterThan(1);
-      expect(propEdit.artwork).toBe(true);
+      await expect(studio.locator(".hint", { hasText: "已貼圖" })).toBeVisible({ timeout: 10_000 });
+      await studio.locator("button", { hasText: "加入專案並放置" }).click();
+      await expect(studio).toHaveCount(0);
+      await settle(page);
+      if (await page.locator(".placebar-wrap").isVisible()) {
+        await clickSafeCanvas(page);
+        await settle(page);
+        const finish = page.locator(".placebar-wrap button", { hasText: "完成" });
+        if (await finish.isVisible()) await finish.click();
+      }
+      await expect.poll(async () => (await snapshot(page)).props, { timeout: 8_000 }).toBeGreaterThan(0);
+      expect((await snapshot(page)).artwork).toBeGreaterThan(0);
 
-      // 動線 — two points through the shipped route API, then visible in state.
+      // 改 Prop: the placed object is selected — 屬性 → 編輯這個道具.
+      const ctxProps = page.locator(".ctxbar .chip", { hasText: "屬性" });
+      if (await ctxProps.isVisible()) await ctxProps.click();
+      const editPlaced = page.getByRole("button", { name: /編輯這個道具/ });
+      if (await editPlaced.count()) {
+        await editPlaced.click();
+      } else {
+        await gotoWorkflow(page, "layout");
+        const row = page.locator(".left .list__row", { hasText: "合照背景牆" });
+        await row.scrollIntoViewIfNeeded();
+        await row.locator("button", { hasText: "編輯" }).click();
+      }
+      await expect(page.locator(".propstudio")).toBeVisible();
+      const editName = page.locator(".propstudio .field", { hasText: "名稱" }).locator("input");
+      await editName.fill("改過的背景牆");
+      await editName.blur();
+      await page.locator(".propstudio button", { hasText: "儲存修改" }).click();
+      await expect(page.locator(".propstudio")).toHaveCount(0);
+      await expect.poll(async () => (await snapshot(page)).propNames, { timeout: 8_000 })
+        .toContain("改過的背景牆");
+      await screenshotViewport(page, vp.name, "03-prop");
+
+      // --- 動線: 入場 chip → two taps on the visible canvas → 完成繪製 ------
+      const routesBefore = (await snapshot(page)).routePoints;
       await gotoWorkflow(page, "route");
-      await page.evaluate(() => {
-        const pf = (window as unknown as {
-          planform: {
-            app: { newRoutePreset(type: string): void; finishRoute(): void };
-            store: { mutate(fn: (p: { routes: { id: string; points: { x: number; z: number }[] }[] }) => void): void };
-          };
-        }).planform;
-        pf.app.newRoutePreset("entry");
-        pf.store.mutate((p) => {
-          const r = p.routes[p.routes.length - 1];
-          r.points = [{ x: 1, z: 8 }, { x: 5, z: 5 }, { x: 8, z: 3 }];
-        });
-        pf.app.finishRoute();
-      });
+      await page.locator(".left .chip", { hasText: "入場" }).first().click();
+      await settle(page);
+      await clickSafeCanvas(page);
+      const safe = (await probe(page)).safeRect;
+      await page.mouse.click(
+        Math.round(safe.x + safe.width * 0.6),
+        Math.round(safe.y + safe.height * 0.55),
+      );
+      await settle(page);
+      const finishRoute = page.locator(".placebar-wrap button", { hasText: "完成繪製" });
+      if (await finishRoute.isVisible()) await finishRoute.click();
+      else await page.locator(".left button", { hasText: "完成繪製" }).click();
+      await settle(page);
       const afterRoute = await snapshot(page);
-      expect(afterRoute.routes).toBeGreaterThan(0);
+      expect(afterRoute.routePoints).toBeGreaterThan(routesBefore);
+      await screenshotViewport(page, vp.name, "04-route");
 
-      // 彩排 — the same entry the ▶ 開始彩排 button uses (interaction if the
-      // plan has a step list, otherwise the classroom event engine).
+      // --- 彩排: first-layer tab, the ▶ button, numbers in the readout ------
       await gotoWorkflow(page, "sim");
+      await page.locator(".left button", { hasText: "▶ 開始彩排" }).click();
+      await expect(page.locator(".left .readout", { hasText: "全部完成" })).toBeVisible({ timeout: 20_000 });
       const rehearsal = await page.evaluate(() => {
-        const app = (window as unknown as {
-          planform: {
-            app: {
-              startSimulation(): void;
-              session: { simResult: null | { participantCount: number; finishTimeSeconds: number } };
-            };
-          };
-        }).planform.app;
-        app.startSimulation();
-        return app.session.simResult;
+        const r = (window as unknown as {
+          planform: { app: { session: { simResult: null | { participantCount: number; finishTimeSeconds: number } } } };
+        }).planform.app.session.simResult;
+        return r;
       });
       expect(rehearsal).not.toBeNull();
       expect(rehearsal!.participantCount).toBeGreaterThan(0);
       expect(rehearsal!.finishTimeSeconds).toBeGreaterThan(0);
+      await screenshotViewport(page, vp.name, "05-rehearsal");
 
-      // Export — filename is a 場刊, not editor chrome.
+      // --- Export -----------------------------------------------------------
       await gotoWorkflow(page, "export");
       const download = page.waitForEvent("download");
       await page.locator(".left button", { hasText: "場佈總覽圖" }).click();
@@ -276,16 +288,17 @@ for (const vp of VIEWPORTS) {
       const bytes = Buffer.concat(chunks);
       expect(bytes.byteLength).toBeGreaterThan(1000);
       expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+      await screenshotViewport(page, vp.name, "06-export");
 
-      const probe = await canvasProbe(page);
-      expect(probe.mode).toBe(vp.mode);
-      expect(probe.canvasWidth).toBeGreaterThan(0);
-      expect(probe.canvasHeight).toBeGreaterThan(0);
-      expect(probe.cssW).toBeGreaterThan(vp.width * 0.4);
-      expect(probe.fill).toBeGreaterThan(0.08);
+      const c = await canvasProbe(page);
+      expect(c.mode).toBe(vp.mode);
+      expect(c.cssW).toBeGreaterThanOrEqual(vp.width - 2);
+      expect(c.cssH).toBeGreaterThanOrEqual(vp.height - 2);
+      expect(c.canvasWidth).toBeGreaterThanOrEqual(Math.round(c.cssW * c.dpr) - 1);
+      expect(c.canvasHeight).toBeGreaterThanOrEqual(Math.round(c.cssH * c.dpr) - 1);
+      expect(c.fill).toBeGreaterThan(0.15);
       expect(errors).toEqual([]);
 
-      // reload → reopen: the same change is still there.
       await page.reload();
       await page.waitForFunction(() => !!(window as unknown as { planform?: unknown }).planform);
       await page.waitForSelector(".projhome, #app[data-route='editor']");
@@ -297,9 +310,9 @@ for (const vp of VIEWPORTS) {
       const afterReload = await snapshot(page);
       expect(afterReload.name).toBe(projectName);
       expect(afterReload.objects).toBeGreaterThanOrEqual(afterPlace.objects);
-      expect(afterReload.props).toBeGreaterThan(0);
+      expect(afterReload.propNames).toContain("改過的背景牆");
       expect(afterReload.artwork).toBeGreaterThan(0);
-      expect(afterReload.routes).toBeGreaterThan(0);
+      expect(afterReload.routePoints).toBeGreaterThan(0);
       expect(errors).toEqual([]);
     });
   });

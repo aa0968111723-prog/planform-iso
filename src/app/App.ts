@@ -77,6 +77,7 @@ import {
   nearestWallSnap,
   wallAnchorToPosition,
   areaBounds,
+  clampPointToAreas,
 } from "../core/placement";
 import { groupCenter, groupFootprint, groupMembers, setGroupCenter } from "../core/arrays";
 import { validateProject, type Issue } from "../core/validation";
@@ -622,12 +623,24 @@ export class App {
   }
 
   private confirmPlacement(): void {
-    const g = this.session.ghost;
     const kind = this.session.placingKind;
     const entry = this.placingEntry();
-    if (!g || !kind || !entry) return;
+    if (!this.session.ghost || !kind || !entry) return;
+    // A tap that looks like it hit the canvas can still raycast into the void
+    // around the building (landscape tablet, chrome-trimmed iso view). Snap
+    // floor furniture into the venue instead of silently no-op'ing.
+    if (entry.placementType === "floor" && this.session.ghost.validity === "bad") {
+      const snapped = clampPointToAreas(
+        this.session.ghost.x, this.session.ghost.z,
+        [this.state.classroom, this.state.corridor],
+      );
+      this.updateGhostAt(snapped.x, snapped.z);
+    }
+    const g = this.session.ghost;
+    if (!g) return;
     if (g.validity === "bad") {
       if (entry.placementType === "tabletop") this.toast("點在桌子上才能放下", false);
+      else this.toast("點在教室或走廊裡才能放下", false);
       return;
     }
     const id = uid("obj");
@@ -2633,7 +2646,16 @@ export class App {
 
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 
-    if (this.session.mode === "place") { this.confirmPlacement(); return; }
+    if (this.session.mode === "place") {
+      // Honour the tap location, not whatever the ghost last was. Clamp into
+      // the visible canvas so a finger on the sheet-trimmed view still lands
+      // on the plan, not under the header or behind the bottom nav.
+      const pt = this.scene.clampClientToVisible(e.clientX, e.clientY);
+      const ground = this.scene.groundPoint(pt.x, pt.y);
+      if (ground) this.updateGhostAt(ground.x, ground.z);
+      this.confirmPlacement();
+      return;
+    }
 
     if (this.session.mode === "measure" && ground) {
       const snapped = snapMeasurePoint(ground.x, ground.z, this.state, 0.35);
