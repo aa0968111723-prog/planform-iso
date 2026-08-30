@@ -1,6 +1,16 @@
 /** Campuses, colleges, buildings, official map links. Geometry is not stored here. */
 import type { TkuBuilding, TkuCampus, TkuCollege, TkuFloorUse, TkuMapLink } from "./tkuCampus";
 
+/** Official rare CJK locked as codepoints so GitHub writes cannot swap near-glyphs. */
+const U = (n: number) => String.fromCharCode(n);
+const MO = U(0x8b03); // official Shao-mo
+const ZI = U(0x932b); // official Carrie Chang
+const ZONG = U(0x7e26); // near-glyph alias
+const GE = U(0x9398); // near-glyph alias
+const LIU_H = U(0x9a2c); // official Liu-hsien
+const LIU_I = U(0x6e9c); // skating rink
+const YING = U(0x7028); // Ying Yuan
+
 export const TKU_CAMPUSES: TkuCampus[] = [
   {
     id: "tamsui", name: "淡水校園", nameEn: "Tamsui Campus", officialCode: "TS",
@@ -103,16 +113,16 @@ export const TKU_BUILDINGS: TkuBuilding[] = [
   { code: "LW", name: "文苑一館", nameEn: "Wen-yuan Hall I", campusId: "lanyang", kind: "dorm", note: "蘭陽女生宿舍。目錄代號。" },
   { code: "LX", name: "建軒一館", nameEn: "Chien-hsuan Hall I", campusId: "lanyang", kind: "dorm", note: "蘭陽男生宿舍。目錄代號。" },
   { code: "M", name: "海事博物館", nameEn: "Maritime Museum", campusId: "tamsui", kind: "landmark", aliases: ["海博"], lat: 25.17618, lng: 121.45041 },
-  { code: "N", name: "紹謃紀念游泳館", nameEn: "Shao-mo Memorial Natatorium Complex", campusId: "tamsui", kind: "sport", aliases: ["游泳館", "紹謃紀念游泳館"], lat: 25.1745, lng: 121.447 },
+  { code: "N", name: `紹${MO}紀念游泳館`, nameEn: "Shao-mo Memorial Natatorium Complex", campusId: "tamsui", kind: "sport", aliases: ["游泳館", `紹${MO}紀念游泳館`], lat: 25.1745, lng: 121.447 },
   { code: "O", name: "傳播 O 館", nameEn: "Communication Hall O", campusId: "tamsui", kind: "academic", lat: 25.1756, lng: 121.449 },
   { code: "P", name: "司令臺", nameEn: "Reviewing Stand", campusId: "tamsui", kind: "sport", aliases: ["操場司令臺", "操場"] },
   { code: "Q", name: "傳播 Q 館", nameEn: "Communication Hall Q", campusId: "tamsui", kind: "academic", aliases: ["前教育館"], lat: 25.1756, lng: 121.449 },
   { code: "R", name: "學生活動中心", nameEn: "Student Activity Center", campusId: "tamsui", kind: "service", aliases: ["活動中心"], lat: 25.1748, lng: 121.45 },
   { code: "RT", name: "網球場", nameEn: "Tennis Court", campusId: "tamsui", kind: "sport", lat: 25.175, lng: 121.45 },
-  { code: "S", name: "騬先紀念科學館", nameEn: "Liu-hsien Memorial Science Hall", campusId: "tamsui", kind: "academic", aliases: ["科學館"], lat: 25.1754, lng: 121.448 },
-  { code: "SA", name: "紹謃紀念活動中心", nameEn: "Shao-mo Memorial Activity Center", campusId: "lanyang", kind: "sport", aliases: ["紹謃紀念活動中心"], lat: 24.82278, lng: 121.72941, note: "蘭陽，不是淡水 SG。" },
-  { code: "SG", name: "紹謃紀念體育館", nameEn: "Shao-mo Memorial Gymnasium", campusId: "tamsui", kind: "sport", aliases: ["體育館", "紹謃紀念體育館"], lat: 25.176222, lng: 121.44875, osmWay: 964229634, note: "B1–8F。2006 啟用。1F 社辦、7F 集會。樓地板面積見學校公開資料，教室長寬未實測。" },
-  { code: "SS", name: "溝冰場", nameEn: "Skating Rink", campusId: "tamsui", kind: "sport" },
+  { code: "S", name: `${LIU_H}先紀念科學館`, nameEn: "Liu-hsien Memorial Science Hall", campusId: "tamsui", kind: "academic", aliases: ["科學館"], lat: 25.1754, lng: 121.448 },
+  { code: "SA", name: `紹${MO}紀念活動中心`, nameEn: "Shao-mo Memorial Activity Center", campusId: "lanyang", kind: "sport", aliases: [`紹${MO}紀念活動中心`], lat: 24.82278, lng: 121.72941, note: "蘭陽，不是淡水 SG。" },
+  { code: "SG", name: `紹${MO}紀念體育館`, nameEn: "Shao-mo Memorial Gymnasium", campusId: "tamsui", kind: "sport", aliases: ["體育館", `紹${MO}紀念體育館`], lat: 25.176222, lng: 121.44875, osmWay: 964229634, note: "B1–8F。2006 啟用。1F 社辦、7F 集會。樓地板面積見學校公開資料，教室長寬未實測。" },
+  { code: "SS", name: `${LIU_I}冰場`, nameEn: "Skating Rink", campusId: "tamsui", kind: "sport" },
   { code: "T", name: "驚聲紀念大樓", nameEn: "Ching-sheng Memorial Hall", campusId: "tamsui", kind: "academic", aliases: ["驚聲"], lat: 25.1755, lng: 121.451, note: "前方為書卷廣場。" },
   { code: "TH", name: "校史館暨張建邦創辦人紀念館", nameEn: "Gallery of Tamkang History and Founder Memorial Hall", campusId: "tamsui", kind: "landmark", aliases: ["校史館"] },
   { code: "U", name: "覺生紀念圖書館", nameEn: "Chueh-sheng Memorial Library", campusId: "tamsui", kind: "landmark", aliases: ["圖書館", "總館"], lat: 25.17475, lng: 121.45097, osmWay: 235418149 },
@@ -122,8 +132,8 @@ export const TKU_BUILDINGS: TkuBuilding[] = [
   { code: "XB", name: "五虎崗新社辦", nameEn: "Five-tiger Hill Club Offices", campusId: "tamsui", kind: "service", aliases: ["新社辦"], note: "淡江時報教室代號表曾列 XB。不是課表常用代碼。" },
   { code: "XC", name: "五虎崗綜合球場", nameEn: "Five-tiger Hill Court", campusId: "tamsui", kind: "sport", aliases: ["綜合球場"], lat: 25.17552, lng: 121.45366 },
   { code: "Y", name: "自強館", nameEn: "Tzu-chiang Hall", campusId: "tamsui", kind: "academic", note: "現為教育大樓用途。" },
-  { code: "YY", name: "瀨苑", nameEn: "Ying Yuan House", campusId: "tamsui", kind: "landmark", note: "舊址已整修為校史館 TH。" },
-  { code: "Z", name: "松濤館", nameEn: "Sung-tao Hall", campusId: "tamsui", kind: "academic", aliases: ["文錫藝術中心", "文錫", "文縦藝術中心", "文鎘藝術中心", "文縦", "文鎘"] },
+  { code: "YY", name: `${YING}苑`, nameEn: "Ying Yuan House", campusId: "tamsui", kind: "landmark", note: "舊址已整修為校史館 TH。" },
+  { code: "Z", name: "松濤館", nameEn: "Sung-tao Hall", campusId: "tamsui", kind: "academic", aliases: [`文${ZI}藝術中心`, `文${ZI}`, `文${ZONG}藝術中心`, `文${GE}藝術中心`, `文${ZONG}`, `文${GE}`] },
   { code: "ZF", name: "淡江國際學園", nameEn: "Tamkang International Hall", campusId: "tamsui", kind: "dorm", aliases: ["國際學園"] },
 ];
 
@@ -137,7 +147,7 @@ export const TKU_MAP_LINKS: TkuMapLink[] = [
   { title: "臺北校園", url: "https://tpcampus.tku.edu.tw/", kind: "official", campusId: "taipei" },
   { title: "蘭陽校園", url: "https://www.lanyang.tku.edu.tw", kind: "official", campusId: "lanyang" },
   { title: "圖書館總館平面", url: "https://www.lib.tku.edu.tw/FrontPointOfEntry.aspx?Sn=63", kind: "floorplan", campusId: "tamsui" },
-  { title: "海事博物館／文錫", url: "https://www.finearts.tku.edu.tw/", kind: "official", campusId: "tamsui" },
+  { title: `海事博物館／文${ZI}`, url: "https://www.finearts.tku.edu.tw/", kind: "official", campusId: "tamsui" },
   { title: "對外場地借用", url: "https://spacerental.tku.edu.tw/spaceflow.aspx", kind: "official" },
   { title: "臺北校園外借場地清單", url: "https://spacerental.tku.edu.tw/spacetp.aspx", kind: "index", campusId: "taipei" },
   { title: "淡江文化手冊 PDF", url: "https://classic.tku.edu.tw/doc/TKU_culture.pdf", kind: "index" },
