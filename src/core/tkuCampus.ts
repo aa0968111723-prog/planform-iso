@@ -197,6 +197,10 @@ export function placesByCampus(id: TkuCampusId): TkuPlace[] {
   return TKU_PLACES.filter((p) => p.campusId === id);
 }
 
+export function placesWithPublishedCapacity(): TkuPlace[] {
+  return TKU_PLACES.filter((p) => p.publishedCapacity != null);
+}
+
 export function formatPlaceLabel(place: TkuPlace): string {
   const b = place.buildingCode ? buildingByCode(place.buildingCode) : undefined;
   const where = [b?.name, place.floor != null ? `${place.floor}F` : null].filter(Boolean).join(" ");
