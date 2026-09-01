@@ -19,6 +19,7 @@ describe("precision tabletop project data", () => {
   it("round-trips a tabletop annotation independently from its parent object", () => {
     const project = migrateProject({
       labelDisplayMode: "all",
+      favoriteAssetIds: ["custom:prop_tea_pot", "custom:prop_tea_pot", 42] as never,
       objects: [{
         id: "pin", kind: "computer", x: 2, z: 2, rotationDeg: 0,
         width: 0.058, depth: 0.058, height: 0.008,
@@ -32,6 +33,7 @@ describe("precision tabletop project data", () => {
     const reloaded = migrateProject(JSON.parse(JSON.stringify(project)));
     const pin = reloaded.objects[0];
     expect(reloaded.labelDisplayMode).toBe("all");
+    expect(reloaded.favoriteAssetIds).toEqual(["custom:prop_tea_pot"]);
     expect(pin.parentId).toBe("table-a");
     expect(pin.label).toBe("秋季茶會胸針");
     expect(pin.showLabel).toBe(false);

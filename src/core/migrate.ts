@@ -1004,6 +1004,9 @@ export function migrateProject(input: Partial<Project>): Project {
   p.labelDisplayMode = input.labelDisplayMode === "all" || input.labelDisplayMode === "none" || input.labelDisplayMode === "selected"
     ? input.labelDisplayMode
     : "essential";
+  p.favoriteAssetIds = Array.isArray(input.favoriteAssetIds)
+    ? [...new Set(input.favoriteAssetIds.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 100)
+    : [];
   p.description = input.description ?? "";
   p.zones = (Array.isArray(input.zones) ? input.zones : []).map(migrateZone);
   p.routes = (Array.isArray(input.routes) ? input.routes : []).map(migrateRoute);

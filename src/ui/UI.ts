@@ -7,7 +7,7 @@ import type { LayoutCandidate } from "../core/smartLayout";
 import { issueCounts, type Severity } from "../core/validation";
 import { dockingPolicy, type WorkspaceMode } from "../core/viewport";
 import { renderConstructionPlan, type PageOrientation, type PageSize, type PlanOptions, type PlanPreset, type RoleFilter } from "../export/constructionPlan";
-import { downloadPng, exportProjectJson, importProjectJson, pngFilename, sharePng } from "../export/exporters";
+import { downloadPlanPdf, downloadPng, exportProjectJson, importProjectJson, pngFilename, sharePng } from "../export/exporters";
 import { buildInspector } from "./inspector";
 import { buildLibrary, buildPlacementToolbar } from "./library";
 import { buildQuickAgentSheet, type QuickAgentSheetHandles } from "./quickAgentSheet";
@@ -1244,6 +1244,13 @@ export class UI {
         share("route", null, "模擬摘要", { simplify: true, titleSuffix: "模擬摘要", extraNotes: r.summaryLines });
       }, "btn btn--ghost"),
       button("3D 示意圖", () => downloadPng(this.app.scene.renderToDataURL(state(), "iso"), pngFilename(state().name, "3D示意")), "btn btn--ghost"),
+      button("PDF 場刊圖（目前設定）", () => {
+        const dataUrl = renderConstructionPlan(state(), { ...o, roleFilter: null });
+        const filename = pngFilename(state().name, "場刊圖").replace(/\.png$/, ".pdf");
+        void downloadPlanPdf(dataUrl, filename)
+          .then(() => this.showToast("PDF 已下載（標注設定已套用）"))
+          .catch(() => this.showToast("PDF 產生失敗，請改用圖片匯出", false));
+      }, "btn btn--ghost"),
       el("div", { class: "subhead", text: "專案資料（備份 / 搬機）" }),
       el("div", { class: "row" }, [
         button("匯出 JSON", () => exportProjectJson(state())),

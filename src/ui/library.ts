@@ -89,6 +89,16 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     });
   }
 
+  const favorites = (app.store.getState().favoriteAssetIds ?? [])
+    .map((id) => catalog.get(id))
+    .filter((entry): entry is AssetCatalogEntry => !!entry);
+  if (favorites.length) {
+    panels.push({
+      label: "收藏",
+      body: el("div", { class: "cardgrid" }, favorites.map((entry) => catalogCard(app, entry, opts))),
+    });
+  }
+
   // Always offered: a classroom plan still needs a 招生桌, and burying these
   // behind 「＋ 新增道具」 meant nobody could find a QR 立架.
   if (!opts.categories || opts.zones) {

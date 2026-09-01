@@ -152,6 +152,21 @@ function tableItem(
   };
 }
 
+/** Compact but physical fallback for ordinary stall kit. */
+function simpleItem(
+  id: string,
+  name: string,
+  dims: { width: number; depth: number; height: number },
+  icon: string,
+  color: string,
+  text?: string,
+  placement: PropDefinition["placement"] = "tabletop",
+): PropDefinition {
+  return tableItem(id, name, dims, [
+    part("body", "box", dims, { x: 0, y: 0, z: 0 }, { color, finish: "plastic-matte", ...(text ? { text } : {}) }),
+  ], icon, { placement });
+}
+
 /* ------------------------------------------------------------------ */
 
 export const BOOTH_PROP_PRESETS: readonly PropDefinition[] = [
@@ -412,6 +427,58 @@ export const BOOTH_PROP_PRESETS: readonly PropDefinition[] = [
     part("cone", "cylinder", { width: 0.055, depth: 0.055, height: 0.01 }, { x: 0, y: 0.035, z: 0 }, { color: "#94a3b8", finish: "brushed-metal" }),
   ], "🔊"),
 
+  // 社團攤位的一桌，通常不是只有一個 QR 牌。以下是能直接拖進桌面、
+  // 以市售常見尺寸為起點的桌面套件；每個仍可在屬性中改為實際尺寸。
+  tableItem("prop_mini_blackboard", "小黑板", { width: 0.22, depth: 0.1, height: 0.19 }, [
+    part("board", "plane", { width: 0.22, depth: 0.006, height: 0.16 }, { x: 0, y: 0.025, z: 0 }, { color: "#1f2937", finish: "painted-metal", text: "今日活動" }),
+    part("foot", "box", { width: 0.2, depth: 0.1, height: 0.025 }, { x: 0, y: 0, z: 0 }, { color: "#8a6545", finish: "light-wood" }),
+  ], "▤"),
+  tableItem("prop_price_card", "價格牌", { width: 0.12, depth: 0.06, height: 0.1 }, [
+    part("card", "plane", { width: 0.12, depth: 0.004, height: 0.085 }, { x: 0, y: 0.012, z: 0 }, { color: "#fef3c7", finish: "paper", text: "$" }),
+    part("foot", "box", { width: 0.1, depth: 0.06, height: 0.012 }, { x: 0, y: 0, z: 0 }, { color: "#a16207", finish: "light-wood" }),
+  ], "💲"),
+  tableItem("prop_opinion_box", "意見箱", { width: 0.2, depth: 0.16, height: 0.19 }, [
+    part("box", "box", { width: 0.2, depth: 0.16, height: 0.17 }, { x: 0, y: 0, z: 0 }, { color: "#dbeafe", finish: "plastic-matte", text: "建議" }),
+    part("slot", "box", { width: 0.09, depth: 0.015, height: 0.01 }, { x: 0, y: 0.17, z: 0 }, { color: "#1e293b", finish: "plastic-matte" }),
+  ], "💬"),
+  simpleItem("prop_phone", "手機", { width: 0.075, depth: 0.155, height: 0.01 }, "▯", "#334155", "報名"),
+  simpleItem("prop_aroma", "香氛擴香", { width: 0.075, depth: 0.075, height: 0.12 }, "◌", "#d8b4fe"),
+  tableItem("prop_buddha", "小佛像", { width: 0.12, depth: 0.1, height: 0.17 }, [
+    part("base", "box", { width: 0.12, depth: 0.1, height: 0.025 }, { x: 0, y: 0, z: 0 }, { color: "#a16207", finish: "brushed-metal" }),
+    part("figure", "sphere", { width: 0.09, depth: 0.09, height: 0.13 }, { x: 0, y: 0.025, z: 0 }, { color: "#d4a72c", finish: "brushed-metal" }),
+  ], "🪷"),
+  tableItem("prop_succulent", "小盆栽", { width: 0.11, depth: 0.11, height: 0.16 }, [
+    part("pot", "cylinder", { width: 0.1, depth: 0.1, height: 0.07 }, { x: 0, y: 0, z: 0 }, { color: "#b45309", finish: "ceramic" }),
+    part("leaf", "sphere", { width: 0.1, depth: 0.1, height: 0.1 }, { x: 0, y: 0.06, z: 0 }, { color: "#4d7c0f", finish: "plastic-matte" }),
+  ], "🪴"),
+  simpleItem("prop_zen_stones", "禪意石頭", { width: 0.14, depth: 0.09, height: 0.035 }, "●", "#64748b"),
+  tableItem("prop_wood_sign", "木牌", { width: 0.18, depth: 0.07, height: 0.14 }, [
+    part("panel", "plane", { width: 0.18, depth: 0.006, height: 0.12 }, { x: 0, y: 0.012, z: 0 }, { color: "#a16207", finish: "light-wood", text: "平安" }),
+    part("foot", "box", { width: 0.16, depth: 0.07, height: 0.012 }, { x: 0, y: 0, z: 0 }, { color: "#78350f", finish: "dark-wood" }),
+  ], "▥"),
+  simpleItem("prop_wish_cards", "祈願卡一疊", { width: 0.1, depth: 0.15, height: 0.018 }, "♡", "#fce7f3", "祈願"),
+  simpleItem("prop_color_pens", "彩色筆組", { width: 0.16, depth: 0.07, height: 0.025 }, "🖍", "#fda4af"),
+  simpleItem("prop_stamp_cards", "集章卡", { width: 0.09, depth: 0.055, height: 0.01 }, "▦", "#fde68a", "集章"),
+  simpleItem("prop_gift_bag", "小禮物袋", { width: 0.13, depth: 0.08, height: 0.16 }, "🎀", "#f9a8d4"),
+  tableItem("prop_mascot", "吉祥物公仔", { width: 0.11, depth: 0.1, height: 0.16 }, [
+    part("body", "sphere", { width: 0.1, depth: 0.1, height: 0.12 }, { x: 0, y: 0.02, z: 0 }, { color: "#86efac", finish: "plastic-gloss" }),
+    part("base", "cylinder", { width: 0.11, depth: 0.11, height: 0.02 }, { x: 0, y: 0, z: 0 }, { color: "#64748b", finish: "plastic-matte" }),
+  ], "🐢"),
+  tableItem("prop_vase_flowers", "花瓶與花", { width: 0.12, depth: 0.12, height: 0.22 }, [
+    part("vase", "cylinder", { width: 0.09, depth: 0.09, height: 0.12 }, { x: 0, y: 0, z: 0 }, { color: "#bae6fd", finish: "ceramic" }),
+    part("flower", "sphere", { width: 0.12, depth: 0.12, height: 0.1 }, { x: 0, y: 0.12, z: 0 }, { color: "#f9a8d4", finish: "plastic-matte" }),
+  ], "💐"),
+  tableItem("prop_night_light", "小夜燈", { width: 0.09, depth: 0.09, height: 0.13 }, [
+    part("base", "cylinder", { width: 0.09, depth: 0.09, height: 0.03 }, { x: 0, y: 0, z: 0 }, { color: "#475569", finish: "plastic-matte" }),
+    part("shade", "sphere", { width: 0.08, depth: 0.08, height: 0.1 }, { x: 0, y: 0.03, z: 0 }, { color: "#fde68a", finish: "plastic-gloss" }),
+  ], "💡"),
+  simpleItem("prop_basket", "小籃子", { width: 0.22, depth: 0.16, height: 0.1 }, "🧺", "#b89063"),
+  simpleItem("prop_storage_box", "收納盒", { width: 0.25, depth: 0.18, height: 0.1 }, "□", "#cbd5e1"),
+  simpleItem("prop_string_lights", "燈串", { width: 0.35, depth: 0.04, height: 0.03 }, "✦", "#fde68a"),
+  simpleItem("prop_balloon_cluster", "氣球組", { width: 0.2, depth: 0.15, height: 0.3 }, "●", "#f9a8d4", undefined, "floor"),
+  simpleItem("prop_floor_cushion", "靜坐墊", { width: 0.45, depth: 0.45, height: 0.08 }, "◒", "#475569", undefined, "floor"),
+  simpleItem("prop_cardboard_box", "紙箱", { width: 0.38, depth: 0.28, height: 0.26 }, "▣", "#c8b6a6", undefined, "floor"),
+
   tableItem("prop_trash_bin", "垃圾桶", { width: 0.32, depth: 0.32, height: 0.7 }, [
     part("body", "cylinder", { width: 0.3, depth: 0.3, height: 0.62 }, { x: 0, y: 0, z: 0 },
       { color: "#64748b", finish: "plastic-matte" }),
@@ -458,6 +525,18 @@ meta("prop_turtle_card", { sizeNote: "以 16 cm 桌上角色牌為預設", use: 
 meta("prop_tablet", { sizeNote: "以 10 吋平板外觀尺寸為預設", use: "報名／展示" });
 meta("prop_speaker", { sizeNote: "以小型藍牙音箱為預設", use: "活動聲音提示" });
 meta("prop_trash_bin", { sizeNote: "市售小型垃圾桶常見尺寸", use: "攤位旁垃圾" });
+
+// New tabletop kit uses conservative, common retail footprints. It is an
+// editable starting point, never a claim that a particular club owns exactly
+// this size; organisers can overwrite dimensions after on-site measurement.
+for (const prop of BOOTH_PROP_PRESETS) {
+  if (!BOOTH_PROP_META[prop.id]) {
+    meta(prop.id, {
+      sizeNote: "市售常見尺寸的可調整起點；請依實物量測後修改",
+      use: `攤位桌面佈置：${prop.name}`,
+    });
+  }
+}
 
 const BY_ID = new Map(BOOTH_PROP_PRESETS.map((p) => [p.id, p]));
 

@@ -202,6 +202,13 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
   }
 
   const labelPos = obj.labelPosition ?? { offsetX: 0, offsetY: 0, offsetZ: 0 };
+  if (obj.assetId) {
+    root.append(button(
+      app.isAssetFavorite(obj.assetId) ? "★ 已收藏這個素材" : "☆ 收藏這個素材",
+      () => app.toggleAssetFavorite(obj.assetId!),
+      "chip chip--sm",
+    ));
+  }
   root.append(el("div", { class: "subhead", text: "標注（不影響物件本體）" }));
   root.append(el("div", { class: "row wrap" }, [
     button(obj.showLabel === false ? "顯示此標注" : "隱藏此標注", () => app.updateSelectedLabel({ showLabel: obj.showLabel === false }), "chip chip--sm"),

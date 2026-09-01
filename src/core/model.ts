@@ -846,6 +846,8 @@ export interface Project {
   layers: LayerVisibility;
   /** Persisted label visibility policy. Individual `showLabel` values win. */
   labelDisplayMode?: LabelDisplayMode;
+  /** Asset ids explicitly bookmarked by this project owner. */
+  favoriteAssetIds?: string[];
   /** v5: user/custom catalog entries (binary blobs referenced via blobIds). */
   catalogExtras?: ProjectCatalogExtra[];
   /** v6: event-flow simulation scenarios (DES). */
@@ -916,6 +918,7 @@ export function createDefaultProject(): Project {
     view: "top",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },
     labelDisplayMode: "essential",
+    favoriteAssetIds: [],
     catalogExtras: [],
     scenarios: [],
     activeScenarioId: null,

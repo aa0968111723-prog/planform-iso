@@ -342,6 +342,20 @@ export class App {
     this.recentAssetIds = [id, ...this.recentAssetIds.filter((x) => x !== id)].slice(0, 12);
   }
 
+  isAssetFavorite(id: string): boolean {
+    return (this.state.favoriteAssetIds ?? []).includes(id);
+  }
+
+  toggleAssetFavorite(id: string): void {
+    this.store.mutate((project) => {
+      const current = project.favoriteAssetIds ?? [];
+      project.favoriteAssetIds = current.includes(id)
+        ? current.filter((assetId) => assetId !== id)
+        : [id, ...current].slice(0, 100);
+    }, { history: false });
+    this.toast(this.isAssetFavorite(id) ? "已收藏素材" : "已取消收藏", false);
+  }
+
   private drag: DragState | null = null;
   private dragging = false;
   private tapClearStart: { x: number; y: number } | null = null;
