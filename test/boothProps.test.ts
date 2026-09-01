@@ -93,6 +93,17 @@ describe("stall props and collateral", () => {
     expect(entry.blocksFlow).toBe(false);
   });
 
+  it("includes a usable first-pass tabletop kit for a campus club stall", () => {
+    const names = new Set(BOOTH_PROP_PRESETS.map((prop) => prop.name));
+    for (const name of [
+      "A4 傳單一疊", "三折頁", "QR 立架", "價格牌", "意見箱", "手機", "茶壺", "茶杯",
+      "禪語卡", "祈願卡一疊", "集章卡", "龜龜角色牌", "吉祥物公仔", "小盆栽", "小夜燈",
+    ]) expect(names.has(name), name).toBe(true);
+    for (const id of ["prop_price_card", "prop_tea_pot", "prop_zen_card", "prop_mascot", "prop_night_light"]) {
+      expect(boothPropPreset(id)?.placement, id).toBe("tabletop");
+    }
+  });
+
   it("a custom badge is a small tabletop prop with an artwork-ready circular face", () => {
     const def = blankPropDraft("badge");
     expect(def.placement).toBe("tabletop");

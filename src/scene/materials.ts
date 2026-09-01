@@ -11,6 +11,7 @@ export type MaterialPresetId =
   | "brushed-metal"
   | "plastic-matte"
   | "plastic-gloss"
+  | "ceramic"
   | "light-wood"
   | "dark-wood"
   | "fabric"
@@ -31,6 +32,7 @@ export const MATERIAL_PRESETS: Record<MaterialPresetId, MaterialPreset> = {
   "brushed-metal": { id: "brushed-metal", baseColor: "#8b949e", roughness: 0.4, metalness: 0.7 },
   "plastic-matte": { id: "plastic-matte", baseColor: "#d1d5db", roughness: 0.85, metalness: 0.02 },
   "plastic-gloss": { id: "plastic-gloss", baseColor: "#e5e7eb", roughness: 0.35, metalness: 0.05 },
+  ceramic: { id: "ceramic", baseColor: "#f5f1e8", roughness: 0.3, metalness: 0.0 },
   "light-wood": { id: "light-wood", baseColor: "#c8b6a6", roughness: 0.75, metalness: 0.0 },
   "dark-wood": { id: "dark-wood", baseColor: "#8b7355", roughness: 0.7, metalness: 0.0 },
   fabric: { id: "fabric", baseColor: "#a8b0bc", roughness: 0.95, metalness: 0.0 },

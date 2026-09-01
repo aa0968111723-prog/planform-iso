@@ -17,6 +17,12 @@ export interface TextLabelOptions {
   fontSize?: number;
 }
 
+export interface TextLabelStyle {
+  fontSize?: number;
+  /** CSS canvas colour; absent keeps the restrained PLANFORM neutral pill. */
+  background?: string;
+}
+
 export class TextLabel {
   readonly sprite: Sprite;
   private text = "";
@@ -24,12 +30,15 @@ export class TextLabel {
   private texture: CanvasTexture;
   private canvas: HTMLCanvasElement;
   private fontSize: number;
+  private readonly defaultFontSize: number;
+  private background = `rgba(${LABEL_PILL_RGBA.r},${LABEL_PILL_RGBA.g},${LABEL_PILL_RGBA.b},${LABEL_PILL_RGBA.a})`;
 
   constructor(opts: TextLabelOptions = {}) {
     this.canvas = document.createElement("canvas");
     this.canvas.width = opts.width ?? 240;
     this.canvas.height = opts.height ?? 56;
     this.fontSize = opts.fontSize ?? 26;
+    this.defaultFontSize = this.fontSize;
     this.texture = new CanvasTexture(this.canvas);
     this.texture.minFilter = LinearFilter;
     const material = new SpriteMaterial({
@@ -47,15 +56,19 @@ export class TextLabel {
     this.sprite.renderOrder = 3;
   }
 
-  set(text: string, color: string): void {
-    if (text === this.text && color === this.color) return;
+  set(text: string, color: string, style: TextLabelStyle = {}): void {
+    const fontSize = style.fontSize ?? this.defaultFontSize;
+    const background = style.background ?? `rgba(${LABEL_PILL_RGBA.r},${LABEL_PILL_RGBA.g},${LABEL_PILL_RGBA.b},${LABEL_PILL_RGBA.a})`;
+    if (text === this.text && color === this.color && fontSize === this.fontSize && background === this.background) return;
     this.text = text;
     this.color = color;
+    this.fontSize = fontSize;
+    this.background = background;
     const ctx = this.canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     // One source for the pill colour, so contrast can be tested against it.
-    ctx.fillStyle = `rgba(${LABEL_PILL_RGBA.r},${LABEL_PILL_RGBA.g},${LABEL_PILL_RGBA.b},${LABEL_PILL_RGBA.a})`;
+    ctx.fillStyle = this.background;
     roundRect(ctx, 3, 4, this.canvas.width - 6, this.canvas.height - 8, this.canvas.height / 4);
     ctx.fill();
     ctx.font = `600 ${this.fontSize}px system-ui, 'Noto Sans TC', sans-serif`;

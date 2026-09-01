@@ -24,8 +24,10 @@ export function contextBarModel(app: App): ContextBarModel | null {
 
   const obj = app.getSelectedObject();
   if (obj) {
+    const tabletop = app.tabletopHost;
+    const objectName = assetDef(obj.kind).displayName;
     return {
-      name: assetDef(obj.kind).displayName,
+      name: tabletop ? `場景 > ${tabletop.name ?? assetDef(tabletop.kind).displayName} > 桌面 · ${objectName}` : objectName,
       size: `${Math.round(obj.width * 100)}×${Math.round(obj.depth * 100)} cm`,
     };
   }
@@ -55,6 +57,13 @@ export function renderContextBar(host: HTMLElement, app: App, opts: ContextBarOp
   const model = contextBarModel(app);
   host.innerHTML = "";
   if (!model) return;
+  const selectedObject = app.getSelectedObject();
+  const tabletopAction = selectedObject && (selectedObject.kind === "table" || selectedObject.kind === "regTable")
+    ? [button(app.tabletopHost?.id === selectedObject.id ? "離開桌面" : "桌面", () => {
+      if (app.tabletopHost?.id === selectedObject.id) app.exitTabletopLayout();
+      else app.enterTabletopLayout();
+    }, "chip chip--sm chip--primary")]
+    : [];
   host.append(
     el("span", { class: "ctxbar__info" }, [
       el("span", { class: "ctxbar__name", text: model.name }),
@@ -63,6 +72,7 @@ export function renderContextBar(host: HTMLElement, app: App, opts: ContextBarOp
     el("span", { class: "ctxbar__actions" }, [
       button("旋轉", () => app.rotateSelection(15), "chip chip--sm"),
       button("複製", () => app.duplicateSelection(), "chip chip--sm"),
+      ...tabletopAction,
       button("屬性", () => opts.onOpenProperties(), "chip chip--sm chip--primary"),
     ]),
   );

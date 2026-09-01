@@ -43,6 +43,7 @@ import type { InteractionOption, PropDefinition, PropPart } from "../core/model"
 export const FINISH_CHOICES: { id: MaterialPresetId; label: string }[] = [
   { id: "plastic-matte", label: "霧面" },
   { id: "plastic-gloss", label: "亮面" },
+  { id: "ceramic", label: "陶瓷" },
   { id: "light-wood", label: "木質" },
   { id: "brushed-metal", label: "金屬" },
   { id: "fabric", label: "布面" },

@@ -22,7 +22,7 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
     root.append(el("div", { class: "subhead", text: "場地摘要" }));
     const box = el("div", { class: "readout" });
     for (const line of buildSummaryLines(app.store.getState())) box.append(el("div", { text: line }));
-    root.append(box, el("p", { class: "hint", text: "從左側素材庫選一個素材開始擺放，或點選場景中的物件查看資訊。" }));
+    root.append(box, el("p", { class: "hint", text: "從左側素材庫選一個素材開始擺放，或點選場景中的物件查看資訊。" }), buildObjectLayerPanel(app));
     return root;
   }
 
@@ -44,6 +44,8 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
       button("下", () => app.alignSelection("bottom"), "chip chip--sm"),
       button("水平等距", () => app.distributeSelection("x"), "chip chip--sm"),
       button("垂直等距", () => app.distributeSelection("z"), "chip chip--sm"),
+      button("設成群組", () => app.groupSelectedObjects(), "chip chip--sm"),
+      button("解除群組", () => app.ungroupSelectedObjects(), "chip chip--sm"),
     ]));
     root.append(nudgePanel(app));
     return root;
@@ -162,6 +164,13 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
   root.append(field);
   root.append(button("鏡頭定位", () => { app.scene.focusOn(obj.x, obj.z); }, "chip chip--sm"));
 
+  if (obj.kind === "table" || obj.kind === "regTable") {
+    root.append(button(app.tabletopHost?.id === obj.id ? "離開桌面佈置" : "進入桌面佈置", () => {
+      if (app.tabletopHost?.id === obj.id) app.exitTabletopLayout();
+      else app.enterTabletopLayout();
+    }, "btn btn--primary"));
+  }
+
   if (prop) {
     root.append(el("div", { class: "row wrap" }, [
       button("編輯這個道具", () => app.openPropStudioFor(prop.id), "chip chip--sm"),
@@ -185,6 +194,35 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
   if (obj.kind === "computer") {
     root.append(button(obj.parentId ? "解除桌面關聯" : "（未在桌面上）", () => app.detachComputer(), "chip chip--sm"));
   }
+  if (obj.groupId) {
+    root.append(el("div", { class: "row wrap" }, [
+      button("選取整個群組", () => app.selectObjectGroup(obj.id), "chip chip--sm"),
+      button("從群組移除", () => app.ungroupSelectedObjects(), "chip chip--sm"),
+    ]));
+  }
+
+  const labelPos = obj.labelPosition ?? { offsetX: 0, offsetY: 0, offsetZ: 0 };
+  if (obj.assetId) {
+    root.append(button(
+      app.isAssetFavorite(obj.assetId) ? "★ 已收藏這個素材" : "☆ 收藏這個素材",
+      () => app.toggleAssetFavorite(obj.assetId!),
+      "chip chip--sm",
+    ));
+  }
+  root.append(el("div", { class: "subhead", text: "標注（不影響物件本體）" }));
+  root.append(el("div", { class: "row wrap" }, [
+    button(obj.showLabel === false ? "顯示此標注" : "隱藏此標注", () => app.updateSelectedLabel({ showLabel: obj.showLabel === false }), "chip chip--sm"),
+    button("只看選取標注", () => app.setLabelDisplayMode("selected"), "chip chip--sm"),
+  ]));
+  root.append(textField("畫面標注", obj.label ?? obj.name ?? def.displayName, (v) => app.updateSelectedLabel({ label: v })));
+  root.append(el("div", { class: "grid2" }, [
+    num("標注左右 cm", Math.round(labelPos.offsetX * 100), 1, (v) => app.updateSelectedLabel({ labelPosition: { ...labelPos, offsetX: v / 100 } }), -500),
+    num("標注前後 cm", Math.round(labelPos.offsetZ * 100), 1, (v) => app.updateSelectedLabel({ labelPosition: { ...labelPos, offsetZ: v / 100 } }), -500),
+    num("標注高度 cm", Math.round(labelPos.offsetY * 100), 1, (v) => app.updateSelectedLabel({ labelPosition: { ...labelPos, offsetY: v / 100 } }), -500),
+    num("標注字級", obj.labelStyle?.fontSize ?? 26, 1, (v) => app.updateSelectedLabel({ labelStyle: { ...obj.labelStyle, fontSize: v } }), 10),
+    textField("文字色（#RRGGBB）", obj.labelStyle?.color ?? "#f8fafc", (v) => app.updateSelectedLabel({ labelStyle: { ...obj.labelStyle, color: v } })),
+    textField("標注底色（#RRGGBB）", obj.labelStyle?.background ?? "#172033", (v) => app.updateSelectedLabel({ labelStyle: { ...obj.labelStyle, background: v } })),
+  ]));
 
   propStationPanel(root, app, obj.id);
 
@@ -205,7 +243,46 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
       el("div", { text: `放置面：${surfaceLabel}` }),
     ]));
     root.append(textField("備註", obj.note ?? "", (v) => app.updateSelectedObject({ note: v })));
+    root.append(textField("工作名稱", obj.name ?? def.displayName, (v) => app.renameSelectedObject(v)));
+    root.append(el("div", { class: "row wrap" }, [
+      button("圖層往前", () => app.setObjectLayer(obj.id, 1), "chip chip--sm"),
+      button("圖層往後", () => app.setObjectLayer(obj.id, -1), "chip chip--sm"),
+      el("span", { class: "hint", text: `圖層 ${obj.layer ?? 0}` }),
+    ]));
+    if (obj.surface === "tabletop") {
+      root.append(button(
+        obj.allowTabletopOverflow ? "限制在桌面內" : "允許超出桌緣",
+        () => app.updateSelectedObject({ allowTabletopOverflow: !obj.allowTabletopOverflow }),
+        "chip chip--sm",
+      ));
+    }
   }
+}
+
+/** A compact persistent object/layer list. It deliberately uses the same App
+ * mutators as canvas interactions, so visibility and lock state are saved,
+ * undoable, and never become a UI-only shadow copy. */
+function buildObjectLayerPanel(app: App): HTMLElement {
+  const state = app.store.getState();
+  const rows = [...state.objects]
+    .sort((a, b) => (b.layer ?? 0) - (a.layer ?? 0) || (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  const panel = el("div", { class: "list" });
+  panel.append(el("div", { class: "subhead", text: "物件與圖層" }));
+  if (!rows.length) {
+    panel.append(el("p", { class: "hint", text: "還沒有物件。先放一張桌子，再進入桌面佈置。" }));
+    return panel;
+  }
+  for (const object of rows) {
+    const name = object.label ?? object.name ?? assetDef(object.kind).displayName;
+    panel.append(el("div", { class: "list__row" }, [
+      button(name, () => { app.setSelection([object.id]); app.focusObject(object.id); }, "list__grow chip chip--sm"),
+      button(object.hidden ? "顯" : "隱", () => app.setObjectVisibility(object.id, object.hidden), "chip chip--sm"),
+      button(object.locked ? "解鎖" : "鎖", () => app.setObjectLocked(object.id, !object.locked), "chip chip--sm"),
+      button("↑", () => app.setObjectLayer(object.id, 1), "chip chip--sm"),
+      button("↓", () => app.setObjectLayer(object.id, -1), "chip chip--sm"),
+    ]));
+  }
+  return panel;
 }
 
 function buildGroupInspector(root: HTMLElement, app: App, g: NonNullable<ReturnType<App["getSelectedGroup"]>>, advanced: boolean): void {

@@ -128,6 +128,30 @@ export function migrateObject(input: Partial<SceneObject> & { kind: ObjectKind }
     wallAnchor: input.wallAnchor,
     assetId,
     serviceRole,
+    name: typeof input.name === "string" && input.name.trim() ? input.name.trim() : undefined,
+    label: typeof input.label === "string" ? input.label : undefined,
+    showLabel: input.showLabel !== false,
+    labelPosition: {
+      offsetX: Number.isFinite(input.labelPosition?.offsetX) ? Number(input.labelPosition!.offsetX) : 0,
+      offsetY: Number.isFinite(input.labelPosition?.offsetY) ? Number(input.labelPosition!.offsetY) : 0,
+      offsetZ: Number.isFinite(input.labelPosition?.offsetZ) ? Number(input.labelPosition!.offsetZ) : 0,
+    },
+    labelStyle: {
+      ...(Number.isFinite(input.labelStyle?.fontSize) ? { fontSize: Math.max(10, Math.min(42, Number(input.labelStyle!.fontSize))) } : {}),
+      ...(typeof input.labelStyle?.color === "string" ? { color: input.labelStyle.color } : {}),
+      ...(typeof input.labelStyle?.background === "string" ? { background: input.labelStyle.background } : {}),
+    },
+    layer: Number.isFinite(input.layer) ? Math.round(Number(input.layer)) : 0,
+    groupId: typeof input.groupId === "string" && input.groupId ? input.groupId : undefined,
+    opacity: Number.isFinite(input.opacity) ? Math.max(0, Math.min(1, Number(input.opacity))) : 1,
+    collisionEnabled: input.collisionEnabled !== false,
+    snapEnabled: input.snapEnabled !== false,
+    allowTabletopOverflow: input.allowTabletopOverflow === true,
+    customProperties: input.customProperties && typeof input.customProperties === "object"
+      ? Object.fromEntries(Object.entries(input.customProperties).filter(([, value]) => typeof value === "string"))
+      : {},
+    createdAt: Number.isFinite(input.createdAt) ? Number(input.createdAt) : undefined,
+    updatedAt: Number.isFinite(input.updatedAt) ? Number(input.updatedAt) : undefined,
   };
 
   if (input.kind === "door") {
@@ -977,6 +1001,12 @@ export function migrateProject(input: Partial<Project>): Project {
     confirmed: { ...base.calibration.confirmed, ...(input.calibration?.confirmed ?? {}) },
   };
   p.layers = { ...base.layers, ...input.layers };
+  p.labelDisplayMode = input.labelDisplayMode === "all" || input.labelDisplayMode === "none" || input.labelDisplayMode === "selected"
+    ? input.labelDisplayMode
+    : "essential";
+  p.favoriteAssetIds = Array.isArray(input.favoriteAssetIds)
+    ? [...new Set(input.favoriteAssetIds.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 100)
+    : [];
   p.description = input.description ?? "";
   p.zones = (Array.isArray(input.zones) ? input.zones : []).map(migrateZone);
   p.routes = (Array.isArray(input.routes) ? input.routes : []).map(migrateRoute);
