@@ -92,6 +92,14 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   // Always offered: a classroom plan still needs a 招生桌, and burying these
   // behind 「＋ 新增道具」 meant nobody could find a QR 立架.
   if (!opts.categories || opts.zones) {
+    const tabletop = BOOTH_PROP_PRESETS.filter((p) => p.placement === "tabletop");
+    panels.push({
+      label: "桌面佈置",
+      body: el("div", {}, [
+        el("p", { class: "hint", text: "選一個小物後點攤位桌；可放 QR 立牌、DM 架、抽獎箱、集章、零錢盒與桌旗。" }),
+        el("div", { class: "cardgrid" }, tabletop.map((p) => boothPropCard(app, p, opts))),
+      ]),
+    });
     const groups = [
       { label: "文宣", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "文宣") },
       { label: "擺攤小物", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "擺攤小物") },

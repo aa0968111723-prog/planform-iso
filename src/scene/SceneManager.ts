@@ -96,6 +96,7 @@ interface SessionView {
   measure: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   calibrate: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   showLabels: boolean;
+  showObjectLabels?: boolean;
   focusRouteId?: string | null;
   simplify?: boolean;
   simPositions?: { id?: number; x: number; z: number; routeId?: string; state?: string }[];
@@ -550,7 +551,7 @@ export class SceneManager {
         for (const o of project.objects) {
           if (o.hidden || selected.has(o.id)) continue;
           const label = this.objectNodes.get(o.id)?.label;
-          if (!label) continue;
+          if (!label || !session.showObjectLabels) continue;
           const entry = this.catalog.resolve(o.assetId, o.kind);
           add(`object:${o.id}`, label, entry.category === "service" || LANDMARKS.has(o.kind) ? 1 : 2);
         }

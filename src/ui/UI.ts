@@ -400,6 +400,7 @@ export class UI {
             onSelect: () => { this.app.setView(view.id); return true; },
           })),
           { label: "顯示名稱", active: sess.showLabels, onSelect: () => { this.app.setShowLabels(!sess.showLabels); return true; } },
+          { label: "物件名稱", sub: "區域與動線會保留", active: sess.showObjectLabels, onSelect: () => { this.app.setShowObjectLabels(!sess.showObjectLabels); return true; } },
           { label: "置中 / 重新框選", onSelect: () => this.app.recenterView() },
           { label: "簡化顯示", active: sess.simplify, onSelect: () => { this.app.setSimplify(!sess.simplify); return true; } },
           { label: "顯示 / 隱藏格線", onSelect: () => this.app.updateTile({ visible: !this.app.store.getState().tile.visible }) },
