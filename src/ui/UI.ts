@@ -360,13 +360,19 @@ export class UI {
       snapSel,
       button("✦ AI", () => this.agentSheet.open(), "chip chip--sm chip--accent"),
     ]);
+    // On 1200–1440px the utility group is intentionally folded to preserve
+    // canvas room. Keep one compact, direct AI entry so the planning flow does
+    // not become undiscoverable (and it remains visually secondary to 場佈／彩排).
+    const aiQuick = button("✦", () => this.agentSheet.open(), "chip chip--sm chip--accent topbar__ai-quick");
+    aiQuick.setAttribute("aria-label", "AI 建議");
+    aiQuick.title = "AI 建議";
     const team = button("👥 夥伴模式", () => this.app.enterPartnerMode(), "chip chip--primary");
     const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
       this.homeButton("← 我的專案"),
       el("div", { class: "topbar__title", text: BRAND.name }),
-      history, flows, views, more, el("div", { class: "topbar__spacer" }), team, moreBtn,
+      history, flows, views, more, el("div", { class: "topbar__spacer" }), aiQuick, team, moreBtn,
     );
     this.topbar.append(this.statusBadge);
   }
