@@ -93,6 +93,15 @@ describe("stall props and collateral", () => {
     expect(entry.blocksFlow).toBe(false);
   });
 
+  it("a custom badge is a small tabletop prop with an artwork-ready circular face", () => {
+    const def = blankPropDraft("badge");
+    expect(def.placement).toBe("tabletop");
+    expect(def.dimensions).toEqual({ width: 0.058, depth: 0.058, height: 0.008 });
+    const face = def.parts.find((part) => part.id === "badge-face");
+    expect(face).toMatchObject({ shape: "cylinder", text: "圖案", finish: "plastic-gloss" });
+    expect(entryFromProp(def).placementType).toBe("tabletop");
+  });
+
   it("a kit item copied into the project is not listed as 我做的", () => {
     expect(isUserMadeProp(boothPropPreset("prop_qr_stand")!)).toBe(false);
     expect(isUserMadeProp({ id: "prop_homemade", source: "user" })).toBe(true);

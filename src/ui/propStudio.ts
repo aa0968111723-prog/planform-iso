@@ -280,6 +280,8 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
           draftKind === "interactive" ? "chip chip--sm chip--primary" : "chip chip--sm"),
         button("✦ 桌上小物（自己設計）", () => startFrom("tabletop"),
           draftKind === "tabletop" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button("● 自訂胸針", () => startFrom("badge"),
+          draftKind === "badge" ? "chip chip--sm chip--primary" : "chip chip--sm"),
         el("span", { class: "hint", text: "或從一個現成的開始改：" }),
       ]));
       const seedFrom = (id: string, name: string) => {
@@ -313,6 +315,10 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
     preview.update(draft, { faceOptions: faceOptions(draft) });
     preview.setAngle(angle);
 
+    if (draftKind === "badge") {
+      card.append(el("p", { class: "hint", text: "預設 58 mm，可依廠商規格改尺寸；在「胸針正面」那列按「上傳胸針圖案」。預覽與場景都會顯示在圓形正面，圖片只留在這個裝置的專案素材庫。" }));
+    }
+
     // --- 名稱與尺寸 ---------------------------------------------------------
     card.append(el("div", { class: "row wrap" }, [
       textField("名稱", draft.name, (v) => { draft.name = v || draft.name; touch(); }),
@@ -338,6 +344,7 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
     const overlaps = new Set(overlappingParts(draft.parts).flat());
     draft.parts.forEach((part, i) => {
       partRows.push(el("div", { class: "list__row" }, [
+        ...(part.id === "badge-face" ? [el("span", { class: "hint", text: "胸針正面" })] : []),
         selectField("形狀", [
           { value: "box", label: "方塊" }, { value: "cylinder", label: "圓柱" },
           { value: "sphere", label: "球" }, { value: "plane", label: "面板" },
@@ -354,7 +361,7 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
         // Not just 「文字」: a tester could not tell whether a dice face's
         // question went here or in the face table below, and the two do very
         // different things. This one is paint.
-        textField("印在這塊上的字", part.text ?? "", (v) => { part.text = v || undefined; touch(); }),
+        textField(part.id === "badge-face" ? "胸針正面的字" : "印在這塊上的字", part.text ?? "", (v) => { part.text = v || undefined; touch(); }),
         (() => {
           const file = el("input", {
             type: "file",
@@ -376,7 +383,9 @@ export function showPropStudio(app: App, opts: PropStudioOptions): HTMLElement {
             })();
           });
           const lab = el("label", { class: "chip chip--sm", style: "position:relative;display:inline-flex;align-items:center;cursor:pointer" }, [
-            el("span", { text: part.imageBlobId ? "換這塊上的照片" : "貼一張照片" }),
+            el("span", { text: part.imageBlobId
+              ? (part.id === "badge-face" ? "換胸針圖案" : "換這塊上的照片")
+              : (part.id === "badge-face" ? "上傳胸針圖案" : "貼一張照片") }),
             file,
           ]);
           return lab;
