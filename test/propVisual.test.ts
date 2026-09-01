@@ -135,6 +135,19 @@ describe("faces come from the options", () => {
     expect((plate.material as unknown[]).length).toBe(6);
   });
 
+  it("a cylindrical badge gives artwork its own top-cap material", () => {
+    const g = buildPropGroup(def({
+      parts: [{
+        id: "badge-face", shape: "cylinder",
+        size: { width: 0.058, depth: 0.058, height: 0.008 },
+        offset: { x: 0, y: 0, z: 0 }, imageBlobId: "art_badge",
+      }],
+    }));
+    const badge = meshes(g)[0];
+    expect(Array.isArray(badge.material)).toBe(true);
+    expect((badge.material as unknown[]).length).toBe(3);
+  });
+
   it("two options wrap around six faces rather than leaving blanks", () => {
     const two = options.slice(0, 2);
     const g = buildPropGroup(def(), { faceOptions: two });

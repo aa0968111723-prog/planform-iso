@@ -27,20 +27,24 @@ export class TextLabel {
 
   constructor(opts: TextLabelOptions = {}) {
     this.canvas = document.createElement("canvas");
-    this.canvas.width = opts.width ?? 256;
-    this.canvas.height = opts.height ?? 64;
-    this.fontSize = opts.fontSize ?? 30;
+    this.canvas.width = opts.width ?? 240;
+    this.canvas.height = opts.height ?? 56;
+    this.fontSize = opts.fontSize ?? 26;
     this.texture = new CanvasTexture(this.canvas);
     this.texture.minFilter = LinearFilter;
     const material = new SpriteMaterial({
       map: this.texture,
       transparent: true,
-      depthTest: false,
+      // Labels are information *in* the scene, not HUD chrome. Let a wall,
+      // tent, or foreground prop occlude an inactive label instead of making
+      // every pill float over the only thing the volunteer needs to inspect.
+      depthTest: true,
       depthWrite: false,
     });
     this.sprite = new Sprite(material);
-    this.sprite.scale.set(1.6, 0.4, 1);
-    this.sprite.renderOrder = 999;
+    this.sprite.userData.textLabel = true;
+    this.sprite.scale.set(1.42, 0.32, 1);
+    this.sprite.renderOrder = 3;
   }
 
   set(text: string, color: string): void {
@@ -52,13 +56,13 @@ export class TextLabel {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     // One source for the pill colour, so contrast can be tested against it.
     ctx.fillStyle = `rgba(${LABEL_PILL_RGBA.r},${LABEL_PILL_RGBA.g},${LABEL_PILL_RGBA.b},${LABEL_PILL_RGBA.a})`;
-    roundRect(ctx, 2, 2, this.canvas.width - 4, this.canvas.height - 4, this.canvas.height / 5);
+    roundRect(ctx, 3, 4, this.canvas.width - 6, this.canvas.height - 8, this.canvas.height / 4);
     ctx.fill();
-    ctx.font = `700 ${this.fontSize}px system-ui, 'Noto Sans TC', sans-serif`;
+    ctx.font = `600 ${this.fontSize}px system-ui, 'Noto Sans TC', sans-serif`;
     ctx.fillStyle = color;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(fitLabelText(ctx, text, this.canvas.width - 16), this.canvas.width / 2, this.canvas.height / 2);
+    ctx.fillText(fitLabelText(ctx, text, this.canvas.width - 20), this.canvas.width / 2, this.canvas.height / 2);
     this.texture.needsUpdate = true;
   }
 

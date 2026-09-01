@@ -144,6 +144,15 @@ html, body {
 .topbar__title { font-weight: 700; font-size: 15px; margin-right: 4px; white-space: nowrap; }
 .topbar__spacer { flex: 1 1 auto; min-width: 0; }
 
+/* At 1200–1400 px the project title yields before a status chip becomes a
+   second header row. The full name remains available from 我的專案. */
+.topbar:not(.topbar--compact) .topbar__title {
+  flex: 0 1 150px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /*
  * Compact header contract: exactly one row, six slots, no wrapping and no
  * horizontal scroll. The project name is the only elastic element; everything
@@ -843,26 +852,11 @@ html, body {
   padding: 10px 14px;
   box-shadow: 0 8px 30px var(--shadow-strong);
 }
-.calibration-banner {
-  position: fixed;
-  left: 50%;
-  top: calc(var(--ws-header-h, 0px) + 8px);
-  transform: translateX(-50%);
-  z-index: 55;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border: 1px solid #f59e0b;
-  border-radius: 10px;
-  background: var(--warn-panel-bg);
-  color: var(--warn-panel-text);
-  box-shadow: 0 6px 20px var(--shadow);
-}
-.calibration-banner .chip { min-height: 40px; }
 .status-badge {
+  appearance: none;
+  cursor: pointer;
   flex: 0 0 auto;
-  min-height: 32px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   padding: 4px 9px;
@@ -870,6 +864,14 @@ html, body {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
+}
+
+/* A 1200–1440px laptop has the desktop rails but not room for two full
+   toolbar rows. Keep the canvas as the primary surface; view and AI actions
+   remain in 「更多」 rather than wrapping the header below the title. */
+@media (min-width: 1200px) and (max-width: 1440px) {
+  .topbar [data-group="views"],
+  .topbar [data-group="view2"] { display: none; }
 }
 .status-badge--bad { color: var(--bad-text); border-color: #fb7185; background: var(--bad-bg); }
 .status-badge--warn { color: var(--warn-text); border-color: #f59e0b; background: var(--warn-bg); }

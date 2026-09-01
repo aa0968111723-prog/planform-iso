@@ -255,12 +255,26 @@ function buildPart(part: PropPart, options: readonly InteractionOption[] | undef
       // used to honour it, so the spinner's disc rendered as a plain yellow
       // cylinder while the panel, the §26 readout and the 場刊 all listed six
       // named wedges.
-      mesh = part.facesFromOptions && options?.length
-        ? spinnerMesh(part, options)
-        : new Mesh(
+      if (part.facesFromOptions && options?.length) {
+        mesh = spinnerMesh(part, options);
+      } else if (part.text || part.imageBlobId) {
+        // CylinderGeometry has separate material groups for its side, top and
+        // bottom. Mapping the top cap makes a photo-backed 58 mm chest pin
+        // read as a circular merch item from the normal top/ISO booth view,
+        // instead of stretching the artwork around its rim.
+        const top = paintedMaterial(part.text ?? "", part.color ?? "#f8fafc");
+        applyArtwork(top, part);
+        const base = baseMaterial(part);
+        mesh = new Mesh(
+          new CylinderGeometry(width / 2, width / 2, height, 24),
+          [base, top, base] as never,
+        );
+      } else {
+        mesh = new Mesh(
           new CylinderGeometry(width / 2, width / 2, height, 24),
           baseMaterial(part),
         );
+      }
       break;
     }
     case "sphere": {

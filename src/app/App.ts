@@ -167,6 +167,8 @@ export interface Session {
   measureType: MeasurementType;
   calibrate: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   showLabels: boolean;
+  /** Keep object names independently optional; zones/routes stay legible. */
+  showObjectLabels: boolean;
   workflow: Workflow;
   issues: Issue[];
   /** When set, scene shows agent draft instead of committed project. */
@@ -275,7 +277,11 @@ export class App {
     measure: null,
     measureType: "free-distance",
     calibrate: null,
-    showLabels: false,
+    // A first-time organiser should see the room, primary zones and service
+    // stations without discovering a hidden setting. SceneManager caps and
+    // declutters this set per viewport, so this is not an opt-in label flood.
+    showLabels: true,
+    showObjectLabels: false,
     workflow: "site",
     issues: [],
     agentPreview: null,
@@ -428,6 +434,7 @@ export class App {
       // Partner Mode names places (zones) and flows (routes); per-object name
       // tags on top of that is what turns the plan into label soup.
       showLabels: this.session.showLabels,
+      showObjectLabels: this.session.showObjectLabels,
       focusRouteId: this.session.focusRouteId,
       simplify: this.session.simplify || !!this.session.partner,
       partner: this.partnerView(),
@@ -464,6 +471,7 @@ export class App {
   setView(view: ViewName): void { this.store.mutate((p) => (p.view = view), { history: false }); this.scene.setView(view); }
   setSnap(mode: SnapMode): void { this.session.snap = mode; this.notifyUi(); }
   setShowLabels(v: boolean): void { this.session.showLabels = v; this.render(); }
+  setShowObjectLabels(v: boolean): void { this.session.showObjectLabels = v; this.render(); }
 
   /** The plan currently being edited. Read-only view for the agent host. */
   get plan(): Project { return this.store.getState(); }
@@ -1188,6 +1196,10 @@ export class App {
   private adoptProjectSettings(project: Project): void {
     this.seedSessionFromPlan(project);
     this.setWorkflow("layout");
+    // A newly opened project can carry an intentional camera view (notably the
+    // booth template's ISO first look). The renderer otherwise keeps the
+    // previous/default camera even though `project.view` was persisted as ISO.
+    this.scene.setView(project.view);
     // Two flat slabs in a shallow isometric view read as nothing on a phone —
     // compact devices open the plan top-down. A booth is the exception: its
     // subject is a 2.5 m tent, and from directly above that is a white

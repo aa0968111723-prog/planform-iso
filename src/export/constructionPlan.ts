@@ -765,10 +765,11 @@ function overlapsPlaced(box: LabelBox): boolean {
 
 /**
  * Find a clear spot for a label near (x, y): try the anchor, then step above
- * and below in alternating rings, then give up and take the anchor. Always
- * clamped inside the drawing frame.
+ * and below in alternating rings. If there is no clear spot, omit the label:
+ * the page keeps the zone outline, symbol and legend, while an overprinted
+ * word communicates less than no word at all.
  */
-function placeLabel(x: number, y: number, w: number, h: number, step: number): { x: number; y: number } {
+function placeLabel(x: number, y: number, w: number, h: number, step: number): { x: number; y: number } | null {
   const clampX = (v: number) => Math.min(Math.max(v, labelFrame.minX), Math.max(labelFrame.minX, labelFrame.maxX - w));
   const clampY = (v: number) => Math.min(Math.max(v, labelFrame.minY), Math.max(labelFrame.minY, labelFrame.maxY - h));
   const cx = clampX(x);
@@ -781,9 +782,7 @@ function placeLabel(x: number, y: number, w: number, h: number, step: number): {
       }
     }
   }
-  const cy = clampY(y);
-  labelBoxes.push({ x: cx, y: cy, w, h });
-  return { x: cx, y: cy };
+  return null;
 }
 
 /** Zone tints and dashed outlines. Titles are drawn later — see drawZoneLabels. */
@@ -825,6 +824,7 @@ function drawZoneLabels(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emp
     const insideTop = y + (emphasize ? lineH : lineH - 4) - lineH;
     const anchorY = h >= lineH * 2 ? insideTop : y - lineH - 4;
     const spot = placeLabel(x + 6, anchorY, labelW, lineH, lineH);
+    if (!spot) continue;
     planText(ctx, fitText(ctx, label, labelW), spot.x, spot.y + lineH - 6, activePageSize === "phone" ? 6 : 4);
   }
 }
@@ -874,6 +874,7 @@ function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: b
       routeFont,
       routeFont + 6,
     );
+    if (!routeSpot) continue;
     planText(ctx, routeText, routeSpot.x, routeSpot.y + routeFont - 4, activePageSize === "phone" ? 6 : 4);
   }
 }
@@ -969,7 +970,7 @@ function drawFieldGroup(ctx: CanvasRenderingContext2D, g: Project["groups"][numb
     const pitchText = "一人約 1 格寬 × 1.5 格深";
     const pitchW = ctx.measureText(pitchText).width;
     const pitchSpot = placeLabel(x, y + h + 12, pitchW, 20, 24);
-    planText(ctx, pitchText, pitchSpot.x, pitchSpot.y + 16);
+    if (pitchSpot) planText(ctx, pitchText, pitchSpot.x, pitchSpot.y + 16);
   }
 
   // Two lines (name / spec) so a narrow block never ellipsizes the piece count.
@@ -1080,6 +1081,7 @@ function drawScreen(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): vo
   const labelX = t.X(o.x) - labelW / 2;
   const labelY = t.Y(o.z + f.z * 0.52) - (activePageSize === "phone" ? 34 : 18);
   const spot = placeLabel(labelX, labelY, labelW, activePageSize === "phone" ? 34 : 18, 20);
+  if (!spot) return;
   ctx.fillStyle = "#1e40af";
   planText(ctx, label, spot.x, spot.y + (activePageSize === "phone" ? 28 : 15));
 }
@@ -1100,6 +1102,7 @@ function drawComputer(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform): 
   ctx.font = font(`700 ${size}px`);
   const w = ctx.measureText("電腦").width;
   const spot = placeLabel(t.X(o.x) - w / 2, t.Y(o.z) - size / 2, w, size, size + 4);
+  if (!spot) return;
   ctx.fillStyle = "#0369a1";
   ctx.textAlign = "left";
   planText(ctx, "電腦", spot.x, spot.y + size - 4);

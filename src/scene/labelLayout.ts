@@ -28,6 +28,64 @@ export interface PlacedLabel {
   y: number;
 }
 
+/** A pixel rectangle inside the scene canvas. Kept Three-free for fast tests. */
+export interface ScreenRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * P0 is something the volunteer is actively working on. P1 makes the space
+ * legible. P2 is useful context, but is never worth covering the plan for.
+ */
+export type LabelPriority = 0 | 1 | 2;
+
+export interface ScreenLabelCandidate {
+  id: string;
+  priority: LabelPriority;
+  rect: ScreenRect;
+}
+
+function overlaps(a: ScreenRect, b: ScreenRect): boolean {
+  return a.x < b.x + b.width
+    && a.x + a.width > b.x
+    && a.y < b.y + b.height
+    && a.y + a.height > b.y;
+}
+
+/**
+ * Pick a readable subset of labels after the camera has projected them into
+ * the *actual* canvas. World-space stacking cannot solve an overlap caused by
+ * an isometric camera, a compact viewport, or a panel changing the safe rect.
+ *
+ * The input order is deliberately retained as the final tie-breaker. It makes
+ * an unchanged plan stable across frames: labels do not flicker between two
+ * equally useful candidates while the camera is at rest.
+ */
+export function declutterScreenLabels(
+  candidates: readonly ScreenLabelCandidate[],
+  maxVisible: number,
+): Set<string> {
+  const visible = new Set<string>();
+  const accepted: ScreenLabelCandidate[] = [];
+  const capped = Math.max(1, maxVisible);
+  const ordered = candidates
+    .map((candidate, order) => ({ candidate, order }))
+    .sort((a, b) => a.candidate.priority - b.candidate.priority || a.order - b.order);
+
+  for (const { candidate } of ordered) {
+    // P0 labels (selection, active route, bottleneck) are never sacrificed to
+    // a density cap. They run first, so surrounding context yields to them.
+    if (candidate.priority > 0 && accepted.length >= capped) continue;
+    if (accepted.some((other) => overlaps(other.rect, candidate.rect))) continue;
+    visible.add(candidate.id);
+    accepted.push(candidate);
+  }
+  return visible;
+}
+
 /**
  * The height to draw this label at, given the ones already placed.
  *

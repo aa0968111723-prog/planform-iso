@@ -92,6 +92,19 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   // Always offered: a classroom plan still needs a 招生桌, and burying these
   // behind 「＋ 新增道具」 meant nobody could find a QR 立架.
   if (!opts.categories || opts.zones) {
+    const tabletop = BOOTH_PROP_PRESETS.filter((p) => p.placement === "tabletop");
+    panels.push({
+      label: "桌面佈置",
+      body: el("div", {}, [
+        el("p", { class: "hint", text: "選一個小物後點桌上的確切位置；放下後可選取、拖曳、旋轉或微調。" }),
+        el("div", { class: "cardgrid" }, [
+          card("●", "自訂胸針", "上傳圖案後模擬桌面擺放", pick(() => app.openNewPropStudio("badge"))),
+          selfMakeCard(app, opts),
+        ]),
+        el("div", { class: "subhead", text: "現場小物" }),
+        el("div", { class: "cardgrid" }, tabletop.map((p) => boothPropCard(app, p, opts))),
+      ]),
+    });
     const groups = [
       { label: "文宣", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "文宣") },
       { label: "擺攤小物", items: BOOTH_PROP_PRESETS.filter((p) => p.category === "擺攤小物") },
@@ -101,7 +114,6 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     panels.push({
       label: "攤位道具",
       body: el("div", {}, [
-        el("div", { class: "cardgrid" }, [selfMakeCard(app, opts)]),
         ...(mine.length ? [
           el("div", { class: "subhead", text: "我做的" }),
           el("div", { class: "cardgrid" }, mine),

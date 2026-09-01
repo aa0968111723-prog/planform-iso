@@ -13,12 +13,41 @@ import type { PropDefinition } from "./model";
 import { uid } from "./model";
 import { allPropPresets } from "./propPresets";
 
-export type PropDraftKind = "interactive" | "tabletop";
+export type PropDraftKind = "interactive" | "tabletop" | "badge";
 
 export const PROP_STUDIO_CATEGORIES = ["擺攤小物", "文宣", "互動", "背景"] as const;
 
 /** A 60 cm cube — the seed for a game you have not designed yet. */
 export function blankPropDraft(kind: PropDraftKind = "interactive"): PropDefinition {
+  if (kind === "badge") {
+    // A pin needs a circular *top* face, not a generic rectangular photo
+    // panel. `propVisual` paints the artwork on the cylinder's top cap, so a
+    // photo uploaded in Prop Studio becomes a true on-desk badge mock-up.
+    // Keep it tabletop by default: this is a merch/display item, and it must
+    // inherit a table parent rather than silently land on the classroom floor.
+    return {
+      id: `prop_${uid("p")}`,
+      name: "我的胸針",
+      category: "擺攤小物",
+      placement: "tabletop",
+      dimensions: { width: 0.058, depth: 0.058, height: 0.008 },
+      parts: [{
+        id: "badge-face", shape: "cylinder",
+        size: { width: 0.058, depth: 0.058, height: 0.008 },
+        offset: { x: 0, y: 0, z: 0 },
+        color: "#f8fafc", finish: "plastic-gloss", text: "圖案",
+      }, {
+        id: "badge-rim", shape: "cylinder",
+        size: { width: 0.06, depth: 0.06, height: 0.003 },
+        offset: { x: 0, y: 0, z: 0 },
+        color: "#94a3b8", finish: "brushed-metal",
+      }],
+      anchors: [],
+      version: 1,
+      source: "user",
+      icon: "●",
+    };
+  }
   if (kind === "tabletop") {
     return {
       id: `prop_${uid("p")}`,
