@@ -31,6 +31,7 @@ import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewp
 import { button, el, num, section, selectField, textField } from "./dom";
 import { BRAND } from "../core/brand";
 import { PRIMARY_WORKFLOWS, WORKFLOW_LABELS } from "../core/workflow";
+import type { PickResult } from "../scene/SceneManager";
 
 const VIEWS: { id: ViewName; label: string }[] = [
   { id: "top", label: "俯視" }, { id: "iso", label: "立體" }, { id: "front", label: "正視" },
@@ -69,7 +70,7 @@ export class UI {
   private lastMode: Mode | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
-  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false };
+  private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false, labels: true };
   private agentSheet: QuickAgentSheetHandles;
   private menu: MenuSheetHandles = buildMenuSheet();
   private home: ProjectHomeHandles;
@@ -159,6 +160,7 @@ export class UI {
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.onPickCandidates = (items) => this.openPickCandidates(items);
     this.app.openPropStudioHook = (defId) => {
       const def = this.app.propDefinitionForEdit(defId);
       if (!def) return;
@@ -399,8 +401,10 @@ export class UI {
             active: this.app.store.getState().view === view.id,
             onSelect: () => { this.app.setView(view.id); return true; },
           })),
-          { label: "顯示名稱", active: sess.showLabels, onSelect: () => { this.app.setShowLabels(!sess.showLabels); return true; } },
-          { label: "物件名稱", sub: "區域與動線會保留", active: sess.showObjectLabels, onSelect: () => { this.app.setShowObjectLabels(!sess.showObjectLabels); return true; } },
+          { label: "必要標注", sub: "場地與重要站點", active: this.app.labelDisplayMode === "essential", onSelect: () => { this.app.setLabelDisplayMode("essential"); return true; } },
+          { label: "只顯示選取標注", active: this.app.labelDisplayMode === "selected", onSelect: () => { this.app.setLabelDisplayMode("selected"); return true; } },
+          { label: "完整標注", sub: "所有已啟用的物件標注", active: this.app.labelDisplayMode === "all", onSelect: () => { this.app.setLabelDisplayMode("all"); return true; } },
+          { label: "隱藏所有標注", active: this.app.labelDisplayMode === "none", onSelect: () => { this.app.setLabelDisplayMode("none"); return true; } },
           { label: "置中 / 重新框選", onSelect: () => this.app.recenterView() },
           { label: "簡化顯示", active: sess.simplify, onSelect: () => { this.app.setSimplify(!sess.simplify); return true; } },
           { label: "顯示 / 隱藏格線", onSelect: () => this.app.updateTile({ visible: !this.app.store.getState().tile.visible }) },
@@ -418,6 +422,19 @@ export class UI {
           active: sess.snap === sn.id,
           onSelect: () => { this.app.setSnap(sn.id); return true; },
         })),
+      },
+      {
+        title: "精準編輯",
+        items: [
+          ...[25, 50, 100, 200, 400].map((zoom) => ({ label: `${zoom}%`, active: this.app.zoomPercent === zoom, onSelect: () => { this.app.setZoomPercent(zoom); return true; } })),
+          { label: "自訂縮放…", onSelect: () => { const value = window.prompt("輸入 25–400 的縮放百分比", String(this.app.zoomPercent)); const zoom = Number(value); if (Number.isFinite(zoom)) this.app.setZoomPercent(zoom); return true; } },
+          { label: "物件與圖層", sub: "選取、顯示、鎖定與前後順序", onSelect: () => { this.setSheet("inspector"); return true; } },
+          ...(["top", "group", "recent", "layer"] as const).map((priority) => ({
+            label: ({ top: "重疊時：最上層", group: "重疊時：同群組", recent: "重疊時：最近新增", layer: "重疊時：指定圖層" })[priority],
+            active: sess.selectionPriority === priority,
+            onSelect: () => { this.app.setSelectionPriority(priority); return true; },
+          })),
+        ],
       },
       {
         title: "工具",
@@ -799,6 +816,28 @@ export class UI {
     if (this.compact) this.setSheet("none");
   }
 
+  /** Choose a real mesh when a finger/cursor intersects a stack of tabletop props. */
+  private openPickCandidates(items: PickResult[]): void {
+    const state = this.app.store.getState();
+    const nameFor = (item: PickResult): string => {
+      if (item.type === "object") {
+        const object = state.objects.find((o) => o.id === item.id);
+        if (object) return object.label ?? object.name ?? this.app.getCatalog().resolve(object.assetId, object.kind).name;
+      }
+      if (item.type === "zone") return state.zones.find((z) => z.id === item.id)?.name ?? "區域";
+      if (item.type === "group") return state.groups.find((g) => g.id === item.id)?.name ?? "陣列";
+      return "動線節點";
+    };
+    this.menu.open("選擇重疊物件", [{
+      title: "請選要編輯的項目",
+      items: items.slice(0, 8).map((item, index) => ({
+        label: nameFor(item),
+        sub: index === 0 ? "目前最優先" : "重疊項目",
+        onSelect: () => { this.app.setSelection([item.id]); return true; },
+      })),
+    }]);
+  }
+
   /** The compact header is the one persistent calibration entry point. */
   private openCalibrationSheet(): void {
     this.app.setWorkflow("site");
@@ -1177,6 +1216,7 @@ export class UI {
       el("div", { class: "row wrap" }, [
         button(o.dims ? "✓ 顯示尺寸" : "顯示尺寸", () => { o.dims = !o.dims; this.update(); }, o.dims ? "chip chip--sm chip--primary" : "chip chip--sm"),
         button(o.inventory ? "✓ 顯示物資數量" : "顯示物資數量", () => { o.inventory = !o.inventory; this.update(); }, o.inventory ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button(o.labels ? "✓ 包含標注" : "不含標注", () => { o.labels = !o.labels; this.update(); }, o.labels ? "chip chip--sm chip--primary" : "chip chip--sm"),
       ]),
     ]);
 

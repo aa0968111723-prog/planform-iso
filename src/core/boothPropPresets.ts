@@ -368,6 +368,50 @@ export const BOOTH_PROP_PRESETS: readonly PropDefinition[] = [
       { color: "#cbd5e1", finish: "plastic-matte" }),
   ], "📁"),
 
+  // Activity tables need more than generic market hardware. These small items
+  // are deliberately physical (a lip, a cup rim, a card stack) so organisers
+  // can judge a real tabletop arrangement at high zoom without importing a
+  // heavyweight model for every paper item.
+  tableItem("prop_a4_flyers", "A4 傳單一疊", { width: 0.22, depth: 0.3, height: 0.025 }, [
+    part("paper", "box", { width: 0.21, depth: 0.297, height: 0.018 }, { x: 0, y: 0, z: 0 }, { color: "#f8fafc", finish: "paper", text: "活動資訊" }),
+    part("edge", "box", { width: 0.22, depth: 0.3, height: 0.007 }, { x: 0, y: 0.018, z: 0 }, { color: "#cbd5e1", finish: "paper" }),
+  ], "📄"),
+  tableItem("prop_trifold", "三折頁", { width: 0.3, depth: 0.08, height: 0.21 }, [
+    part("leaflet", "plane", { width: 0.3, depth: 0.004, height: 0.21 }, { x: 0, y: 0, z: 0 }, { color: "#fef3c7", finish: "paper", text: "社團介紹" }),
+    part("base", "box", { width: 0.3, depth: 0.08, height: 0.012 }, { x: 0, y: 0, z: 0 }, { color: "#94a3b8", finish: "plastic-matte" }),
+  ], "📰"),
+  tableItem("prop_tea_pot", "茶壺", { width: 0.18, depth: 0.18, height: 0.15 }, [
+    part("body", "cylinder", { width: 0.14, depth: 0.14, height: 0.1 }, { x: 0, y: 0, z: 0 }, { color: "#8b5e3c", finish: "ceramic" }),
+    part("lid", "cylinder", { width: 0.1, depth: 0.1, height: 0.025 }, { x: 0, y: 0.1, z: 0 }, { color: "#a46d42", finish: "ceramic" }),
+    part("handle", "box", { width: 0.04, depth: 0.08, height: 0.08 }, { x: -0.08, y: 0.025, z: 0 }, { color: "#8b5e3c", finish: "ceramic" }),
+    part("spout", "box", { width: 0.08, depth: 0.05, height: 0.04 }, { x: 0.09, y: 0.045, z: 0 }, { color: "#8b5e3c", finish: "ceramic" }),
+  ], "🍵"),
+  tableItem("prop_tea_cup", "茶杯", { width: 0.07, depth: 0.07, height: 0.055 }, [
+    part("cup", "cylinder", { width: 0.065, depth: 0.065, height: 0.05 }, { x: 0, y: 0, z: 0 }, { color: "#f5f1e8", finish: "ceramic" }),
+  ], "☕"),
+  tableItem("prop_tea_tray", "茶盤", { width: 0.36, depth: 0.22, height: 0.03 }, [
+    part("tray", "box", { width: 0.36, depth: 0.22, height: 0.02 }, { x: 0, y: 0, z: 0 }, { color: "#8a6545", finish: "dark-wood" }),
+    part("inset", "box", { width: 0.31, depth: 0.17, height: 0.01 }, { x: 0, y: 0.02, z: 0 }, { color: "#b89063", finish: "light-wood" }),
+  ], "🫖"),
+  tableItem("prop_zen_card", "禪語卡", { width: 0.1, depth: 0.07, height: 0.004 }, [
+    part("card", "box", { width: 0.1, depth: 0.07, height: 0.004 }, { x: 0, y: 0, z: 0 }, { color: "#fff7ed", finish: "paper", text: "安心" }),
+  ], "🪷"),
+  tableItem("prop_dice_tabletop", "桌上骰子", { width: 0.04, depth: 0.04, height: 0.04 }, [
+    part("dice", "box", { width: 0.04, depth: 0.04, height: 0.04 }, { x: 0, y: 0, z: 0 }, { color: "#f8fafc", finish: "plastic-gloss", text: "•" }),
+  ], "🎲"),
+  tableItem("prop_turtle_card", "龜龜角色牌", { width: 0.16, depth: 0.08, height: 0.18 }, [
+    part("foot", "box", { width: 0.1, depth: 0.08, height: 0.015 }, { x: 0, y: 0, z: 0 }, { color: "#64748b", finish: "plastic-matte" }),
+    part("card", "plane", { width: 0.16, depth: 0.004, height: 0.16 }, { x: 0, y: 0.015, z: 0 }, { color: "#bbf7d0", finish: "paper", text: "龜龜" }),
+  ], "🐢"),
+  tableItem("prop_tablet", "平板", { width: 0.25, depth: 0.18, height: 0.015 }, [
+    part("body", "box", { width: 0.25, depth: 0.18, height: 0.012 }, { x: 0, y: 0, z: 0 }, { color: "#334155", finish: "brushed-metal" }),
+    part("screen", "box", { width: 0.22, depth: 0.15, height: 0.003 }, { x: 0, y: 0.012, z: 0 }, { color: "#bae6fd", finish: "screen-glass", text: "報名" }),
+  ], "▣"),
+  tableItem("prop_speaker", "小音箱", { width: 0.13, depth: 0.09, height: 0.08 }, [
+    part("body", "box", { width: 0.13, depth: 0.09, height: 0.08 }, { x: 0, y: 0, z: 0 }, { color: "#1e293b", finish: "plastic-matte" }),
+    part("cone", "cylinder", { width: 0.055, depth: 0.055, height: 0.01 }, { x: 0, y: 0.035, z: 0 }, { color: "#94a3b8", finish: "brushed-metal" }),
+  ], "🔊"),
+
   tableItem("prop_trash_bin", "垃圾桶", { width: 0.32, depth: 0.32, height: 0.7 }, [
     part("body", "cylinder", { width: 0.3, depth: 0.3, height: 0.62 }, { x: 0, y: 0, z: 0 },
       { color: "#64748b", finish: "plastic-matte" }),
@@ -403,6 +447,16 @@ meta("prop_cash_box", { sizeNote: "市售小型零錢盒", use: "現場收費找
 meta("prop_power_strip", { sizeNote: "市售三孔延長線盤", use: "筆電、收費機電源" });
 meta("prop_table_flag", { sizeNote: "市售小型桌旗座", use: "社團名／活動名" });
 meta("prop_document_tray", { sizeNote: "A4 文件盤，市售常見尺寸", use: "報名表、問卷" });
+meta("prop_a4_flyers", { sizeNote: "A4 210 × 297 mm；單張紙疊的示意厚度", use: "招生傳單" });
+meta("prop_trifold", { sizeNote: "常見三折頁展開 300 × 210 mm", use: "社團介紹" });
+meta("prop_tea_pot", { sizeNote: "以小型茶席茶壺為可調整示意尺寸", use: "茶會桌面" });
+meta("prop_tea_cup", { sizeNote: "以小型茶杯為可調整示意尺寸", use: "茶會桌面" });
+meta("prop_tea_tray", { sizeNote: "以桌上茶盤為可調整示意尺寸", use: "茶會桌面" });
+meta("prop_zen_card", { sizeNote: "以名片尺寸禪語卡為預設", use: "互動／帶走卡片" });
+meta("prop_dice_tabletop", { sizeNote: "以 4 cm 桌上骰子為預設", use: "互動遊戲" });
+meta("prop_turtle_card", { sizeNote: "以 16 cm 桌上角色牌為預設", use: "活動辨識／互動" });
+meta("prop_tablet", { sizeNote: "以 10 吋平板外觀尺寸為預設", use: "報名／展示" });
+meta("prop_speaker", { sizeNote: "以小型藍牙音箱為預設", use: "活動聲音提示" });
 meta("prop_trash_bin", { sizeNote: "市售小型垃圾桶常見尺寸", use: "攤位旁垃圾" });
 
 const BY_ID = new Map(BOOTH_PROP_PRESETS.map((p) => [p.id, p]));

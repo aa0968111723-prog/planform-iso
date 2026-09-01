@@ -50,6 +50,8 @@ export interface PlanOptions {
   inventory: boolean;
   roleFilter: RoleFilter;
   simplify: boolean;
+  /** Include user annotations; geometry is always exported either way. */
+  labels: boolean;
   /** Canvas pixel multiplier (2 = high-res export, 1 = fast inline preview). */
   scale: number;
   /** Optional subtitle override (e.g. 模擬摘要). */
@@ -58,7 +60,7 @@ export interface PlanOptions {
   extraNotes?: string[];
 }
 
-const DEFAULT_OPTIONS: PlanOptions = { preset: "full", page: "a4", orientation: "landscape", dims: true, inventory: true, roleFilter: null, simplify: false, scale: 2 };
+const DEFAULT_OPTIONS: PlanOptions = { preset: "full", page: "a4", orientation: "landscape", dims: true, inventory: true, roleFilter: null, simplify: false, labels: true, scale: 2 };
 
 /** Restrict a plan to what a given partner role needs (partner task map). */
 function applyRoleFilter(project: Project, role: RoleFilter, simplify: boolean): Project {
@@ -350,13 +352,15 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   if (emphasizeRoutes) {
     // Route/partner sheets prioritise numbered stops. Draw zone names first so
     // a long label cannot erase a stop badge (the previous 背包 label hid ④).
-    drawZoneLabels(ctx, project, t, emphasizeZones);
-    drawRoutes(ctx, project, t, showRouteBadges);
+    if (opt.labels) drawZoneLabels(ctx, project, t, emphasizeZones);
+    drawRoutes(ctx, project, t, showRouteBadges, opt.labels);
   } else {
-    withAlpha(ctx, opt.preset === "mats" ? 0.5 : 0.85, () => drawRoutes(ctx, project, t, showRouteBadges));
+    withAlpha(ctx, opt.preset === "mats" ? 0.5 : 0.85, () => drawRoutes(ctx, project, t, showRouteBadges, opt.labels));
     // On non-route sheets labels remain the topmost communication layer.
-    drawZoneLabels(ctx, project, t, emphasizeZones);
+    if (opt.labels) drawZoneLabels(ctx, project, t, emphasizeZones);
   }
+
+  if (opt.labels) drawObjectAnnotations(ctx, project, t);
 
   if (opt.dims) drawDimensions(ctx, project, t);
   const subtitle = opt.titleSuffix
@@ -829,7 +833,7 @@ function drawZoneLabels(ctx: CanvasRenderingContext2D, p: Project, t: Xform, emp
   }
 }
 
-function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: boolean): void {
+function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: boolean, showNames = true): void {
   for (const r of p.routes) {
     // Photo-grounded Golden Scenes may hide editing overlays by default; a
     // dedicated route/partner sheet must still be able to reveal the route.
@@ -863,6 +867,7 @@ function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: b
       }
     }
     ctx.fillStyle = TEXT;
+    if (!showNames) continue;
     const routeFont = activePageSize === "phone" ? 26 : 18;
     ctx.font = font(`600 ${routeFont}px`);
     const routeText = fitText(ctx, r.name, Math.max(180, t.s * 5));
@@ -897,6 +902,24 @@ function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, pre
     const f = facingVec(o.rotationDeg);
     ctx.strokeStyle = NEUTRAL_STROKE;
     ctx.beginPath(); ctx.moveTo(t.X(o.x), t.Y(o.z)); ctx.lineTo(t.X(o.x + f.x * o.depth * 0.5), t.Y(o.z + f.z * o.depth * 0.5)); ctx.stroke();
+  }
+}
+
+/** User-entered annotations only. Catalog names remain an editor aid and do
+ * not suddenly turn a clean field export into a page of default labels. */
+function drawObjectAnnotations(ctx: CanvasRenderingContext2D, project: Project, t: Xform): void {
+  ctx.font = font(activePageSize === "phone" ? "600 22px" : "600 15px");
+  for (const object of project.objects) {
+    if (object.hidden || object.showLabel === false) continue;
+    const text = object.label ?? object.name;
+    if (!text) continue;
+    const pos = object.labelPosition ?? { offsetX: 0, offsetY: 0, offsetZ: 0 };
+    const x = t.X(object.x + pos.offsetX);
+    const y = t.Y(object.z + pos.offsetZ) - 14 - pos.offsetY * t.s;
+    const width = Math.min(Math.max(70, ctx.measureText(text).width + 16), Math.max(110, t.s * 2.2));
+    const spot = placeLabel(x - width / 2, y - 20, width, 22, 26);
+    if (!spot) continue;
+    planText(ctx, fitText(ctx, text, width - 14), spot.x + 7, spot.y + 16, activePageSize === "phone" ? 6 : 4);
   }
 }
 

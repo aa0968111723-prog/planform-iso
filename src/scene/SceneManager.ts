@@ -34,7 +34,7 @@ import { AssetCatalog } from "../core/catalog";
 import { catalogFromProject } from "../core/migrate";
 import { isBoothProject } from "../core/boothCatalog";
 import { calibrationComplete, venueNeedsCalibration } from "../core/model";
-import type { ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
+import type { LabelDisplayMode, ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
 import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
@@ -97,6 +97,9 @@ interface SessionView {
   calibrate: { a: { x: number; z: number } | null; b: { x: number; z: number } | null } | null;
   showLabels: boolean;
   showObjectLabels?: boolean;
+  labelDisplayMode?: LabelDisplayMode;
+  /** The table currently being edited at detail scale, if any. */
+  tabletopHostId?: string | null;
   focusRouteId?: string | null;
   simplify?: boolean;
   simPositions?: { id?: number; x: number; z: number; routeId?: string; state?: string }[];
@@ -294,6 +297,17 @@ export class SceneManager {
 
   setControlsEnabled(enabled: boolean): void {
     this.controls.enabled = enabled;
+  }
+
+  /** Exact editor zoom for tabletop work; percentages map to camera.zoom. */
+  setZoomPercent(percent: number): void {
+    this.camera.zoom = Math.max(0.25, Math.min(4, percent / 100));
+    this.userAdjustedCamera = true;
+    this.applyProjection();
+  }
+
+  zoomPercent(): number {
+    return Math.round((this.camera.zoom || 1) * 100);
   }
 
   private currentView: ViewName = "iso";
@@ -551,7 +565,11 @@ export class SceneManager {
         for (const o of project.objects) {
           if (o.hidden || selected.has(o.id)) continue;
           const label = this.objectNodes.get(o.id)?.label;
-          if (!label || !session.showObjectLabels) continue;
+          const isEssential = this.catalog.resolve(o.assetId, o.kind).category === "service" || LANDMARKS.has(o.kind);
+          if (!label || o.showLabel === false) continue;
+          if (session.labelDisplayMode === "selected") continue;
+          if (session.labelDisplayMode === "essential" && !isEssential) continue;
+          if (session.labelDisplayMode !== "all" && !session.showObjectLabels && !isEssential) continue;
           const entry = this.catalog.resolve(o.assetId, o.kind);
           add(`object:${o.id}`, label, entry.category === "service" || LANDMARKS.has(o.kind) ? 1 : 2);
         }
@@ -861,6 +879,7 @@ export class SceneManager {
   private syncObjects(project: Project, session: SessionView, simplify: boolean): void {
     this.objectGroup.visible = this.layersState.objects;
     const showLabels = session.showLabels;
+    const labelMode = session.labelDisplayMode ?? (session.showObjectLabels ? "all" : "essential");
     const seen = new Set<string>();
     for (const o of project.objects) {
       seen.add(o.id);
@@ -915,19 +934,22 @@ export class SceneManager {
           group.add(proxy);
         }
         this.objectGroup.add(group);
-        const label = LANDMARKS.has(o.kind) || catalogEntry.category === "service" ? new TextLabel() : null;
-        if (label) this.objectGroup.add(label.sprite);
-        entry = { group, label, sig };
+        entry = { group, label: null, sig };
         this.objectNodes.set(o.id, entry);
       }
       entry.group.position.set(o.x, o.elevation, o.z);
       entry.group.rotation.y = o.rotationDeg * D2R;
       const persistentLabel = LANDMARKS.has(o.kind) || catalogEntry.category === "service";
       const selected = session.selection.has(o.id);
-      if (selected && !entry.label) {
+      const wantsLabel = o.showLabel !== false && (
+        labelMode === "all"
+        || selected
+        || (labelMode === "essential" && persistentLabel)
+      );
+      if (wantsLabel && !entry.label) {
         entry.label = new TextLabel();
         this.objectGroup.add(entry.label.sprite);
-      } else if (!selected && !persistentLabel && entry.label) {
+      } else if (!wantsLabel && entry.label) {
         this.objectGroup.remove(entry.label.sprite);
         entry.label.dispose();
         entry.label = null;
@@ -938,10 +960,12 @@ export class SceneManager {
       const roleMuted = !!this.partner && this.partner.emphasis.objects[o.id] === "muted";
       entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind)) && !roleMuted;
       if (entry.label) {
-        entry.label.sprite.visible = showLabels && !o.hidden;
+        entry.label.sprite.visible = showLabels && labelMode !== "none" && !o.hidden;
         if (showLabels) {
-          entry.label.set(catalogEntry.name, selected ? "#e0f2fe" : "#f8fafc");
-          entry.label.sprite.position.set(o.x, o.elevation + o.height + 0.35, o.z);
+          const pos = o.labelPosition ?? { offsetX: 0, offsetY: 0, offsetZ: 0 };
+          const style = o.labelStyle;
+          entry.label.set(o.label ?? o.name ?? catalogEntry.name, selected ? "#e0f2fe" : (style?.color ?? "#f8fafc"), style);
+          entry.label.sprite.position.set(o.x + pos.offsetX, o.elevation + o.height + 0.35 + pos.offsetY, o.z + pos.offsetZ);
         }
       }
     }
@@ -1533,6 +1557,18 @@ export class SceneManager {
       if (!selection.has(g.id)) continue;
       for (const m of groupMembers(g)) this.overlayGroup.add(this.footprintOutline(m.x, m.z, g.itemWidth, g.itemDepth, m.rotationDeg));
     }
+    const tabletopHost = session.tabletopHostId
+      ? project.objects.find((o) => o.id === session.tabletopHostId)
+      : undefined;
+    if (tabletopHost) {
+      // Detail mode needs an unambiguous legal surface, not just the table's
+      // legs. This outline sits on the actual tabletop height and stays visible
+      // while small props are selected or dragged.
+      this.overlayGroup.add(this.footprintOutline(
+        tabletopHost.x, tabletopHost.z, tabletopHost.width, tabletopHost.depth,
+        tabletopHost.rotationDeg, tabletopHost.elevation + tabletopHost.height + 0.018, "#22d3ee",
+      ));
+    }
     // Live measure / calibrate line + endpoints.
     const live = measure && (measure.a || measure.b) ? measure : (calibrate && (calibrate.a || calibrate.b) ? calibrate : null);
     const liveColor = measure && (measure.a || measure.b) ? 0xfacc15 : 0x38bdf8;
@@ -1555,13 +1591,13 @@ export class SceneManager {
     }
   }
 
-  private footprintOutline(cx: number, cz: number, w: number, d: number, rotDeg: number): Object3D {
+  private footprintOutline(cx: number, cz: number, w: number, d: number, rotDeg: number, y = 0.09, color = SELECT): Object3D {
     const edges = new LineSegments(
       new EdgesGeometry(new PlaneGeometry(w + 0.06, d + 0.06)),
-      new LineBasicMaterial({ color: SELECT }),
+      new LineBasicMaterial({ color }),
     );
     edges.rotation.x = -Math.PI / 2;
-    edges.position.set(cx, 0.09, cz);
+    edges.position.set(cx, y, cz);
     edges.rotation.z = rotDeg * D2R;
     return edges;
   }
@@ -1597,29 +1633,44 @@ export class SceneManager {
     return res ? { x: hit.x, z: hit.z } : null;
   }
 
-  pick(clientX: number, clientY: number): PickResult | null {
+  /**
+   * Every hit under a pointer, nearest first. The editor uses this rather than
+   * throwing away lower intersections so a small QR stand behind a display
+   * card remains selectable on a crowded tabletop.
+   */
+  pickAll(clientX: number, clientY: number): PickResult[] {
     this.raycaster.setFromCamera(this.ndc(clientX, clientY), this.camera);
+    const results: PickResult[] = [];
+    const seen = new Set<string>();
+    const add = (hit: PickResult) => {
+      const key = `${hit.type}:${hit.id}:${hit.index ?? ""}`;
+      if (!seen.has(key)) { seen.add(key); results.push(hit); }
+    };
     if (this.layersState.routes) {
       const rn = this.raycaster.intersectObjects(this.routeNodeMeshes, false);
-      if (rn.length) { const u = rn[0].object.userData; return { type: "routeNode", id: u.id, index: u.index }; }
+      for (const h of rn) { const u = h.object.userData; add({ type: "routeNode", id: u.id, index: u.index }); }
     }
     if (this.layersState.objects) {
       const objs: Object3D[] = [];
       for (const e of this.objectNodes.values()) if (e.group.visible) objs.push(e.group);
       const hit = this.raycaster.intersectObjects(objs, true);
-      if (hit.length) { const id = ancestorId(hit[0].object); if (id) return { type: "object", id }; }
+      for (const h of hit) { const id = ancestorId(h.object); if (id) add({ type: "object", id }); }
       const arrays: Object3D[] = [];
       for (const e of this.arrayNodes.values()) if (e.mesh.visible) arrays.push(e.mesh);
       const ah = this.raycaster.intersectObjects(arrays, false);
-      if (ah.length) return { type: "group", id: ah[0].object.userData.id };
+      for (const h of ah) add({ type: "group", id: h.object.userData.id });
     }
     if (this.layersState.zones) {
       const fills: Object3D[] = [];
       for (const e of this.zoneNodes.values()) if (e.group.visible) { const f = e.group.getObjectByName("fill"); if (f) fills.push(f); }
       const hit = this.raycaster.intersectObjects(fills, false);
-      if (hit.length) return { type: "zone", id: hit[0].object.userData.id };
+      for (const h of hit) add({ type: "zone", id: h.object.userData.id });
     }
-    return null;
+    return results;
+  }
+
+  pick(clientX: number, clientY: number): PickResult | null {
+    return this.pickAll(clientX, clientY)[0] ?? null;
   }
 
   /**

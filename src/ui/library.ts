@@ -92,17 +92,14 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
   // Always offered: a classroom plan still needs a 招生桌, and burying these
   // behind 「＋ 新增道具」 meant nobody could find a QR 立架.
   if (!opts.categories || opts.zones) {
-    const tabletop = BOOTH_PROP_PRESETS.filter((p) => p.placement === "tabletop");
     panels.push({
       label: "桌面佈置",
       body: el("div", {}, [
-        el("p", { class: "hint", text: "選一個小物後點桌上的確切位置；放下後可選取、拖曳、旋轉或微調。" }),
+        el("p", { class: "hint", text: "先選一張桌子，再進入桌面佈置；素材都收在「攤位道具」，避免同一個小物重複出現。" }),
         el("div", { class: "cardgrid" }, [
-          card("●", "自訂胸針", "上傳圖案後模擬桌面擺放", pick(() => app.openNewPropStudio("badge"))),
-          selfMakeCard(app, opts),
+          (() => { const badge = card("●", "自訂胸針", "上傳圖案後模擬桌面擺放", pick(() => app.openNewPropStudio("badge"))); badge.dataset.name = "胸針 badge"; return badge; })(),
+          card("⌗", "進入桌面佈置", "選取桌子後放大編排", pick(() => app.enterTabletopLayout())),
         ]),
-        el("div", { class: "subhead", text: "現場小物" }),
-        el("div", { class: "cardgrid" }, tabletop.map((p) => boothPropCard(app, p, opts))),
       ]),
     });
     const groups = [
@@ -114,6 +111,8 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     panels.push({
       label: "攤位道具",
       body: el("div", {}, [
+        el("div", { class: "subhead", text: "新增自訂素材" }),
+        el("div", { class: "cardgrid" }, [selfMakeCard(app, opts)]),
         ...(mine.length ? [
           el("div", { class: "subhead", text: "我做的" }),
           el("div", { class: "cardgrid" }, mine),
@@ -159,7 +158,17 @@ export function buildLibrary(app: App, opts: LibraryOptions = {}): HTMLElement {
     bodies.forEach((b, i) => (b.style.display = i === idx ? "" : "none"));
     tabs.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(i === idx)));
   };
-  root.append(el("div", { class: "subhead", text: "素材庫" }), tabs, ...bodies);
+  const search = el("input", { type: "search", class: "field__input", placeholder: "搜尋茶壺、QR、傳單、骰子…" }) as HTMLInputElement;
+  search.addEventListener("input", () => {
+    const query = search.value.trim().toLowerCase();
+    root.querySelectorAll<HTMLElement>("[data-name]").forEach((node) => {
+      const name = node.dataset.name ?? "";
+      node.style.display = !query || name.includes(query) ? "" : "none";
+    });
+    // A search should not leave the only match behind an inactive tab.
+    if (query) bodies.forEach((body) => { body.style.display = ""; });
+  });
+  root.append(el("div", { class: "subhead", text: "素材庫" }), search, tabs, ...bodies);
   show(0);
   return root;
 }

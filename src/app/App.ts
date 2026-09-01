@@ -19,6 +19,7 @@ import {
   type InteractionStation,
   type InteractionStep,
   type InteractionTemplate,
+  type LabelDisplayMode,
   type PropDefinition,
   type Zone,
   type ZoneType,
@@ -137,7 +138,7 @@ import {
   type VenueCaptureSession,
 } from "../assets/venueCapture";
 import { Store } from "../state/store";
-import { planBounds, SceneManager, type GhostState } from "../scene/SceneManager";
+import { planBounds, SceneManager, type GhostState, type PickResult } from "../scene/SceneManager";
 import { workspaceModeForWidth, type WorkspaceMode } from "../core/viewport";
 import { applyThemeToDocument, loadTheme, otherTheme, saveTheme, type ThemeName } from "../core/theme";
 import { ProjectRepository, type ProjectMeta } from "../state/projectRepository";
@@ -146,6 +147,7 @@ import { createAppAgentHost } from "./agentHost";
 import { LocalPlannerProvider } from "../agent/provider";
 
 export type Mode = "select" | "place" | "route" | "measure" | "calibrate";
+export type SelectionPriority = "top" | "group" | "recent" | "layer";
 /** `sim` is 彩排 (classroom or booth). `check` still lives inside 分享. */
 export type Workflow = "site" | "layout" | "route" | "sim" | "check" | "export";
 
@@ -169,6 +171,9 @@ export interface Session {
   showLabels: boolean;
   /** Keep object names independently optional; zones/routes stay legible. */
   showObjectLabels: boolean;
+  /** A selected table constrains placement/picking to its tabletop children. */
+  tabletopHostId: string | null;
+  selectionPriority: SelectionPriority;
   workflow: Workflow;
   issues: Issue[];
   /** When set, scene shows agent draft instead of committed project. */
@@ -282,6 +287,8 @@ export class App {
     // declutters this set per viewport, so this is not an opt-in label flood.
     showLabels: true,
     showObjectLabels: false,
+    tabletopHostId: null,
+    selectionPriority: "top",
     workflow: "site",
     issues: [],
     agentPreview: null,
@@ -355,6 +362,8 @@ export class App {
   private partnerReturnView: ViewName | null = null;
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
+  /** UI owns the compact sheet/menu used to disambiguate overlapping meshes. */
+  onPickCandidates: ((items: PickResult[]) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, store: Store) {
     this.store = store;
@@ -426,6 +435,7 @@ export class App {
     // The ghost and the library thumbnail resolve visuals without a project in
     // hand, so the registry is refreshed from the one we are about to draw.
     registerPropVisuals(this.state.props);
+    const labelDisplayMode = this.state.labelDisplayMode ?? "essential";
     this.scene.sync(this.viewState, {
       selection: this.session.selection,
       ghost: this.session.ghost,
@@ -433,8 +443,10 @@ export class App {
       calibrate: this.session.calibrate,
       // Partner Mode names places (zones) and flows (routes); per-object name
       // tags on top of that is what turns the plan into label soup.
-      showLabels: this.session.showLabels,
-      showObjectLabels: this.session.showObjectLabels,
+      showLabels: this.session.showLabels && labelDisplayMode !== "none",
+      showObjectLabels: this.session.showObjectLabels || labelDisplayMode === "all",
+      labelDisplayMode,
+      tabletopHostId: this.session.tabletopHostId,
       focusRouteId: this.session.focusRouteId,
       simplify: this.session.simplify || !!this.session.partner,
       partner: this.partnerView(),
@@ -470,14 +482,24 @@ export class App {
 
   setView(view: ViewName): void { this.store.mutate((p) => (p.view = view), { history: false }); this.scene.setView(view); }
   setSnap(mode: SnapMode): void { this.session.snap = mode; this.notifyUi(); }
-  setShowLabels(v: boolean): void { this.session.showLabels = v; this.render(); }
-  setShowObjectLabels(v: boolean): void { this.session.showObjectLabels = v; this.render(); }
+  setShowLabels(v: boolean): void { this.setLabelDisplayMode(v ? "essential" : "none"); }
+  setShowObjectLabels(v: boolean): void { this.setLabelDisplayMode(v ? "all" : "essential"); }
+  setLabelDisplayMode(mode: LabelDisplayMode): void {
+    this.store.mutate((p) => { p.labelDisplayMode = mode; }, { history: false });
+    this.session.showLabels = mode !== "none";
+    this.session.showObjectLabels = mode === "all";
+    this.render();
+  }
+  get labelDisplayMode(): LabelDisplayMode { return this.state.labelDisplayMode ?? "essential"; }
+  setSelectionPriority(priority: SelectionPriority): void { this.session.selectionPriority = priority; this.notifyUi(); }
 
   /** The plan currently being edited. Read-only view for the agent host. */
   get plan(): Project { return this.store.getState(); }
 
   /** Frame the whole plan in the canvas. */
   fitSceneToCanvas(): void { this.scene.fitBounds(planBounds(this.store.getState())); }
+  setZoomPercent(percent: number): void { this.scene.setZoomPercent(percent); this.notifyUi(); }
+  get zoomPercent(): number { return this.scene.zoomPercent(); }
 
   /** Which workspace the user is on, so the agent can answer 「手機還是桌機」. */
   get workspaceMode(): WorkspaceMode { return workspaceModeForWidth(this.scene.canvasWidth()); }
@@ -608,7 +630,11 @@ export class App {
       if (kind === "door") door = { hinge: this.session.ghostHinge, openInward: true, openDeg: 90 };
     } else if (entry.placementType === "tabletop") {
       const table = findParentTable(px, pz, this.state.objects, TABLE_KINDS);
-      if (table) { elevation = table.height; validity = "ok"; }
+      const allowedHost = !this.session.tabletopHostId || table?.id === this.session.tabletopHostId;
+      if (table && allowedHost) {
+        elevation = table.elevation + table.height;
+        validity = this.tabletopContains(table, x, z, dims, rotationDeg) ? "ok" : "bad";
+      }
       else { elevation = entry.defaultElevation ?? 0; validity = "bad"; }
     } else {
       const s = applySnap(px, pz, this.state.tile, this.session.snap);
@@ -647,7 +673,10 @@ export class App {
     const g = this.session.ghost;
     if (!g) return;
     if (g.validity === "bad") {
-      if (entry.placementType === "tabletop") this.toast("點在桌子上才能放下", false);
+      if (entry.placementType === "tabletop") {
+        const table = findParentTable(g.x, g.z, this.state.objects, TABLE_KINDS);
+        this.toast(table ? "這個小物超出桌面邊界，請往內放" : "點在桌子上才能放下", false);
+      }
       else this.toast("點在教室或走廊裡才能放下", false);
       return;
     }
@@ -660,6 +689,8 @@ export class App {
       presetId: this.session.placingPreset ?? undefined,
       assetId: entry.id,
       serviceRole: entry.serviceRole,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     if (entry.placementType === "floor") {
       // A tap near the edge must not leave furniture sticking through a wall
@@ -680,7 +711,7 @@ export class App {
       if (kind === "door") { obj.hinge = this.session.ghostHinge; obj.openInward = true; obj.openDeg = 90; }
     } else if (entry.placementType === "tabletop") {
       const table = findParentTable(g.x, g.z, this.state.objects, TABLE_KINDS);
-      if (table) obj.parentId = table.id;
+      if (table && this.tabletopContains(table, obj.x, obj.z, obj, obj.rotationDeg)) obj.parentId = table.id;
     }
     this.store.mutate((p) => p.objects.push(obj));
     this.bindPropOnPlace(obj);
@@ -1261,6 +1292,85 @@ export class App {
 
   setSelection(ids: string[]): void { this.session.selection = new Set(ids); this.render(); }
 
+  /** Enter a constrained detail workspace for the currently selected table. */
+  enterTabletopLayout(): void {
+    const table = this.getSelectedObject();
+    if (!table || !TABLE_KINDS.has(table.kind)) {
+      this.toast("先選取一張桌子，再進入桌面佈置", false);
+      return;
+    }
+    this.session.tabletopHostId = table.id;
+    this.setView("top");
+    this.scene.fitBounds({
+      minX: table.x - table.width / 2 - 0.25,
+      maxX: table.x + table.width / 2 + 0.25,
+      minZ: table.z - table.depth / 2 - 0.25,
+      maxZ: table.z + table.depth / 2 + 0.25,
+    }, { padding: 0.8, heightMeters: table.elevation + table.height + 0.2 });
+    this.toast("桌面佈置：只會選取這張桌與桌上小物", false);
+    this.render();
+  }
+
+  exitTabletopLayout(): void {
+    if (!this.session.tabletopHostId) return;
+    this.session.tabletopHostId = null;
+    this.fitSceneToCanvas();
+    this.render();
+  }
+
+  get tabletopHost(): SceneObject | null {
+    const id = this.session.tabletopHostId;
+    return id ? this.state.objects.find((o) => o.id === id) ?? null : null;
+  }
+
+  renameSelectedObject(name: string): void {
+    const text = name.trim();
+    if (!text) return;
+    this.updateSelectedObject({ name: text, updatedAt: Date.now() });
+  }
+
+  updateSelectedLabel(patch: Pick<SceneObject, "label" | "showLabel" | "labelPosition" | "labelStyle">): void {
+    this.updateSelectedObject({ ...patch, updatedAt: Date.now() });
+  }
+
+  setObjectLayer(id: string, delta: number): void {
+    this.store.mutate((p) => {
+      const o = p.objects.find((x) => x.id === id);
+      if (o) { o.layer = Math.max(-99, Math.min(99, (o.layer ?? 0) + delta)); o.updatedAt = Date.now(); }
+    });
+  }
+
+  setObjectVisibility(id: string, visible: boolean): void {
+    this.store.mutate((p) => { const o = p.objects.find((x) => x.id === id); if (o) o.hidden = !visible; });
+  }
+
+  setObjectLocked(id: string, locked: boolean): void {
+    this.store.mutate((p) => { const o = p.objects.find((x) => x.id === id); if (o) o.locked = locked; });
+  }
+
+  groupSelectedObjects(): void {
+    const selected = this.state.objects.filter((o) => this.session.selection.has(o.id));
+    if (selected.length < 2) { this.toast("請先選取至少兩個物件", false); return; }
+    const groupId = uid("group");
+    this.store.mutate((p) => {
+      for (const o of p.objects) if (this.session.selection.has(o.id)) { o.groupId = groupId; o.updatedAt = Date.now(); }
+    });
+    this.toast(`已把 ${selected.length} 個物件設成同一群組`, true);
+  }
+
+  ungroupSelectedObjects(): void {
+    const ids = this.session.selection;
+    this.store.mutate((p) => {
+      for (const o of p.objects) if (ids.has(o.id)) { delete o.groupId; o.updatedAt = Date.now(); }
+    });
+  }
+
+  selectObjectGroup(id: string): void {
+    const groupId = this.state.objects.find((o) => o.id === id)?.groupId;
+    if (!groupId) { this.setSelection([id]); return; }
+    this.setSelection(this.state.objects.filter((o) => o.groupId === groupId).map((o) => o.id));
+  }
+
   getSelectedObject(): SceneObject | null {
     if (this.session.selection.size !== 1) return null;
     return this.state.objects.find((o) => this.session.selection.has(o.id)) ?? null;
@@ -1317,7 +1427,37 @@ export class App {
     const newIds: string[] = [];
     const copiedObjects: SceneObject[] = [];
     this.store.mutate((p) => {
-      for (const o of [...p.objects]) if (ids.has(o.id)) { const c = { ...o, id: uid("obj"), x: o.x + 0.4, z: o.z + 0.4, locked: false, parentId: undefined }; p.objects.push(c); newIds.push(c.id); copiedObjects.push(c); }
+      const originals = [...p.objects];
+      const copiedByOriginal = new Map<string, SceneObject>();
+      // Copy selected roots first. A selected table retains a proper parent
+      // relationship for its children instead of leaving its duplicated QR
+      // stands at world coordinates with no tabletop host.
+      const roots = originals.filter((o) => ids.has(o.id));
+      for (const o of roots) {
+        const c: SceneObject = {
+          ...o, id: uid("obj"), x: o.x + 0.4, z: o.z + 0.4, locked: false,
+          parentId: o.parentId && ids.has(o.parentId) ? undefined : o.parentId,
+          createdAt: Date.now(), updatedAt: Date.now(),
+        };
+        copiedByOriginal.set(o.id, c);
+        p.objects.push(c); newIds.push(c.id); copiedObjects.push(c);
+      }
+      for (const table of roots.filter((o) => TABLE_KINDS.has(o.kind))) {
+        const copiedTable = copiedByOriginal.get(table.id)!;
+        for (const child of originals.filter((o) => o.parentId === table.id && !ids.has(o.id))) {
+          const c: SceneObject = {
+            ...child, id: uid("obj"), x: child.x + 0.4, z: child.z + 0.4,
+            parentId: copiedTable.id, locked: false, createdAt: Date.now(), updatedAt: Date.now(),
+          };
+          p.objects.push(c); newIds.push(c.id); copiedObjects.push(c);
+        }
+      }
+      // If both a parent and child were explicitly selected, repair that
+      // child's parent now that both new ids exist.
+      for (const [originalId, copied] of copiedByOriginal) {
+        const original = originals.find((o) => o.id === originalId)!;
+        if (original.parentId && copiedByOriginal.has(original.parentId)) copied.parentId = copiedByOriginal.get(original.parentId)!.id;
+      }
       for (const g of [...p.groups]) if (ids.has(g.id)) { const c = { ...g, id: uid("grp"), anchorX: g.anchorX + 0.4, anchorZ: g.anchorZ + 0.4, locked: false }; p.groups.push(c); newIds.push(c.id); }
       for (const z of [...p.zones]) if (ids.has(z.id)) { const c = { ...z, id: uid("zone"), x: z.x + 0.4, z: z.z + 0.4, locked: false }; p.zones.push(c); newIds.push(c.id); }
     });
@@ -1350,7 +1490,17 @@ export class App {
 
   updateSelectedObject(patch: Partial<SceneObject>): void {
     const ids = this.session.selection;
-    this.store.mutate((p) => { for (const o of p.objects) if (ids.has(o.id)) Object.assign(o, patch); });
+    this.store.mutate((p) => {
+      for (const o of p.objects) if (ids.has(o.id)) {
+        Object.assign(o, patch, { updatedAt: Date.now() });
+        const parent = o.parentId ? p.objects.find((candidate) => candidate.id === o.parentId) : undefined;
+        if (parent && TABLE_KINDS.has(parent.kind) && !o.allowTabletopOverflow) {
+          const bounded = this.clampToTabletop(parent, o.x, o.z, o);
+          o.x = bounded.x;
+          o.z = bounded.z;
+        }
+      }
+    });
   }
 
   applyPresetToSelection(presetId: string): void {
@@ -1467,8 +1617,14 @@ export class App {
     const ids = this.session.selection;
     this.store.mutate((p) => {
       const moved = new Set<string>();
-      for (const o of p.objects) if (ids.has(o.id) && !o.locked) { o.x += dx; o.z += dz; moved.add(o.id); }
-      for (const o of p.objects) if (o.parentId && moved.has(o.parentId) && !ids.has(o.id)) { o.x += dx; o.z += dz; }
+      for (const o of p.objects) if (ids.has(o.id) && !o.locked) {
+        const parent = o.parentId ? p.objects.find((candidate) => candidate.id === o.parentId) : undefined;
+        const next = parent && TABLE_KINDS.has(parent.kind) && !o.allowTabletopOverflow
+          ? this.clampToTabletop(parent, o.x + dx, o.z + dz, o)
+          : { x: o.x + dx, z: o.z + dz };
+        o.x = next.x; o.z = next.z; o.updatedAt = Date.now(); moved.add(o.id);
+      }
+      for (const o of p.objects) if (o.parentId && moved.has(o.parentId) && !ids.has(o.id)) { o.x += dx; o.z += dz; o.updatedAt = Date.now(); }
       for (const z of p.zones) if (ids.has(z.id) && !z.locked) { z.x += dx; z.z += dz; }
       for (const g of p.groups) if (ids.has(g.id) && !g.locked) { g.anchorX += dx; g.anchorZ += dz; }
     });
@@ -2615,6 +2771,35 @@ export class App {
       || this.state.groups.find((g) => g.id === id)?.locked);
   }
 
+  /** Is a tabletop item's complete rotated footprint still on its parent table? */
+  private tabletopContains(table: SceneObject, x: number, z: number, item: Pick<SceneObject, "width" | "depth">, itemRotation: number): boolean {
+    const angle = (-table.rotationDeg * Math.PI) / 180;
+    const dx = x - table.x, dz = z - table.z;
+    const localX = dx * Math.cos(angle) - dz * Math.sin(angle);
+    const localZ = dx * Math.sin(angle) + dz * Math.cos(angle);
+    const relative = ((itemRotation - table.rotationDeg) * Math.PI) / 180;
+    const halfX = (Math.abs(Math.cos(relative)) * item.width + Math.abs(Math.sin(relative)) * item.depth) / 2;
+    const halfZ = (Math.abs(Math.sin(relative)) * item.width + Math.abs(Math.cos(relative)) * item.depth) / 2;
+    return Math.abs(localX) <= table.width / 2 - halfX + 1e-6
+      && Math.abs(localZ) <= table.depth / 2 - halfZ + 1e-6;
+  }
+
+  /** Clamp an existing tabletop item back onto the legal interior of its table. */
+  private clampToTabletop(table: SceneObject, x: number, z: number, item: Pick<SceneObject, "width" | "depth" | "rotationDeg">): { x: number; z: number } {
+    const angle = (-table.rotationDeg * Math.PI) / 180;
+    const dx = x - table.x, dz = z - table.z;
+    const relative = ((item.rotationDeg - table.rotationDeg) * Math.PI) / 180;
+    const halfX = (Math.abs(Math.cos(relative)) * item.width + Math.abs(Math.sin(relative)) * item.depth) / 2;
+    const halfZ = (Math.abs(Math.sin(relative)) * item.width + Math.abs(Math.cos(relative)) * item.depth) / 2;
+    const lx = Math.max(-table.width / 2 + halfX, Math.min(table.width / 2 - halfX, dx * Math.cos(angle) - dz * Math.sin(angle)));
+    const lz = Math.max(-table.depth / 2 + halfZ, Math.min(table.depth / 2 - halfZ, dx * Math.sin(angle) + dz * Math.cos(angle)));
+    const forward = (table.rotationDeg * Math.PI) / 180;
+    return {
+      x: table.x + lx * Math.cos(forward) - lz * Math.sin(forward),
+      z: table.z + lx * Math.sin(forward) + lz * Math.cos(forward),
+    };
+  }
+
   // --- pointer interaction ----------------------------------------------
 
   private bindPointer(canvas: HTMLCanvasElement): void {
@@ -2695,7 +2880,8 @@ export class App {
       return;
     }
 
-    const pick = this.scene.pick(e.clientX, e.clientY);
+    const picks = this.pickCandidates(e.clientX, e.clientY);
+    const pick = picks[0] ?? null;
 
     if (this.session.mode === "route" && this.session.activeRouteId) {
       if (pick?.type === "routeNode" && pick.id === this.session.activeRouteId) {
@@ -2711,8 +2897,19 @@ export class App {
     }
 
     if (pick) {
+      // A tabletop can contain a QR stand, name card and pin at nearly the
+      // same screen coordinate. Do not silently choose whichever mesh Three
+      // happened to report first: offer a real choice before starting a drag.
+      if (!e.shiftKey && picks.length > 1 && this.onPickCandidates) {
+        this.onPickCandidates(picks);
+        return;
+      }
       if (!e.shiftKey && !this.session.selection.has(pick.id)) this.session.selection = new Set();
       this.session.selection.add(pick.id);
+      if (pick.type === "object" && this.session.selectionPriority === "group") {
+        const groupId = this.state.objects.find((o) => o.id === pick.id)?.groupId;
+        if (groupId) this.session.selection = new Set(this.state.objects.filter((o) => o.groupId === groupId).map((o) => o.id));
+      }
       this.render();
       if (!this.isLocked(pick.id)) { this.beginDrag(e, { kind: "move" }); this.scene.setControlsEnabled(false); }
       return;
@@ -2726,6 +2923,56 @@ export class App {
     } else if (this.session.mode === "select" && this.session.selection.size > 0) {
       this.tapClearStart = { x: e.clientX, y: e.clientY };
     }
+  }
+
+  private pickCandidates(clientX: number, clientY: number): PickResult[] {
+    const hostId = this.session.tabletopHostId;
+    const host = hostId ? this.state.objects.find((o) => o.id === hostId) : null;
+    let picks = this.scene.pickAll(clientX, clientY);
+    if (host) {
+      picks = picks.filter((pick) => pick.type !== "object" || pick.id === host.id
+        || this.state.objects.some((o) => o.id === pick.id && o.parentId === host.id));
+    }
+    const primary = [...this.session.selection][0];
+    const groupId = this.state.objects.find((o) => o.id === primary)?.groupId;
+    const rank = (pick: PickResult): [number, number, number] => {
+      const object = pick.type === "object" ? this.state.objects.find((o) => o.id === pick.id) : undefined;
+      if (!object) return [3, 0, 0];
+      switch (this.session.selectionPriority) {
+        case "group": return [object.groupId && object.groupId === groupId ? 0 : 1, -(object.layer ?? 0), -(object.createdAt ?? 0)];
+        case "recent": return [0, -(object.createdAt ?? 0), -(object.layer ?? 0)];
+        case "layer": return [0, -(object.layer ?? 0), -(object.createdAt ?? 0)];
+        case "top": default: return [0, 0, 0];
+      }
+    };
+    return picks.sort((a, b) => {
+      const ar = rank(a), br = rank(b);
+      return ar[0] - br[0] || ar[1] - br[1] || ar[2] - br[2];
+    });
+    window.addEventListener("keydown", (e) => this.onKeyDown(e));
+  }
+
+  private onKeyDown(e: KeyboardEvent): void {
+    const target = e.target as HTMLElement | null;
+    if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+    if (e.key === "Escape") {
+      if (this.session.tabletopHostId) this.exitTabletopLayout();
+      else this.cancelPlacement();
+      return;
+    }
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (this.session.selection.size) { e.preventDefault(); this.deleteSelection(); }
+      return;
+    }
+    const delta = e.shiftKey ? 0.1 : 0.01;
+    const move: Record<string, [number, number]> = {
+      ArrowLeft: [-delta, 0], ArrowRight: [delta, 0], ArrowUp: [0, -delta], ArrowDown: [0, delta],
+    };
+    const dir = move[e.key];
+    if (!dir || this.session.selection.size === 0) return;
+    e.preventDefault();
+    if (e.altKey && !e.repeat) this.duplicateSelection();
+    this.nudgeSelection(dir[0], dir[1]);
   }
 
   private beginDrag(e: PointerEvent, opts: { kind: DragState["kind"]; routeId?: string; routeIndex?: number }): void {
@@ -2784,11 +3031,22 @@ export class App {
       this.store.transient((p) => {
         for (const o of p.objects) {
           const orig = drag.orig.get(o.id);
-          if (orig && !o.locked) { o.x = orig.x + sdx; o.z = orig.z + sdz; movedObjectIds.add(o.id); }
+          if (orig && !o.locked) {
+            const nextX = orig.x + sdx;
+            const nextZ = orig.z + sdz;
+            const parent = o.parentId ? p.objects.find((candidate) => candidate.id === o.parentId) : undefined;
+            const clamped = parent && TABLE_KINDS.has(parent.kind) && !o.allowTabletopOverflow
+              ? this.clampToTabletop(parent, nextX, nextZ, o)
+              : { x: nextX, z: nextZ };
+            o.x = clamped.x;
+            o.z = clamped.z;
+            o.updatedAt = Date.now();
+            movedObjectIds.add(o.id);
+          }
         }
         // Tabletop children follow their parent.
         for (const o of p.objects) {
-          if (o.parentId && movedObjectIds.has(o.parentId) && !drag.orig.has(o.id)) { o.x += sdx; o.z += sdz; }
+          if (o.parentId && movedObjectIds.has(o.parentId) && !drag.orig.has(o.id)) { o.x += sdx; o.z += sdz; o.updatedAt = Date.now(); }
         }
         for (const z of p.zones) { const orig = drag.orig.get(z.id); if (orig && !z.locked) { z.x = orig.x + sdx; z.z = orig.z + sdz; } }
         for (const g of p.groups) { const orig = drag.orig.get(g.id); if (orig && !g.locked) { const patch = setGroupCenter(g, orig.x + sdx, orig.z + sdz); g.anchorX = patch.anchorX; g.anchorZ = patch.anchorZ; } }

@@ -66,6 +66,21 @@ export type ObjectKind =
 export type Surface = "floor" | "wall" | "tabletop";
 export type WallEdge = "n" | "s" | "e" | "w";
 export type HingeSide = "left" | "right";
+/** Persisted presentation mode; it never changes or deletes the object itself. */
+export type LabelDisplayMode = "essential" | "selected" | "all" | "none";
+
+/** A label is presentation data, separate from an object's internal id/name. */
+export interface ObjectLabelPosition {
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+}
+
+export interface ObjectLabelStyle {
+  fontSize?: number;
+  color?: string;
+  background?: string;
+}
 
 export interface WallAnchor {
   areaId: "classroom" | "corridor";
@@ -103,6 +118,29 @@ export interface SceneObject {
   /** Catalog entry id (builtin:kind or custom:*). */
   assetId?: string;
   serviceRole?: ServiceRole;
+
+  // Precision-layout additions. They are optional on the type so a project
+  // produced by an older build remains source-compatible; migrateObject gives
+  // every loaded object a concrete, safe value.
+  /** Internal/working name — distinct from the visible annotation. */
+  name?: string;
+  /** User-facing annotation text. Falls back to the catalog name when absent. */
+  label?: string;
+  showLabel?: boolean;
+  labelPosition?: ObjectLabelPosition;
+  labelStyle?: ObjectLabelStyle;
+  /** Higher values win ties in overlap picking and the object panel ordering. */
+  layer?: number;
+  /** Non-destructive grouping for moving/selecting related objects together. */
+  groupId?: string;
+  opacity?: number;
+  collisionEnabled?: boolean;
+  snapEnabled?: boolean;
+  /** Keep tabletop items inside their host by default; opt out for banners etc. */
+  allowTabletopOverflow?: boolean;
+  customProperties?: Record<string, string>;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export type NumberOrder = "row" | "col";
@@ -806,6 +844,8 @@ export interface Project {
   validationSettings: ValidationSettings;
   view: ViewName;
   layers: LayerVisibility;
+  /** Persisted label visibility policy. Individual `showLabel` values win. */
+  labelDisplayMode?: LabelDisplayMode;
   /** v5: user/custom catalog entries (binary blobs referenced via blobIds). */
   catalogExtras?: ProjectCatalogExtra[];
   /** v6: event-flow simulation scenarios (DES). */
@@ -875,6 +915,7 @@ export function createDefaultProject(): Project {
     validationSettings: { ...DEFAULT_VALIDATION_SETTINGS },
     view: "top",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },
+    labelDisplayMode: "essential",
     catalogExtras: [],
     scenarios: [],
     activeScenarioId: null,
