@@ -10,6 +10,7 @@ describe("precision tabletop project data", () => {
     expect(object.showLabel).toBe(true);
     expect(object.labelPosition).toEqual({ offsetX: 0, offsetY: 0, offsetZ: 0 });
     expect(object.layer).toBe(0);
+    expect(object.scale).toBe(1);
     expect(object.collisionEnabled).toBe(true);
     expect(object.snapEnabled).toBe(true);
     expect(object.allowTabletopOverflow).toBe(false);
@@ -27,7 +28,7 @@ describe("precision tabletop project data", () => {
         parentId: "table-a", name: "胸針樣品", label: "秋季茶會胸針",
         showLabel: false, labelPosition: { offsetX: 0.12, offsetY: 0.03, offsetZ: -0.08 },
         labelStyle: { fontSize: 18, color: "#112233", background: "#ffffff" },
-        layer: 3, collisionEnabled: false, snapEnabled: true, allowTabletopOverflow: true,
+        layer: 3, scale: 1.5, collisionEnabled: false, snapEnabled: true, allowTabletopOverflow: true,
       }],
     } as never);
     const reloaded = migrateProject(JSON.parse(JSON.stringify(project)));
@@ -39,6 +40,7 @@ describe("precision tabletop project data", () => {
     expect(pin.showLabel).toBe(false);
     expect(pin.labelPosition).toEqual({ offsetX: 0.12, offsetY: 0.03, offsetZ: -0.08 });
     expect(pin.layer).toBe(3);
+    expect(pin.scale).toBe(1.5);
     expect(pin.allowTabletopOverflow).toBe(true);
     expect(pin.hidden).toBe(false);
   });

@@ -143,6 +143,7 @@ export function migrateObject(input: Partial<SceneObject> & { kind: ObjectKind }
     },
     layer: Number.isFinite(input.layer) ? Math.round(Number(input.layer)) : 0,
     groupId: typeof input.groupId === "string" && input.groupId ? input.groupId : undefined,
+    scale: Number.isFinite(input.scale) ? Math.max(0.1, Math.min(10, Number(input.scale))) : 1,
     opacity: Number.isFinite(input.opacity) ? Math.max(0, Math.min(1, Number(input.opacity))) : 1,
     collisionEnabled: input.collisionEnabled !== false,
     snapEnabled: input.snapEnabled !== false,
