@@ -407,7 +407,7 @@ export class UI {
             active: this.app.store.getState().view === view.id,
             onSelect: () => { this.app.setView(view.id); return true; },
           })),
-          { label: "必要標注", sub: "場地與重要站點", active: this.app.labelDisplayMode === "essential", onSelect: () => { this.app.setLabelDisplayMode("essential"); return true; } },
+          { label: "顯示名稱", sub: "必要標注：場地與重要站點", active: this.app.labelDisplayMode === "essential", onSelect: () => { this.app.setLabelDisplayMode("essential"); return true; } },
           { label: "只顯示選取標注", active: this.app.labelDisplayMode === "selected", onSelect: () => { this.app.setLabelDisplayMode("selected"); return true; } },
           { label: "完整標注", sub: "所有已啟用的物件標注", active: this.app.labelDisplayMode === "all", onSelect: () => { this.app.setLabelDisplayMode("all"); return true; } },
           { label: "隱藏所有標注", active: this.app.labelDisplayMode === "none", onSelect: () => { this.app.setLabelDisplayMode("none"); return true; } },
