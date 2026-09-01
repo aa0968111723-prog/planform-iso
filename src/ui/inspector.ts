@@ -234,6 +234,7 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
     root.append(el("div", { class: "grid2" }, [
       num("寬 (cm)", info.sizeCm.w, 1, (v) => app.updateSelectedObject({ width: v / 100 }), 5),
       num("深 (cm)", info.sizeCm.d, 1, (v) => app.updateSelectedObject({ depth: v / 100 }), 5),
+      num("整體縮放 (%)", Math.round((obj.scale ?? 1) * 100), 1, (v) => app.setSelectedScale(v / 100), 10),
       num("旋轉 (°)", obj.rotationDeg, 5, (v) => app.updateSelectedObject({ rotationDeg: v })),
       num("離地 (cm)", Math.round(metersToCm(obj.elevation)), 1, (v) => app.updateSelectedObject({ elevation: v / 100 }), 0),
     ]));

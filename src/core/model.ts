@@ -133,6 +133,8 @@ export interface SceneObject {
   layer?: number;
   /** Non-destructive grouping for moving/selecting related objects together. */
   groupId?: string;
+  /** Relative overall scale; dimensions remain the renderer's canonical metres. */
+  scale?: number;
   opacity?: number;
   collisionEnabled?: boolean;
   snapEnabled?: boolean;

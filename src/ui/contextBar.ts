@@ -65,15 +65,17 @@ export function renderContextBar(host: HTMLElement, app: App, opts: ContextBarOp
     }, "chip chip--sm chip--primary")]
     : [];
   host.append(
-    el("span", { class: "ctxbar__info" }, [
-      el("span", { class: "ctxbar__name", text: model.name }),
-      el("span", { class: "ctxbar__size", text: model.size }),
-    ]),
-    el("span", { class: "ctxbar__actions" }, [
-      button("旋轉", () => app.rotateSelection(15), "chip chip--sm"),
-      button("複製", () => app.duplicateSelection(), "chip chip--sm"),
-      ...tabletopAction,
-      button("屬性", () => opts.onOpenProperties(), "chip chip--sm chip--primary"),
-    ]),
+      el("span", { class: "ctxbar__info" }, [
+        el("span", { class: "ctxbar__name", text: model.name }),
+        el("span", { class: "ctxbar__size", text: model.size }),
+      ]),
+      // Keep the established three repeat actions stable; tabletop is a
+      // contextual mode switch, not a fourth generic edit action.
+      ...(tabletopAction.length ? [el("span", { class: "ctxbar__tabletop" }, tabletopAction)] : []),
+      el("span", { class: "ctxbar__actions" }, [
+        button("旋轉", () => app.rotateSelection(15), "chip chip--sm"),
+        button("複製", () => app.duplicateSelection(), "chip chip--sm"),
+        button("屬性", () => opts.onOpenProperties(), "chip chip--sm chip--primary"),
+      ]),
   );
 }

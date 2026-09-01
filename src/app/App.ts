@@ -1517,6 +1517,33 @@ export class App {
     });
   }
 
+  /**
+   * Scale from the current physical dimensions, rather than leaving an unused
+   * scene-scale value beside width/depth/height. This keeps exports, collision
+   * and the 3D mesh in agreement.
+   */
+  setSelectedScale(nextScale: number): void {
+    const requested = Math.max(0.1, Math.min(10, nextScale));
+    const ids = this.session.selection;
+    this.store.mutate((p) => {
+      for (const o of p.objects) if (ids.has(o.id) && !o.locked) {
+        const previous = o.scale ?? 1;
+        const factor = requested / previous;
+        o.width *= factor;
+        o.depth *= factor;
+        o.height *= factor;
+        o.scale = requested;
+        o.updatedAt = Date.now();
+        const parent = o.parentId ? p.objects.find((candidate) => candidate.id === o.parentId) : undefined;
+        if (parent && TABLE_KINDS.has(parent.kind) && !o.allowTabletopOverflow) {
+          const bounded = this.clampToTabletop(parent, o.x, o.z, o);
+          o.x = bounded.x;
+          o.z = bounded.z;
+        }
+      }
+    });
+  }
+
   applyPresetToSelection(presetId: string): void {
     const obj = this.getSelectedObject();
     if (!obj) return;
