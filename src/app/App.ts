@@ -275,7 +275,10 @@ export class App {
     measure: null,
     measureType: "free-distance",
     calibrate: null,
-    showLabels: false,
+    // A first-time organiser should see the room, primary zones and service
+    // stations without discovering a hidden setting. SceneManager caps and
+    // declutters this set per viewport, so this is not an opt-in label flood.
+    showLabels: true,
     workflow: "site",
     issues: [],
     agentPreview: null,
@@ -1188,6 +1191,10 @@ export class App {
   private adoptProjectSettings(project: Project): void {
     this.seedSessionFromPlan(project);
     this.setWorkflow("layout");
+    // A newly opened project can carry an intentional camera view (notably the
+    // booth template's ISO first look). The renderer otherwise keeps the
+    // previous/default camera even though `project.view` was persisted as ISO.
+    this.scene.setView(project.view);
     // Two flat slabs in a shallow isometric view read as nothing on a phone —
     // compact devices open the plan top-down. A booth is the exception: its
     // subject is a 2.5 m tent, and from directly above that is a white

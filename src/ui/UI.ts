@@ -60,8 +60,7 @@ export class UI {
   private measurebar = el("div", { class: "measurebar", style: "display:none" });
   private box = el("div", { class: "boxsel", style: "display:none" });
   private toast = el("div", { class: "toast", style: "display:none" });
-  private calibrationBanner = el("div", { class: "calibration-banner", style: "display:none" });
-  private statusBadge = el("span", { class: "status-badge", role: "status" });
+  private statusBadge = button("", () => this.openCalibrationSheet(), "status-badge");
   private partner: PartnerModeHandles;
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
@@ -87,21 +86,13 @@ export class UI {
   private builtHeaderMode: WorkspaceMode | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
-    this.calibrationBanner.append(
-      el("span", { text: "尺寸待現場校正" }),
-      button("去校正", () => {
-        this.app.setWorkflow("site");
-        this.app.startCalibration();
-        if (this.compact) this.setSheet("workflow");
-        this.update();
-      }, "chip chip--sm chip--primary"),
-    );
+    this.statusBadge.setAttribute("aria-label", "開啟現場校正");
     this.partner = buildPartnerMode(app, {
       onExit: () => this.app.exitPartnerMode(),
       onLayoutChange: () => this.viewport.schedule(),
     });
     root.append(
-      this.topbar, this.calibrationBanner, this.left, this.right, this.nav, this.placebar, this.measurebar,
+      this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
       this.box, this.toast, this.ctxbar, this.menu.root,
       this.partner.top, this.partner.dock, this.partner.sheet,
     );
@@ -403,6 +394,11 @@ export class UI {
       {
         title: "畫布",
         items: [
+          ...VIEWS.map((view) => ({
+            label: view.label,
+            active: this.app.store.getState().view === view.id,
+            onSelect: () => { this.app.setView(view.id); return true; },
+          })),
           { label: "顯示名稱", active: sess.showLabels, onSelect: () => { this.app.setShowLabels(!sess.showLabels); return true; } },
           { label: "置中 / 重新框選", onSelect: () => this.app.recenterView() },
           { label: "簡化顯示", active: sess.simplify, onSelect: () => { this.app.setSimplify(!sess.simplify); return true; } },
@@ -427,6 +423,7 @@ export class UI {
         items: [
           { label: "現場量測", onSelect: () => this.app.startMeasure(sess.measureType) },
           { label: "現場校正", onSelect: () => { this.app.setWorkflow("site"); this.app.startCalibration(); this.setSheet("workflow"); } },
+          { label: "✦ AI 建議", sub: "先預覽，再決定要不要套用", onSelect: () => { this.agentSheet.open(); return true; } },
           { label: "👥 夥伴模式", sub: "給夥伴看的乾淨視圖", onSelect: () => this.app.enterPartnerMode() },
         ],
       },
@@ -642,11 +639,6 @@ export class UI {
 
   private venuePresetSection(): HTMLElement {
     const body: HTMLElement[] = [];
-    const pending = calibrationPendingLabels(this.app.store.getState());
-    if (pending.length) {
-      body.push(el("div", { class: "readout readout--warn", text: `⚠ 待校正：${pending.join("、")}` }),
-        button("現場校正", () => { this.app.startCalibration(); }, "btn btn--primary"));
-    }
     const apply = (id: string) => {
       if (window.confirm("套用場地模板會改變教室尺寸與地磚（物件會保留、可復原）。繼續？")) {
         this.app.applyVenuePresetById(id);
@@ -804,6 +796,18 @@ export class UI {
   private startCalibrationFromSheet(): void {
     this.app.startCalibration();
     if (this.compact) this.setSheet("none");
+  }
+
+  /** The compact header is the one persistent calibration entry point. */
+  private openCalibrationSheet(): void {
+    this.app.setWorkflow("site");
+    if (this.compact) this.setSheet("workflow");
+    this.update();
+    requestAnimationFrame(() => {
+      const section = [...this.left.querySelectorAll<HTMLElement>(".section")]
+        .find((node) => node.querySelector(".section__title")?.textContent?.trim() === "現場校正");
+      section?.scrollIntoView({ block: "nearest" });
+    });
   }
 
   private applyCalib(action: "record" | "tile" | "door" | "classroom-length", input: HTMLInputElement): void {
@@ -1283,22 +1287,6 @@ export class UI {
     this.statusBadge.textContent = counts.error
       ? "有問題待處理"
       : counts.warning ? "有提醒" : uncalibrated ? "尺寸待校正" : "檢查通過";
-    const pendingCalibration = uncalibrated;
-    this.calibrationBanner.style.display = pendingCalibration ? "flex" : "none";
-    if (pendingCalibration) {
-      const labels = calibrationPendingLabels(s);
-      const span = this.calibrationBanner.querySelector("span")!;
-      span.innerHTML = "";
-      // Wrap between terms only — never inside 「校正」 or 「門寬」.
-      span.append(el("span", { text: "尺寸待現場校正", style: "white-space:nowrap" }));
-      if (labels.length) {
-        span.append(el("span", { text: "：" }));
-        labels.forEach((label, i) => span.append(
-          el("span", { text: label + (i < labels.length - 1 ? "、" : ""), style: "white-space:nowrap" }),
-        ));
-      }
-    }
-
     if (this.compact) {
       const title = this.topbar.querySelector(".topbar__title--compact");
       if (title) title.textContent = s.name || BRAND.name;

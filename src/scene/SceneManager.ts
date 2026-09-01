@@ -40,11 +40,16 @@ import { doorSweep } from "../core/placement";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
 import { SimCrowd } from "./crowd";
-import { DEFAULT_THEME, EXPORT_PALETTE, MAT_COLORS, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
+import { DEFAULT_THEME, EXPORT_PALETTE, MAT_COLORS, MAT_SURFACE_VARIATION, scenePalette, type ScenePalette, type ThemeName } from "../core/theme";
 import { TextLabel } from "./label";
 import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
-import { stackedLabelY, type PlacedLabel } from "./labelLayout";
+import {
+  declutterScreenLabels,
+  type LabelPriority,
+  type ScreenLabelCandidate,
+  type ScreenRect,
+} from "./labelLayout";
 import {
   buildPropGroupCached,
   clearPartResult,
@@ -209,6 +214,8 @@ export class SceneManager {
   private lastGhostSig = "";
 
   private catalog: AssetCatalog = new AssetCatalog();
+  /** Roof fading is visual-only; collision and validation stay unchanged. */
+  private currentProjectIsBooth = false;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -297,8 +304,19 @@ export class SceneManager {
    */
   private applyRoofVisibility(): void {
     const hide = this.currentView === "top";
+    const fade = this.currentProjectIsBooth && this.currentView === "iso";
     this.objectGroup.traverse((m) => {
-      if (m instanceof Mesh && m.userData.roof) m.visible = !hide;
+      if (!(m instanceof Mesh) || !m.userData.roof) return;
+      m.visible = !hide;
+      const materials = Array.isArray(m.material) ? m.material : [m.material];
+      for (const material of materials) {
+        if (!(material instanceof MeshStandardMaterial)) continue;
+        if (m.userData.roofBaseOpacity === undefined) m.userData.roofBaseOpacity = material.opacity;
+        material.transparent = fade;
+        material.opacity = fade ? Math.min(0.36, m.userData.roofBaseOpacity as number) : m.userData.roofBaseOpacity as number;
+        material.depthWrite = !fade;
+        material.needsUpdate = true;
+      }
     });
   }
 
@@ -433,23 +451,177 @@ export class SceneManager {
   sync(project: Project, session: SessionView): void {
     this.catalog = catalogFromProject(project);
     this.layersState = project.layers;
+    this.currentProjectIsBooth = isBoothProject(project);
     const simplify = session.simplify ?? false;
     const partner = session.partner ?? null;
     this.partner = partner;
     this.syncAreasAndTiles(project, simplify);
-    this.syncObjects(project, session.showLabels, simplify);
+    this.syncObjects(project, session, simplify);
     this.syncPropPlayback(project, session.propPlayback ?? null);
     this.syncArrays(project);
-    this.syncZones(project);
-    this.syncRoutes(project, session.focusRouteId ?? null, session.hideRouteLabels ?? false);
+    this.syncZones(project, session.selection);
+    this.syncRoutes(project, session.focusRouteId ?? null, session.hideRouteLabels ?? false, session.showLabels);
     this.syncGhost(session.ghost);
     this.syncMeasurements(project, simplify);
     this.syncOverlay(project, session);
     this.syncPartner(partner);
+    this.applyLabelDeclutter(project, session);
   }
 
   /** Current partner presentation, or null while the editor is active. */
   private partner: PartnerPresentation | null = null;
+
+  /**
+   * Scene labels are a bounded annotation layer, not a second UI rendered over
+   * the scene. Candidates are collected after every source has had a chance to
+   * update, then projected to the real canvas and culled in screen space.
+   */
+  private applyLabelDeclutter(project: Project, session: SessionView): void {
+    type Candidate = { id: string; label: TextLabel | Sprite; priority: LabelPriority };
+    const candidates: Candidate[] = [];
+    const add = (id: string, label: TextLabel | Sprite, priority: LabelPriority) => {
+      const sprite = label instanceof TextLabel ? label.sprite : label;
+      if (sprite.parent) candidates.push({ id, label, priority });
+    };
+    const selected = session.selection;
+    const rehearsing = !!(session.simPositions?.length || session.simStations?.length);
+
+    // Start from a closed annotation layer. Only the candidates below earn a
+    // place back on the scene; this makes the density budget comprehensive.
+    this.scene.traverse((node) => {
+      if (node instanceof Sprite && node.userData.textLabel) node.visible = false;
+    });
+
+    // "顯示名稱" is a real visibility switch, including labels baked into the
+    // venue and mat overlays. The selected outline still tells a user what is
+    // selected while this quiet mode is on.
+    if (!session.showLabels) {
+      for (const root of [this.floorGroup, this.arrayGroupRoot]) {
+        root.traverse((node) => {
+          if (node instanceof Sprite && node.userData.sceneLabel) node.visible = false;
+        });
+      }
+      for (const map of [this.objectNodes, this.zoneNodes, this.routeNodes]) {
+        for (const entry of map.values()) {
+          if (entry.label) entry.label.sprite.visible = false;
+        }
+      }
+      for (const label of [...this.stationLabels.values(), ...this.bottleneckLabels.values(), ...this.anchorLabels.values()]) {
+        label.sprite.visible = false;
+      }
+      return;
+    }
+
+    // The selected thing gets first claim on the screen. Its neighbours are
+    // then allowed to yield rather than forcing the user to decipher a stack.
+    for (const o of project.objects) {
+      if (!selected.has(o.id)) continue;
+      const label = this.objectNodes.get(o.id)?.label;
+      if (label && !o.hidden && session.showLabels) add(`object:${o.id}`, label, 0);
+    }
+    for (const zone of project.zones) {
+      if (!selected.has(zone.id)) continue;
+      const label = this.zoneNodes.get(zone.id)?.label;
+      if (label && !zone.hidden && session.showLabels) add(`zone:${zone.id}`, label, 0);
+    }
+    for (const route of project.routes) {
+      if (route.id !== session.focusRouteId) continue;
+      const label = this.routeNodes.get(route.id)?.label;
+      if (label && route.visible && session.showLabels) add(`route:${route.id}`, label, 0);
+    }
+
+    if (session.showLabels) {
+      // Room / corridor and the one field label orient a first-time viewer.
+      // They are kept out of rehearsal mode, where the queue is the task.
+      if (!rehearsing) {
+        for (const root of [this.floorGroup, this.arrayGroupRoot]) {
+          root.traverse((node) => {
+            if (!(node instanceof Sprite)) return;
+            const data = node.userData.sceneLabel as { id?: string; priority?: LabelPriority } | undefined;
+            if (data?.id) add(data.id, node, data.priority ?? 1);
+          });
+        }
+        for (const zone of project.zones) {
+          if (zone.hidden || selected.has(zone.id)) continue;
+          const priority: LabelPriority = ["registration", "payment", "meditation", "group"].includes(zone.type) ? 1 : 2;
+          const label = this.zoneNodes.get(zone.id)?.label;
+          if (label) add(`zone:${zone.id}`, label, priority);
+        }
+        for (const o of project.objects) {
+          if (o.hidden || selected.has(o.id)) continue;
+          const label = this.objectNodes.get(o.id)?.label;
+          if (!label) continue;
+          const entry = this.catalog.resolve(o.assetId, o.kind);
+          add(`object:${o.id}`, label, entry.category === "service" || LANDMARKS.has(o.kind) ? 1 : 2);
+        }
+        if (!session.hideRouteLabels) {
+          for (const route of project.routes) {
+            if (!route.visible || route.id === session.focusRouteId) continue;
+            const label = this.routeNodes.get(route.id)?.label;
+            if (label) add(`route:${route.id}`, label, 2);
+          }
+        }
+      }
+
+      // In rehearsal these labels are the actionable information. They remain
+      // P0 even on phone, above room names and decorative context.
+      for (const station of session.simStations ?? []) {
+        const label = this.stationLabels.get(station.id);
+        if (label) add(`station:${station.id}`, label, 0);
+      }
+      for (const bn of session.bottlenecks ?? []) {
+        const key = `${bn.kind ?? "route"}|${bn.x.toFixed(2)}|${bn.z.toFixed(2)}`;
+        const label = this.bottleneckLabels.get(key);
+        if (label) add(`bottleneck:${key}`, label, 0);
+      }
+      for (const anchor of session.propAnchors ?? []) {
+        const label = this.anchorLabels.get(`anchor:${anchor.role}`);
+        if (label) add(`anchor:${anchor.role}`, label, 1);
+      }
+      for (const measurement of project.measurements) {
+        if (!measurement.visible) continue;
+        const label = this.measureNodes.get(measurement.id)?.label;
+        if (label) add(`measure:${measurement.id}`, label, 1);
+      }
+      if (this.liveLabel && (session.measure || session.calibrate)) add("live-measure", this.liveLabel, 0);
+      this.partnerLabels.forEach((label, i) => add(`partner:${i}`, label, 0));
+    }
+
+    this.scene.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld();
+    const screenCandidates: ScreenLabelCandidate[] = [];
+    for (const candidate of candidates) {
+      const rect = this.labelScreenRect(candidate.label instanceof TextLabel ? candidate.label.sprite : candidate.label);
+      if (rect) screenCandidates.push({ id: candidate.id, priority: candidate.priority, rect });
+    }
+    const width = this.canvasSize().w;
+    const maxVisible = width <= 600 ? 6 : width < 1200 ? 9 : 12;
+    const visible = session.showLabels ? declutterScreenLabels(screenCandidates, maxVisible) : new Set<string>();
+
+    // Set every candidate explicitly. A hidden label from the prior frame must
+    // be eligible again when a camera pan opens up room for it.
+    for (const candidate of candidates) {
+      const sprite = candidate.label instanceof TextLabel ? candidate.label.sprite : candidate.label;
+      sprite.visible = visible.has(candidate.id);
+    }
+  }
+
+  private labelScreenRect(sprite: Sprite): ScreenRect | null {
+    const world = sprite.getWorldPosition(new Vector3());
+    const scale = sprite.getWorldScale(new Vector3());
+    const center = world.clone().project(this.camera);
+    if (center.z < -1 || center.z > 1 || center.x < -1.2 || center.x > 1.2 || center.y < -1.2 || center.y > 1.2) return null;
+    const right = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+    const up = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1).normalize();
+    const px = world.clone().addScaledVector(right, scale.x / 2).project(this.camera);
+    const py = world.clone().addScaledVector(up, scale.y / 2).project(this.camera);
+    const { w, h } = this.canvasSize();
+    const width = Math.max(54, Math.abs(px.x - center.x) * w + 10);
+    const height = Math.max(20, Math.abs(py.y - center.y) * h + 8);
+    const x = (center.x * 0.5 + 0.5) * w;
+    const y = (-center.y * 0.5 + 0.5) * h;
+    return { x: x - width / 2, y: y - height / 2, width, height };
+  }
 
   /**
    * Partner marks: a red / orange / green pin on the spot, with the plain
@@ -497,7 +669,7 @@ export class SceneManager {
   private partnerLabels: TextLabel[] = [];
 
   private recenter(project: Project): void {
-    this.fitBounds(planBounds(project));
+    this.fitBounds(primaryWorkAreaBounds(project));
   }
 
   private combinedBounds(project: Project): { cx: number; cz: number; w: number; h: number } {
@@ -573,6 +745,7 @@ export class SceneManager {
       label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
       label.sprite.scale.set(1.55, 0.36, 1);
       label.sprite.position.set(area.x + 1.25, 0.14, area.z + 0.55);
+      label.sprite.userData.sceneLabel = { id: `area:${area.id}`, priority: 1 as LabelPriority };
       areaGroup.add(label.sprite);
       this.floorGroup.add(areaGroup);
     }
@@ -684,8 +857,9 @@ export class SceneManager {
     return g;
   }
 
-  private syncObjects(project: Project, showLabels: boolean, simplify: boolean): void {
+  private syncObjects(project: Project, session: SessionView, simplify: boolean): void {
     this.objectGroup.visible = this.layersState.objects;
+    const showLabels = session.showLabels;
     const seen = new Set<string>();
     for (const o of project.objects) {
       seen.add(o.id);
@@ -747,6 +921,16 @@ export class SceneManager {
       }
       entry.group.position.set(o.x, o.elevation, o.z);
       entry.group.rotation.y = o.rotationDeg * D2R;
+      const persistentLabel = LANDMARKS.has(o.kind) || catalogEntry.category === "service";
+      const selected = session.selection.has(o.id);
+      if (selected && !entry.label) {
+        entry.label = new TextLabel();
+        this.objectGroup.add(entry.label.sprite);
+      } else if (!selected && !persistentLabel && entry.label) {
+        this.objectGroup.remove(entry.label.sprite);
+        entry.label.dispose();
+        entry.label = null;
+      }
       // In Partner Mode, objects that belong to another role drop out entirely:
       // their materials are shared from a cache, so fading them would tint every
       // other object of the same kind too.
@@ -755,7 +939,7 @@ export class SceneManager {
       if (entry.label) {
         entry.label.sprite.visible = showLabels && !o.hidden;
         if (showLabels) {
-          entry.label.set(catalogEntry.name, this.theme === "light" ? "#334155" : "#e2e8f0");
+          entry.label.set(catalogEntry.name, selected ? "#e0f2fe" : "#f8fafc");
           entry.label.sprite.position.set(o.x, o.elevation + o.height + 0.35, o.z);
         }
       }
@@ -874,8 +1058,11 @@ export class SceneManager {
             // Piece-to-piece variation, measured range (dark .. base .. light).
             // Cycled on row+col rather than a flat index so the variation does
             // not read as stripes down one axis, the way `i % 3` did.
-            const v = (members[i].row + members[i].col * 2) % 3;
-            mesh.setColorAt(i, new Color(v === 0 ? MAT_COLORS.base : v === 1 ? MAT_COLORS.light : MAT_COLORS.dark));
+            // Mostly one continuous colour, with a few irregular batches. A
+            // formula such as row + col * 2 creates a diagonal checkerboard
+            // even when each colour was sampled from a real photo.
+            const v = matBatchVariation(members[i].row, members[i].col);
+            mesh.setColorAt(i, new Color(v === 1 ? MAT_SURFACE_VARIATION.light : v === -1 ? MAT_SURFACE_VARIATION.dark : MAT_COLORS.base));
           }
         }
         mesh.instanceMatrix.needsUpdate = true;
@@ -945,15 +1132,15 @@ export class SceneManager {
     label.sprite.scale.set(3.25, 0.52, 1);
     const center = groupCenter(g);
     label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
+    label.sprite.userData.sceneLabel = { id: `field:${g.id}`, priority: 1 as LabelPriority };
     overlay.add(label.sprite);
     return overlay;
   }
 
-  private syncZones(project: Project): void {
+  private syncZones(project: Project, selection: Set<string>): void {
     this.zoneGroup.visible = this.layersState.zones;
     const partner = this.partner;
     const seen = new Set<string>();
-    const placedLabels: PlacedLabel[] = [];
     for (const zone of project.zones) {
       seen.add(zone.id);
       // Partner labels are drawn at a higher texture resolution, so the mode
@@ -975,22 +1162,20 @@ export class SceneManager {
       fillMat.color.set(zone.color);
       edgeMat.color.set(zone.color);
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
-      const labelY = stackedLabelY(zone, placedLabels, partner ? 0.8 : 0.5);
-      entry.label.sprite.position.y = labelY;
-      placedLabels.push({ x: zone.x, z: zone.z, y: labelY });
+      entry.label.sprite.position.y = partner ? 0.8 : 0.5;
       if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the
         // rest stay as faint context so the room still makes sense.
         const muted = partner.emphasis.zones[zone.id] === "muted";
-        fillMat.opacity = muted ? 0.07 : 0.4;
+        fillMat.opacity = muted ? 0.05 : 0.16;
         edgeMat.opacity = muted ? 0.25 : 1;
         entry.label.sprite.visible = !muted;
         entry.label.set(`${zone.icon ?? ""} ${zone.name}${cap}`.trim(), "#f8fafc");
       } else {
-        fillMat.opacity = 0.2;
-        edgeMat.opacity = 0.9;
+        fillMat.opacity = selection.has(zone.id) ? 0.16 : 0.1;
+        edgeMat.opacity = selection.has(zone.id) ? 1 : 0.72;
         entry.label.sprite.visible = true;
-        entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), this.theme === "light" ? "#334155" : "#e2e8f0");
+        entry.label.set(`${zone.icon ?? ""}${zone.name}${cap}`.trim(), selection.has(zone.id) ? "#e0f2fe" : "#f8fafc");
       }
     }
     for (const [id, entry] of this.zoneNodes) {
@@ -1070,7 +1255,7 @@ export class SceneManager {
     return props;
   }
 
-  private syncRoutes(project: Project, focusRouteId: string | null, hideLabels = false): void {
+  private syncRoutes(project: Project, focusRouteId: string | null, hideLabels = false, showLabels = true): void {
     this.routeGroup.visible = this.layersState.routes;
     this.routeNodeMeshes = [];
     const seen = new Set<string>();
@@ -1091,7 +1276,7 @@ export class SceneManager {
       // In the 全部 overview the arrows, colours and ①②③ badges carry the flow;
       // adding four route names on top is what made a phone-sized plan
       // unreadable. Names come back as soon as a role narrows the picture.
-      entry.label.sprite.visible = hideLabels
+      entry.label.sprite.visible = !showLabels || hideLabels
         ? false
         : partner ? partner.role !== "all" && !dim : true;
       entry.label.set(partner ? `${routeIcon(route)} ${route.name}` : route.name, dim ? "#64748b" : route.color);
@@ -1513,7 +1698,7 @@ export class SceneManager {
 
   recenterView(project: Project): void {
     this.userAdjustedCamera = false;
-    this.fitBounds(planBounds(project));
+    this.fitBounds(primaryWorkAreaBounds(project));
   }
 
   project(x: number, z: number): { x: number; y: number } {
@@ -1718,12 +1903,61 @@ export function planBounds(project: Project): { minX: number; maxX: number; minZ
   };
 }
 
+/**
+ * A booth's roof, backdrop and tall signs make the place recognisable, but
+ * they are not the work the organiser must inspect. Initial camera framing
+ * follows routes, stations, zones and tables first; export framing still uses
+ * the full venue through `planBounds` so a 場刊 never silently crops context.
+ */
+export function primaryWorkAreaBounds(project: Project): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  if (!isBoothProject(project)) return planBounds(project);
+  const included: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
+  const include = (minX: number, maxX: number, minZ: number, maxZ: number) => {
+    included.push({ minX, maxX, minZ, maxZ });
+  };
+  for (const zone of project.zones) {
+    if (!zone.hidden) include(zone.x - zone.width / 2, zone.x + zone.width / 2, zone.z - zone.depth / 2, zone.z + zone.depth / 2);
+  }
+  for (const route of project.routes) {
+    if (!route.visible) continue;
+    for (const point of route.points) include(point.x, point.x, point.z, point.z);
+  }
+  for (const object of project.objects) {
+    if (object.hidden || /tent|backdrop|banner|standee|flag/i.test(object.assetId ?? "")) continue;
+    include(object.x - object.width / 2, object.x + object.width / 2, object.z - object.depth / 2, object.z + object.depth / 2);
+  }
+  if (!included.length) return planBounds(project);
+  const bounds = included.reduce((all, next) => ({
+    minX: Math.min(all.minX, next.minX),
+    maxX: Math.max(all.maxX, next.maxX),
+    minZ: Math.min(all.minZ, next.minZ),
+    maxZ: Math.max(all.maxZ, next.maxZ),
+  }));
+  const pad = 0.7;
+  return {
+    minX: bounds.minX - pad,
+    maxX: bounds.maxX + pad,
+    minZ: bounds.minZ - pad,
+    maxZ: bounds.maxZ + pad,
+  };
+}
+
 interface Route2 { id: string; color: string; type?: string; points: { x: number; z: number }[] }
 
 function round(n: number): number { return Math.round(n * 1000) / 1000; }
 
 function isFieldMatGroup(g: Project["groups"][number]): boolean {
   return g.sourceKind === "mat" && Math.abs(g.itemWidth - 0.6) < 1e-6 && Math.abs(g.itemDepth - 0.6) < 1e-6;
+}
+
+/** Deterministic, sparse batch variation — deliberately not a chess pattern. */
+export function matBatchVariation(row: number, col: number): -1 | 0 | 1 {
+  let hash = Math.imul(row + 1, 73856093) ^ Math.imul(col + 1, 19349663);
+  hash ^= hash >>> 13;
+  const sample = (hash >>> 0) % 100;
+  if (sample < 7) return 1;
+  if (sample > 94) return -1;
+  return 0;
 }
 
 function measureText(a: { x: number; z: number }, b: { x: number; z: number }): string {

@@ -47,6 +47,17 @@ export const MAT_COLORS = {
   outline: "#12776a",
 } as const;
 
+/**
+ * The photographs include very bright and very dark pixels at seams and in
+ * shadow. Those are evidence for material and lighting, not a pattern for
+ * alternating every tile. The renderer only uses this restrained range for
+ * occasional deterministic batches; seams keep using the measured seam tone.
+ */
+export const MAT_SURFACE_VARIATION = {
+  light: "#31c0ad",
+  dark: "#25b4a2",
+} as const;
+
 export const THEME_STORAGE_KEY = "planform.theme";
 
 /**
@@ -57,7 +68,7 @@ export const THEME_STORAGE_KEY = "planform.theme";
  * ended up at 1.04:1 — a dark slate chosen for a light floor, painted on a
  * dark pill.
  */
-export const LABEL_PILL_RGBA = { r: 15, g: 23, b: 42, a: 0.72 } as const;
+export const LABEL_PILL_RGBA = { r: 15, g: 23, b: 42, a: 0.58 } as const;
 
 export interface ScenePalette {
   /** Canvas clear colour. */

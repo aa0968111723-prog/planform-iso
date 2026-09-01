@@ -11,7 +11,12 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { LABEL_SIZE, stackedLabelY, type PlacedLabel } from "../src/scene/labelLayout";
+import {
+  LABEL_SIZE,
+  declutterScreenLabels,
+  stackedLabelY,
+  type PlacedLabel,
+} from "../src/scene/labelLayout";
 import { buildE310ClubGoldenProject } from "../src/core/quickStart";
 import { venuePresetById } from "../src/core/venues";
 
@@ -110,5 +115,38 @@ describe("the stacking rule itself", () => {
   it("gives up rather than looping forever on a pathological stack", () => {
     const placed: PlacedLabel[] = Array.from({ length: 200 }, (_, i) => ({ x: 0, z: 0, y: 0.5 + i * 0.01 }));
     expect(Number.isFinite(stackedLabelY({ x: 0, z: 0 }, placed, 0.5))).toBe(true);
+  });
+});
+
+describe("screen-space declutter", () => {
+  it("keeps a selected label and drops overlapping background context", () => {
+    const visible = declutterScreenLabels([
+      { id: "selected", priority: 0, rect: { x: 100, y: 100, width: 100, height: 28 } },
+      { id: "shoe", priority: 2, rect: { x: 108, y: 104, width: 100, height: 28 } },
+      { id: "route", priority: 2, rect: { x: 112, y: 108, width: 100, height: 28 } },
+      { id: "room", priority: 1, rect: { x: 280, y: 100, width: 100, height: 28 } },
+    ], 10);
+    expect(visible).toEqual(new Set(["selected", "room"]));
+  });
+
+  it("does not let a small screen turn every useful label on", () => {
+    const visible = declutterScreenLabels(Array.from({ length: 12 }, (_, i) => ({
+      id: `minor-${i}`,
+      priority: 2 as const,
+      rect: { x: i * 120, y: 0, width: 80, height: 24 },
+    })), 7);
+    expect(visible.size).toBe(7);
+  });
+
+  it("still keeps P0 rehearsal warnings when the context cap is full", () => {
+    const visible = declutterScreenLabels([
+      ...Array.from({ length: 9 }, (_, i) => ({
+        id: `zone-${i}`,
+        priority: 1 as const,
+        rect: { x: i * 100, y: 0, width: 70, height: 24 },
+      })),
+      { id: "bottleneck", priority: 0, rect: { x: 950, y: 0, width: 90, height: 24 } },
+    ], 7);
+    expect(visible.has("bottleneck")).toBe(true);
   });
 });
