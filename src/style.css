@@ -734,6 +734,7 @@ html, body {
   border-color: var(--accent); background: rgba(56, 189, 248, 0.22);
   color: var(--accent-text); font-weight: 700;
 }
+.layerchip__icon { font-size: 17px; }
 #app.freshman .partnerbar__title {
   white-space: normal; line-height: 1.35; font-size: 13px;
 }

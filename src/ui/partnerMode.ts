@@ -142,8 +142,8 @@ export function buildPartnerMode(
 
   for (const layer of FRESHMAN_LAYERS) {
     const chip = el("button", { type: "button", class: "layerchip", "data-layer": layer.id }, [
-      el("span", { class: "rolechip__icon", text: layer.icon }),
-      el("span", { class: "rolechip__label", text: layer.label }),
+      el("span", { class: "layerchip__icon", text: layer.icon }),
+      el("span", { class: "layerchip__label", text: layer.label }),
     ]) as HTMLButtonElement;
     chip.addEventListener("click", () => {
       app.setFreshmanLayer(layer.id);
