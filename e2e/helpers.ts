@@ -154,10 +154,16 @@ export async function gotoWorkflow(
  * or the iso void can swallow. Move first so the placement ghost follows.
  */
 export async function clickSafeCanvas(page: Page): Promise<{ x: number; y: number }> {
+  const compact = (await page.locator("#app").getAttribute("data-ws-mode")) !== "desktop";
+  if (compact) {
+    await expect.poll(() => page.locator("#app").getAttribute("data-sheet"), { timeout: 3_000 })
+      .toBe("none")
+      .catch(() => undefined);
+  }
   const state = await probe(page);
   const rect = state.focusRect.width > 0 ? state.focusRect : state.safeRect;
   const x = Math.round(rect.x + rect.width * 0.5);
-  const y = Math.round(rect.y + rect.height * 0.42);
+  const y = Math.round(rect.y + rect.height * 0.5);
   await page.mouse.move(x, y);
   await page.waitForTimeout(80);
   await page.mouse.click(x, y);

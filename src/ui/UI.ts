@@ -71,6 +71,7 @@ export class UI {
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
   private navSig: string | null = null;
+  private lastMode: App["session"]["mode"] | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false, labels: true };
@@ -1399,12 +1400,13 @@ export class UI {
 
     this.syncNav();
 
-    // Picking an asset drops straight into placement — keep the sheet away for
-    // every subsequent UI tick, not only the first, so a late history/popstate
-    // cannot cover the canvas while the ghost is still armed.
-    if (this.compact && (sess.mode === "place" || sess.mode === "route") && this.sheet !== "none") {
+    // Collapse once when placement/route drawing starts so the first canvas
+    // tap is unobstructed. Do not keep forcing it closed — 場佈 must be able
+    // to reopen for 「編輯這個道具」 while a ghost is still armed.
+    if (this.compact && (sess.mode === "place" || sess.mode === "route") && this.lastMode !== sess.mode) {
       this.setSheet("none");
     }
+    this.lastMode = sess.mode;
 
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
       b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow && this.sheet === "workflow")));
