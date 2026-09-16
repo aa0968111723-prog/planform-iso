@@ -6,8 +6,6 @@
  * coordinates. The current venue is loud; everything else is quiet.
  */
 
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
 import type { App } from "../app/App";
 import {
   TKU_BUILDINGS,
@@ -44,8 +42,24 @@ export interface CampusMapHandles {
   focusPlace(place: TkuPlace): void;
 }
 
+type LeafletNS = typeof import("leaflet");
 type LeafletMap = import("leaflet").Map;
 type LeafletLayer = import("leaflet").Layer;
+
+let leafletLib: LeafletNS | null = null;
+
+async function loadLeaflet(): Promise<LeafletNS | null> {
+  if (leafletLib) return leafletLib;
+  try {
+    const mod = await import("leaflet");
+    await import("leaflet/dist/leaflet.css");
+    const api = (mod as unknown as { default?: LeafletNS }).default ?? (mod as LeafletNS);
+    leafletLib = api;
+    return api;
+  } catch {
+    return null;
+  }
+}
 
 interface MapSelection {
   campusId: TkuCampusId;
@@ -62,6 +76,7 @@ export function buildCampusMap(app: App, opts: {
     "data-map-dock": "top",
   });
   root.hidden = true;
+  root.setAttribute("inert", "");
   root.setAttribute("aria-label", "淡江校園位置");
 
   const search = el("input", {
@@ -338,10 +353,17 @@ export function buildCampusMap(app: App, opts: {
     else root.removeAttribute("data-tiles");
   }
 
-  function mountLeaflet(): void {
+  async function mountLeaflet(): Promise<void> {
     const view = campusMapView(selection.campusId);
     if (!view || !shown || tilesFailed) {
       showFallback(tilesFailed);
+      return;
+    }
+    const L = await loadLeaflet();
+    if (!shown) return;
+    if (!L) {
+      tilesFailed = true;
+      showFallback(true);
       return;
     }
     try {
@@ -406,7 +428,7 @@ export function buildCampusMap(app: App, opts: {
         });
         marker.on("click", () => {
           selection = { campusId: pin.campusId, buildingCode: pin.code };
-          refresh();
+          void refresh();
         });
         marker.addTo(group);
       }
@@ -444,7 +466,7 @@ export function buildCampusMap(app: App, opts: {
     renderFallback();
     renderSheet();
     if (tilesFailed) showFallback(true);
-    else mountLeaflet();
+    else void mountLeaflet();
     opts.onLayoutChange();
   }
 
@@ -461,6 +483,7 @@ export function buildCampusMap(app: App, opts: {
   function show(): void {
     shown = true;
     root.hidden = false;
+    root.removeAttribute("inert");
     syncSelectionFromProject();
     void refresh();
     requestAnimationFrame(() => map?.invalidateSize());
@@ -469,6 +492,13 @@ export function buildCampusMap(app: App, opts: {
   function hide(): void {
     shown = false;
     root.hidden = true;
+    root.setAttribute("inert", "");
+    if (map) {
+      map.remove();
+      map = null;
+      tileLayer = null;
+      pinLayer = null;
+    }
   }
 
   return {

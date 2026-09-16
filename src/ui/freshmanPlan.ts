@@ -21,6 +21,7 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
     "data-map-dock": "cover",
   });
   root.hidden = true;
+  root.setAttribute("inert", "");
   root.setAttribute("aria-label", "教室室內場佈");
 
   const head = el("div", { class: "freshmanplan__head" }, [
@@ -153,12 +154,14 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
     show() {
       shown = true;
       root.hidden = false;
+      root.removeAttribute("inert");
       render();
       opts.onLayoutChange();
     },
     hide() {
       shown = false;
       root.hidden = true;
+      root.setAttribute("inert", "");
       opts.onLayoutChange();
     },
     visible: () => shown,

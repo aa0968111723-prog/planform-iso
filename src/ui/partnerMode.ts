@@ -77,7 +77,7 @@ export function buildPartnerMode(
       });
     }, "btn partneraction"),
   ]);
-  const freshmanActions = el("div", { class: "partneractions freshmanactions" }, [
+  const freshmanActions = el("div", { class: "freshmanactions" }, [
     button("① 下一步", () => app.freshmanNextStop(), "btn freshmanaction freshmanaction--accent"),
     button("看尺寸", () => app.toggleFreshmanDetail(), "btn freshmanaction"),
     button("🖼 存成圖", () => {

@@ -132,7 +132,7 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
       // room, shoes at the mat edge, corridor left clear.
       card.append(
         el("div", { class: "quickstart__recommended" }, [
-          el("span", { class: "quickstart__eyebrow", text: "實景推薦起點" }),
+          el("span", { class: "quickstart__eyebrow", text: "實景推薦起點 · E310" }),
           el("strong", { text: "E310 禪學社社課" }),
           el("span", { class: "hint", text: "30 人・綠色連續巧拼・教室內報到・走廊淨空" }),
           button("建立 30 人實景場佈", () => {
@@ -145,7 +145,37 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
           }, "btn btn--big btn--primary"),
         ]),
         button(`🎤 ${e310.name}`, () => renderNeedsStep(e310), "btn btn--big"),
-        el("p", { class: "hint", text: e310.note }),
+      );
+    }
+
+    // Keep the generic Tamkang classroom on the first phone screen. E305 is a
+    // separate photo-reference venue and must not bury this starting point.
+    card.append(
+      el("p", { class: "quickstart__group", text: "淡江教室" }),
+      button(`🏫 ${tku.name}`, () => renderNeedsStep(tku), "btn btn--big"),
+    );
+
+    if (e305) {
+      card.append(
+        el("div", { class: "quickstart__recommended quickstart__recommended--photo" }, [
+          el("span", { class: "quickstart__eyebrow", text: "照片參考 · 不是 E310" }),
+          el("strong", { text: "E305 工學大樓 3F" }),
+          el("span", { class: "hint", text: "門牌與冷氣標記為 E305。尺寸待現場校正。" }),
+          button("建立 E305 照片參考場佈", () => {
+            finish({
+              name: projectName,
+              project: buildE305PhotoReferenceProject(e305),
+              venue: e305,
+              participants: 30,
+            });
+          }, "btn btn--big"),
+          button(`🏫 ${e305.name}`, () => renderNeedsStep(e305), "btn btn--big btn--ghost"),
+        ]),
+      );
+    }
+
+    if (e310) {
+      card.append(
         button("⚡ 直接用 E310 演講範例（60 人）", () => {
           finish({
             name: projectName,
@@ -157,31 +187,12 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
       );
     }
 
-    if (e305) {
-      card.append(
-        el("div", { class: "quickstart__recommended" }, [
-          el("span", { class: "quickstart__eyebrow", text: "照片參考場地 · 不是 E310" }),
-          el("strong", { text: "E305 工學大樓教室" }),
-          el("span", { class: "hint", text: "門牌與冷氣標記為 E305。尺寸待現場校正。" }),
-          button("建立 E305 照片參考場佈", () => {
-            finish({
-              name: projectName,
-              project: buildE305PhotoReferenceProject(e305),
-              venue: e305,
-              participants: 30,
-            });
-          }, "btn btn--big"),
-        ]),
-        button(`🏫 ${e305.name}`, () => renderNeedsStep(e305), "btn btn--big"),
-        el("p", { class: "hint", text: e305.note }),
-      );
-    }
-
     // 攤位 skips step 3 on purpose: the template already ships its own tent,
     // table, zones, flows and stations, so there is nothing left to tick.
     const booth = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-booth");
     if (booth) {
       card.append(
+        el("p", { class: "quickstart__group", text: "戶外與其他" }),
         button(`⛺ ${booth.name}`, () => {
           finish({
             name: projectName,
@@ -190,13 +201,8 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
             participants: 40,
           });
         }, "btn btn--big"),
-        el("p", { class: "hint", text: booth.note }),
       );
     }
-    card.append(
-      button(`🏫 ${tku.name}`, () => renderNeedsStep(tku), "btn btn--big"),
-      el("p", { class: "hint", text: tku.note }),
-    );
 
     const saved = listUserVenuePresets();
     if (saved.length) {

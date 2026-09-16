@@ -674,7 +674,6 @@ export class UI {
    */
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
-      this.campusLocationSection(),
       this.venuePresetSection(),
       this.roomSizeSection(),
       this.tileSection(),
@@ -684,16 +683,12 @@ export class UI {
     ];
   }
 
-  private campusLocationSection(): HTMLElement {
-    return section("淡江校園位置", [
-      el("p", { class: "hint", text: "給第一次來的夥伴看：活動在哪個校園、哪一棟樓。用地圖公開圖資，不用金鑰。" }),
+  private venuePresetSection(): HTMLElement {
+    const body: HTMLElement[] = [
+      el("p", { class: "hint", text: "給第一次來的夥伴看：活動在哪個校園、哪一棟樓。" }),
       button("🗺️ 打開校園位置圖", () => this.app.openCampusMap(), "btn btn--big"),
       button("🎒 新生夥伴視圖", () => this.app.enterFreshmanPartnerMode(), "btn btn--big btn--primary"),
-    ]);
-  }
-
-  private venuePresetSection(): HTMLElement {
-    const body: HTMLElement[] = [];
+    ];
     const apply = (id: string) => {
       if (window.confirm("套用場地模板會改變教室尺寸與地磚（物件會保留、可復原）。繼續？")) {
         this.app.applyVenuePresetById(id);
