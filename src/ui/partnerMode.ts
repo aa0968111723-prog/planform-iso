@@ -175,7 +175,13 @@ export function buildPartnerMode(
       return;
     }
     const lines: { icon: string; text: string }[] = [];
-    if (b.youAre) lines.push({ icon: "📍", text: `你在「${b.youAre}」` });
+    // You-are-here stays a single dock line: live station name, else the
+    // partner 場刊 sentence. Never stack both — an extra dock line drops
+    // 360×800 canvas coverage under 0.6.
+    const here = b.youAre
+      ? `你在「${b.youAre}」`
+      : (role === "all" ? b.layoutCopy?.[0] : undefined);
+    if (here) lines.push({ icon: "📍", text: here });
     if (role === "all" && b.flowSummary) {
       lines.push({ icon: "➡️", text: `整體流程：${b.flowSummary}` });
     } else {
