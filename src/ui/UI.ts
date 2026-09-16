@@ -692,8 +692,8 @@ export class UI {
     return [
       this.campusLocationSection(),
       this.venuePresetSection(),
-      this.layoutStarterSection(),
       this.roomSizeSection(),
+      this.layoutStarterSection(),
       this.corridorSection(),
       this.tileSection(),
       this.calibrationSection(),
@@ -1221,18 +1221,19 @@ export class UI {
     const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
       button(`${p.icon} ${p.label.replace("動線", "")}`, () => { this.app.newRoutePreset(p.type as RouteType); if (this.compact) this.setSheet("none"); }, "chip chip--sm")));
     const commonRow = el("div", { class: "row wrap" }, [
-      button("入場→報到→鞋子→背包→地墊", () => { this.app.addCommonRoute("entry-flow"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
-      button("工作人員", () => { this.app.addCommonRoute("staff"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
-      button("講師", () => { this.app.addCommonRoute("lecturer"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
-      button("自訂", () => { this.app.addCommonRoute("custom"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+      button("常用流程", () => { this.app.addCommonRoute("entry-flow"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+      button("工作人員動線", () => { this.app.addCommonRoute("staff"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+      button("講師動線", () => { this.app.addCommonRoute("lecturer"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+      button("自訂動線", () => { this.app.addCommonRoute("custom"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
     ]);
 
     refreshFlowPanel(this.simPanelRoot, this.app);
 
     return section("動線／互動", [
       el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。彩排數字在「彩排」。本階段只畫動線，不做人流模擬。" }),
-      commonRow,
       presetRow,
+      el("p", { class: "hint", text: "常用流程：入場 → 報到 → 鞋子 → 背包 → 地墊。" }),
+      commonRow,
       el("div", { class: "row" }, [button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
       list,
       el("div", { class: "subhead", text: "模擬活動流程" }),

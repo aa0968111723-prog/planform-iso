@@ -175,9 +175,6 @@ export function buildPartnerMode(
       return;
     }
     const lines: { icon: string; text: string }[] = [];
-    if (role === "all" && b.layoutCopy?.[0]) {
-      lines.push({ icon: "📍", text: b.layoutCopy[0] });
-    }
     if (b.youAre) lines.push({ icon: "📍", text: `你在「${b.youAre}」` });
     if (role === "all" && b.flowSummary) {
       lines.push({ icon: "➡️", text: `整體流程：${b.flowSummary}` });

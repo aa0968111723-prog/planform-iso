@@ -1998,6 +1998,7 @@ export class App {
   }
 
   addCommonRoute(kind: "entry-flow" | "staff" | "lecturer" | "custom" = "entry-flow"): void {
+    this.cancelPlacement();
     const points: { x: number; z: number }[] = [];
     const door = this.state.objects.find((o) => o.kind === "door" && !o.hidden);
     if (door) points.push({ x: door.x, z: door.z });
@@ -2403,6 +2404,7 @@ export class App {
   // --- route presets + zone links ---------------------------------------
 
   newRoutePreset(type: RouteType): void {
+    this.cancelPlacement();
     const pre = routePreset(type);
     const route: Route = { id: uid("route"), name: pre.label, color: pre.color, points: [], visible: true, type };
     this.store.mutate((p) => p.routes.push(route));
