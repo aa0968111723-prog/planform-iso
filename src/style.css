@@ -101,7 +101,7 @@ html, body {
   position: fixed;
   inset: 0;
   height: 100dvh;
-  overflow-x: hidden;
+  overflow: clip;
   /* Panels opt into "docked" so the viewport only subtracts real rail width. */
   --ws-docked: 0;
 }
