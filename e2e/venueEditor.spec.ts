@@ -97,7 +97,6 @@ for (const vp of VIEWPORTS) {
         pf.app.updateSelectedObject({ x: x0 + 0.2, z: 3.4, elevation: 0.05 });
       }, placed);
 
-      await expect(page.locator(".wb-head")).toBeAttached();
       if (vp.mode !== "desktop") {
         await expect(page.locator(".ctxbar")).toBeVisible();
         const ctxActions = await page.locator(".ctxbar__actions .chip").allInnerTexts();
@@ -106,6 +105,7 @@ for (const vp of VIEWPORTS) {
         await page.locator(".ctxbar__actions .chip", { hasText: "屬性" }).click();
         await expect(page.locator("#app")).toHaveAttribute("data-sheet", "inspector");
         await expect.poll(() => isOnScreen(page, ".right")).toBe(true);
+        await expect(page.locator(".wb-head")).toBeAttached();
         await expect(page.locator(".right")).toContainText("基本");
         await expect(page.locator(".right")).toContainText("位置");
         await expect(page.locator(".right")).toContainText("尺寸");
@@ -115,6 +115,7 @@ for (const vp of VIEWPORTS) {
         expect(overflow).toBeLessThanOrEqual(1);
       } else {
         await expect.poll(() => isOnScreen(page, ".right")).toBe(true);
+        await expect(page.locator(".wb-head")).toBeAttached();
         await expect(page.locator(".right")).toContainText("工作桌");
         await expect(page.locator(".right")).toContainText("基本");
         await expect(page.locator(".right")).toContainText("位置");
