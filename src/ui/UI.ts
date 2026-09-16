@@ -1533,16 +1533,20 @@ export class UI {
     }
     if (on !== this.partnerWasOn) {
       this.partnerWasOn = on;
+      this.freshmanPaneWas = pane;
       requestAnimationFrame(() => requestAnimationFrame(() => {
         this.viewport.measure();
         this.app.recenterView();
         this.freshmanMap?.invalidateSize();
       }));
     } else if (on && freshman) {
-      requestAnimationFrame(() => {
+      const paneChanged = pane !== this.freshmanPaneWas;
+      this.freshmanPaneWas = pane;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         this.viewport.measure();
+        if (paneChanged && pane !== "map") this.app.recenterView();
         this.freshmanMap?.invalidateSize();
-      });
+      }));
     }
   }
 
@@ -1626,6 +1630,7 @@ export class UI {
   }
 
   private partnerWasOn = false;
+  private freshmanPaneWas = "";
 
   private updateMeasureBar(): void {
     const mode = this.app.session.mode;
