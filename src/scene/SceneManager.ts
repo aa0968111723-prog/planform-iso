@@ -46,6 +46,7 @@ import { resolveVisualGroup } from "./visualRegistry";
 import { clampPointToRect, rectCenterNdc, type Rect } from "../core/viewport";
 import {
   declutterScreenLabels,
+  stackedLabelY,
   type LabelPriority,
   type ScreenLabelCandidate,
   type ScreenRect,
@@ -60,6 +61,7 @@ import {
 import { propFaceOptions, propForAssetId } from "../core/propCatalog";
 import type { PlaybackStationResult } from "../core/eventFlow";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
+import type { FreshmanGuide } from "../core/freshmanGuide";
 
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
@@ -130,6 +132,9 @@ export interface PartnerPresentation {
   role: PartnerRole;
   emphasis: PartnerEmphasis;
   marks: PartnerMark[];
+  freshman?: FreshmanGuide | null;
+  /** Second-layer sizes / calibration. Off for first-visit partners. */
+  freshmanDetail?: boolean;
 }
 
 /** Same language as the §85 sentences: your post, the visitor, the queue, the way out. */
@@ -201,6 +206,7 @@ export class SceneManager {
   private theme: ThemeName = DEFAULT_THEME;
   private palette: ScenePalette = scenePalette(DEFAULT_THEME);
   private partnerGroup = new Group(); // partner-mode marks (never in editor mode)
+  private freshmanGroup = new Group(); // you-are-here / next-stop for first-visit partners
 
   private objectNodes = new Map<string, { group: Group; label: TextLabel | null; sig: string }>();
   private anchorLabels = new Map<string, TextLabel>();
@@ -235,6 +241,7 @@ export class SceneManager {
       this.arrayGroupRoot, this.routeGroup, this.ghostGroup, this.measureGroup, this.overlayGroup,
       this.crowd.group,
       this.partnerGroup,
+      this.freshmanGroup,
     );
 
     this.camera = new OrthographicCamera();
@@ -480,6 +487,7 @@ export class SceneManager {
     this.syncMeasurements(project, simplify);
     this.syncOverlay(project, session);
     this.syncPartner(partner);
+    this.syncFreshman(partner);
     this.applyLabelDeclutter(project, session);
   }
 
@@ -558,11 +566,14 @@ export class SceneManager {
         }
         for (const zone of project.zones) {
           if (zone.hidden || selected.has(zone.id)) continue;
-          const priority: LabelPriority = ["registration", "payment", "meditation", "group"].includes(zone.type) ? 1 : 2;
+          const priority: LabelPriority = session.partner?.freshman
+            ? 0
+            : (["registration", "payment", "meditation", "group"].includes(zone.type) ? 1 : 2);
           const label = this.zoneNodes.get(zone.id)?.label;
           if (label) add(`zone:${zone.id}`, label, priority);
         }
         for (const o of project.objects) {
+          if (session.partner?.freshman) continue;
           if (o.hidden || selected.has(o.id)) continue;
           const label = this.objectNodes.get(o.id)?.label;
           const isEssential = this.catalog.resolve(o.assetId, o.kind).category === "service" || LANDMARKS.has(o.kind);
@@ -598,12 +609,14 @@ export class SceneManager {
         if (label) add(`anchor:${anchor.role}`, label, 1);
       }
       for (const measurement of project.measurements) {
+        if (session.partner?.freshman && !session.partner.freshmanDetail) continue;
         if (!measurement.visible) continue;
         const label = this.measureNodes.get(measurement.id)?.label;
         if (label) add(`measure:${measurement.id}`, label, 1);
       }
       if (this.liveLabel && (session.measure || session.calibrate)) add("live-measure", this.liveLabel, 0);
       this.partnerLabels.forEach((label, i) => add(`partner:${i}`, label, 0));
+      this.freshmanLabels.forEach((label, i) => add(`freshman:${i}`, label, 0));
     }
 
     this.scene.updateMatrixWorld(true);
@@ -614,7 +627,10 @@ export class SceneManager {
       if (rect) screenCandidates.push({ id: candidate.id, priority: candidate.priority, rect });
     }
     const width = this.canvasSize().w;
-    const maxVisible = width <= 600 ? 6 : width < 1200 ? 9 : 12;
+    const freshman = !!session.partner?.freshman;
+    const maxVisible = freshman
+      ? (width <= 600 ? 10 : 14)
+      : (width <= 600 ? 6 : width < 1200 ? 9 : 12);
     const visible = session.showLabels ? declutterScreenLabels(screenCandidates, maxVisible) : new Set<string>();
 
     // Set every candidate explicitly. A hidden label from the prior frame must
@@ -686,6 +702,109 @@ export class SceneManager {
 
   private lastPartnerSig = "";
   private partnerLabels: TextLabel[] = [];
+  private lastFreshmanSig = "";
+  private freshmanLabels: TextLabel[] = [];
+
+  private syncFreshman(partner: PartnerPresentation | null): void {
+    const guide = partner?.freshman ?? null;
+    const detail = !!partner?.freshmanDetail;
+    const sig = guide
+      ? JSON.stringify({
+        you: guide.youAre,
+        next: guide.next,
+        journey: guide.journey.map((s) => s.id),
+        first: guide.callouts.filter((c) => c.layer === "first").map((c) => `${c.id}:${c.label}`),
+        detail,
+      })
+      : "";
+    if (sig === this.lastFreshmanSig) {
+      this.freshmanGroup.visible = !!guide;
+      return;
+    }
+    this.lastFreshmanSig = sig;
+    for (const label of this.freshmanLabels) label.dispose();
+    this.freshmanLabels = [];
+    clearGroup(this.freshmanGroup);
+    this.freshmanGroup.visible = !!guide;
+    if (!guide) return;
+
+    const placed: { x: number; z: number; y: number }[] = [];
+    const addPin = (x: number, z: number, color: number, y = 0.04, size = 0.9) => {
+      const halo = new Mesh(
+        new PlaneGeometry(size, size),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.28, depthWrite: false }),
+      );
+      halo.rotation.x = -Math.PI / 2;
+      halo.position.set(x, y, z);
+      this.freshmanGroup.add(halo);
+    };
+    const addLabel = (text: string, x: number, z: number, color: string, baseY = 1.15) => {
+      const y = stackedLabelY({ x, z }, placed, baseY);
+      placed.push({ x, z, y });
+      const label = new TextLabel({ width: 640, height: 140, fontSize: 56 });
+      label.set(text, color);
+      label.sprite.scale.set(2.8, 0.62, 1);
+      label.sprite.position.set(x, y, z);
+      this.freshmanLabels.push(label);
+      this.freshmanGroup.add(label.sprite);
+    };
+
+    for (let i = 0; i < guide.journey.length - 1; i++) {
+      const a = guide.journey[i];
+      const b = guide.journey[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = Math.hypot(dx, dz);
+      if (len < 0.35) continue;
+      const bar = new Mesh(
+        new PlaneGeometry(0.28, Math.min(len * 0.72, 2.4)),
+        new MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.82, depthWrite: false }),
+      );
+      bar.rotation.x = -Math.PI / 2;
+      bar.rotation.z = Math.atan2(dx, dz);
+      bar.position.set((a.x + b.x) / 2, 0.05, (a.z + b.z) / 2);
+      this.freshmanGroup.add(bar);
+    }
+
+    const door = guide.callouts.find((c) => c.kind === "entrance");
+    if (door) {
+      addPin(door.x, door.z, 0xf97316, 0.03, 1.1);
+      const arrow = new Mesh(
+        new PlaneGeometry(0.55, 1.1),
+        new MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.9, depthWrite: false }),
+      );
+      arrow.rotation.x = -Math.PI / 2;
+      arrow.position.set(door.x, 0.06, door.z - 0.7);
+      this.freshmanGroup.add(arrow);
+      addLabel("入口 →", door.x, door.z, "#fdba74", 1.05);
+    }
+    const screen = guide.callouts.find((c) => c.kind === "screen");
+    if (screen) {
+      const bar = new Mesh(
+        new PlaneGeometry(3.6, 0.22),
+        new MeshBasicMaterial({ color: 0x0f172a, transparent: true, opacity: 0.85, depthWrite: false }),
+      );
+      bar.rotation.x = -Math.PI / 2;
+      bar.position.set(screen.x, 0.07, screen.z);
+      this.freshmanGroup.add(bar);
+      addLabel("前方投影幕", screen.x, screen.z, "#e2e8f0", 1.0);
+    }
+    guide.journey.forEach((stop, i) => {
+      if (stop.id === "entrance") return;
+      addLabel(`${i} ${stop.label}`, stop.x, stop.z, "#fdba74", 1.35);
+    });
+    addPin(guide.youAre.x, guide.youAre.z, 0x2563eb, 0.05, 1.35);
+    addLabel("你在這裡", guide.youAre.x, guide.youAre.z, "#93c5fd", 1.55);
+    if (guide.next) {
+      addPin(guide.next.x, guide.next.z, 0x16a34a, 0.05, 1.05);
+      addLabel(`下一站 ${guide.next.label}`, guide.next.x, guide.next.z, "#86efac", 1.7);
+    }
+    if (detail) {
+      for (const callout of guide.callouts.filter((c) => c.layer === "second")) {
+        addLabel(callout.label, callout.x, callout.z, "#cbd5e1", 1.9);
+      }
+    }
+  }
 
   private recenter(project: Project): void {
     this.fitBounds(primaryWorkAreaBounds(project));
@@ -1038,7 +1157,7 @@ export class SceneManager {
     for (const g of project.groups) {
       seen.add(g.id);
       const members = groupMembers(g);
-      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
+      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${this.partner?.freshman ? "freshman" : "edit"}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
       let entry = this.arrayNodes.get(g.id);
       if (!entry || entry.sig !== sig) {
         if (entry) {
@@ -1152,8 +1271,12 @@ export class SceneManager {
     })));
 
     const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
-    const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
-    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, this.theme === "light" ? "#134e4a" : "#d1fae5");
+    const freshman = !!this.partner?.freshman;
+    const name = g.name?.trim() || "地墊區";
+    label.set(
+      freshman ? "地墊區" : `${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`,
+      this.theme === "light" ? "#134e4a" : "#d1fae5",
+    );
     label.sprite.scale.set(3.25, 0.52, 1);
     const center = groupCenter(g);
     label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
@@ -1417,7 +1540,7 @@ export class SceneManager {
   }
 
   private syncMeasurements(project: Project, simplify: boolean): void {
-    this.measureGroup.visible = !simplify;
+    this.measureGroup.visible = !simplify && !this.partner?.freshman;
     const seen = new Set<string>();
     for (const m of project.measurements) {
       if (!m.visible) continue;

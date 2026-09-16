@@ -111,7 +111,21 @@ import {
 import { applyCalibrationPath, type CalibrationPath } from "../core/calibration";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
-import { applyVenuePreset, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
+import {
+  applyVenuePreset,
+  createProjectFromTkuPlace,
+  saveUserVenuePreset,
+  venuePresetById,
+  venuePresetFromProject,
+} from "../core/venues";
+import { placeById, type TkuCampusRef } from "../core/tkuCampus";
+import {
+  buildFreshmanGuide,
+  layerForQuestion,
+  type FreshmanGuide,
+  type FreshmanLayer,
+  type FreshmanQuestion,
+} from "../core/freshmanGuide";
 import {
   agentPositions,
   detectBottlenecks,
@@ -214,6 +228,14 @@ export interface Session {
 /** Live state of Partner Mode — the visual-first, read-only view of a plan. */
 export interface PartnerSession {
   role: PartnerRole;
+  /** staff = existing volunteer roles; freshman = first-visit campus + layout. */
+  audience: "staff" | "freshman";
+  freshmanQuestion: FreshmanQuestion;
+  freshmanLayer: FreshmanLayer;
+  /** Second layer: sizes / calibration. Off by default. */
+  freshmanDetail: boolean;
+  /** Phone toggles map vs layout; tablet/desktop may split. */
+  freshmanPane: "map" | "layout" | "split";
   /** Rehearsal beats from the last run; empty until 演練 is pressed. */
   timeline: RehearsalEvent[];
   /** Pending AI suggestion, shown as a visual before/after. */
@@ -473,7 +495,8 @@ export class App {
       // A booth is 7 m across with eight station badges on it — the flow names
       // on top of that make the plan unreadable exactly when you are watching
       // the crowd. The ribbons and arrows stay; only the names step aside.
-      hideRouteLabels: this.hasFlow() && this.session.simPlaying,
+      hideRouteLabels: (this.hasFlow() && this.session.simPlaying)
+        || (this.session.partner?.audience === "freshman" && !this.session.partner.freshmanDetail),
     });
   }
 
@@ -1736,9 +1759,20 @@ export class App {
    * Enter the visual-first partner view. Nothing about the plan changes — the
    * editor state is left exactly as it was so leaving returns you to your work.
    */
-  enterPartnerMode(role: PartnerRole = "all"): void {
+  enterPartnerMode(role: PartnerRole = "all", audience: "staff" | "freshman" = "staff"): void {
     this.partnerReturnView = this.state.view;
-    this.session.partner = { role, timeline: [], suggestion: null, busy: false, stationObjectId: null };
+    this.session.partner = {
+      role,
+      audience,
+      freshmanQuestion: "where-we-are",
+      freshmanLayer: audience === "freshman" ? "campus" : "layout",
+      freshmanDetail: false,
+      freshmanPane: audience === "freshman" ? "map" : "layout",
+      timeline: [],
+      suggestion: null,
+      busy: false,
+      stationObjectId: null,
+    };
     this.session.selection = new Set();
     this.cancelPlacement();
     if (this.session.mode === "measure") this.stopMeasure();
@@ -1746,8 +1780,6 @@ export class App {
     this.runValidation();
     this.setView("top");
     this.render();
-    // Framing is left to the UI: the partner chrome has not been laid out yet,
-    // so fitting here would frame the plan against the editor's rect.
   }
 
   exitPartnerMode(): void {
@@ -1766,19 +1798,92 @@ export class App {
   }
 
   /** Emphasis + marks the scene needs to render the partner view. */
-  private partnerView(): { role: PartnerRole; emphasis: PartnerEmphasis; marks: PartnerMark[] } | null {
+  private partnerView(): {
+    role: PartnerRole;
+    emphasis: PartnerEmphasis;
+    marks: PartnerMark[];
+    freshman: FreshmanGuide | null;
+    freshmanDetail: boolean;
+  } | null {
     const p = this.session.partner;
     if (!p) return null;
     return {
       role: p.role,
       emphasis: partnerEmphasis(this.viewState, p.role),
-      marks: partnerMarks(this.session.issues),
+      marks: p.audience === "freshman" ? [] : partnerMarks(this.session.issues),
+      freshman: p.audience === "freshman" ? buildFreshmanGuide(this.viewState, p.freshmanQuestion) : null,
+      freshmanDetail: p.audience === "freshman" ? p.freshmanDetail : false,
     };
   }
 
   partnerBriefing(): RoleBriefing {
     const role = this.session.partner?.role ?? "all";
     return buildRoleBriefing(this.state, role, this.activeScenario());
+  }
+
+  freshmanGuide(): FreshmanGuide {
+    const q = this.session.partner?.freshmanQuestion ?? "where-we-are";
+    return buildFreshmanGuide(this.state, q);
+  }
+
+  setFreshmanQuestion(question: FreshmanQuestion): void {
+    if (!this.session.partner) return;
+    this.session.partner.freshmanQuestion = question;
+    this.session.partner.freshmanLayer = layerForQuestion(question);
+    if (question === "where-we-are" || question === "how-to-room") {
+      this.session.partner.freshmanPane = "map";
+    } else {
+      this.session.partner.freshmanPane = "layout";
+    }
+    this.render();
+  }
+
+  setFreshmanLayer(layer: FreshmanLayer): void {
+    if (!this.session.partner) return;
+    this.session.partner.freshmanLayer = layer;
+    this.session.partner.freshmanPane = layer === "layout" ? "layout" : "map";
+    this.render();
+  }
+
+  setFreshmanPane(pane: "map" | "layout" | "split"): void {
+    if (!this.session.partner) return;
+    this.session.partner.freshmanPane = pane;
+    this.notifyUi();
+    this.render();
+  }
+
+  setFreshmanDetail(on: boolean): void {
+    if (!this.session.partner) return;
+    this.session.partner.freshmanDetail = on;
+    this.render();
+  }
+
+  setCampusRef(ref: TkuCampusRef): void {
+    this.store.mutate((p) => {
+      p.campusRef = ref;
+    }, { history: false });
+  }
+
+  /**
+   * Open a Tamkang place as the current plan's pin. Does not rewrite E310
+   * geometry when the user is only looking up E305 on the map.
+   */
+  applyTkuPlacePin(placeId: string): void {
+    const place = placeById(placeId);
+    if (!place) return;
+    this.setCampusRef({
+      campusId: place.campusId,
+      buildingCode: place.buildingCode,
+      floor: place.floor,
+      room: place.room,
+      placeId: place.id,
+    });
+  }
+
+  createFromTkuPlace(placeId: string, name?: string) {
+    const place = placeById(placeId);
+    if (!place) return null;
+    return createProjectFromTkuPlace(place, name);
   }
 
   partnerMarks(): PartnerMark[] {

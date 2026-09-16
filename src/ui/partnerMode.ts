@@ -12,6 +12,7 @@
 
 import type { App } from "../app/App";
 import { PARTNER_ROLES, type PartnerRole } from "../core/partner";
+import { FRESHMAN_LAYERS, FRESHMAN_QUESTIONS } from "../core/freshmanGuide";
 import { formatDuration, type RehearsalEvent } from "../core/rehearsal";
 import { renderConstructionPlan } from "../export/constructionPlan";
 import { pngFilename, sharePng } from "../export/exporters";
@@ -22,6 +23,10 @@ export type PartnerSheet = "none" | "steps" | "timeline" | "suggest" | "marks" |
 export interface PartnerModeHandles {
   /** Top strip: project name, traffic light, exit. */
   top: HTMLElement;
+  /** Header stack (top strip + optional campus map). */
+  chrome: HTMLElement;
+  /** Mount point for the embedded campus map. */
+  mapHost: HTMLElement;
   /** Bottom strip: briefing + the three things a partner can do. */
   dock: HTMLElement;
   /** Overlay sheet for steps / rehearsal / AI suggestion. */
@@ -46,6 +51,8 @@ export function buildPartnerMode(
   const light = el("button", { type: "button", class: "partnerbar__light" }) as HTMLButtonElement;
   light.addEventListener("click", () => openSheet(sheetKind === "marks" ? "none" : "marks"));
   const roles = el("div", { class: "partnerroles" });
+  const questions = el("div", { class: "freshmanqs", style: "display:none" });
+  const layers = el("div", { class: "freshmanlayers", style: "display:none" });
   const top = el("header", { class: "partnertop" }, [
     el("div", { class: "partnerbar" }, [
       title,
@@ -53,7 +60,11 @@ export function buildPartnerMode(
       button("離開", () => opts.onExit(), "chip chip--sm partnerbar__exit"),
     ]),
     roles,
+    questions,
+    layers,
   ]);
+  const mapHost = el("div", { class: "campusmap-host", style: "display:none" });
+  const chrome = el("div", { class: "freshman-chrome" }, [top, mapHost]);
 
   const brief = el("button", { type: "button", class: "partnerbrief" }) as HTMLButtonElement;
   brief.addEventListener("click", () => openSheet(sheetKind === "steps" ? "none" : "steps"));
@@ -74,7 +85,20 @@ export function buildPartnerMode(
       });
     }, "btn partneraction"),
   ]);
-  const dock = el("div", { class: "partnerdock" }, [brief, actions]);
+  const paneToggle = el("div", { class: "partneractions freshman-panes", style: "display:none" }, [
+    button("🗺️ 地圖", () => app.setFreshmanPane("map"), "btn partneraction"),
+    button("教室場佈", () => app.setFreshmanPane("layout"), "btn partneraction"),
+    button("🖼 存成圖", () => {
+      const state = app.store.getState();
+      const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false, inventory: false });
+      void sharePng(dataUrl, pngFilename(state.name, "新生場佈圖")).then((how) => {
+        if (how !== "cancelled") app.notifyToast?.(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+      });
+    }, "btn partneraction"),
+  ]);
+  paneToggle.querySelectorAll("button")[0]?.setAttribute("data-pane", "map");
+  paneToggle.querySelectorAll("button")[1]?.setAttribute("data-pane", "layout");
+  const dock = el("div", { class: "partnerdock" }, [brief, actions, paneToggle]);
 
   const sheetTitle = el("div", { class: "partnersheet__title" });
   const sheetBody = el("div", { class: "partnersheet__body" });
@@ -109,7 +133,21 @@ export function buildPartnerMode(
     openSheet("none");
   }
 
-  // --- role chips ---------------------------------------------------------
+  for (const q of FRESHMAN_QUESTIONS) {
+    const chip = el("button", { type: "button", class: "freshmanchip freshmanq", "data-q": q.id }, [
+      el("span", { class: "rolechip__icon", text: q.icon }),
+      el("span", { class: "rolechip__label", text: q.label }),
+    ]) as HTMLButtonElement;
+    chip.addEventListener("click", () => app.setFreshmanQuestion(q.id));
+    questions.append(chip);
+  }
+  for (const layer of FRESHMAN_LAYERS) {
+    const chip = el("button", { type: "button", class: "freshmanchip freshmanlayer", "data-layer": layer.id }, [
+      el("span", { class: "rolechip__label", text: layer.label }),
+    ]) as HTMLButtonElement;
+    chip.addEventListener("click", () => app.setFreshmanLayer(layer.id));
+    layers.append(chip);
+  }
 
   for (const role of PARTNER_ROLES) {
     const chip = el("button", { type: "button", class: "rolechip", "data-role": role.id }, [
@@ -298,48 +336,126 @@ export function buildPartnerMode(
     );
   }
 
+  function renderFreshmanBrief(): void {
+    const g = app.freshmanGuide();
+    const q = app.session.partner?.freshmanQuestion ?? "where-we-are";
+    brief.innerHTML = "";
+    const lines = [
+      { icon: "📍", text: g.answers["where-we-are"] },
+      { icon: "🚶", text: g.goToBuilding },
+      { icon: "🚪", text: g.enterHow },
+      { icon: "👋", text: g.afterEnter },
+      { icon: "➡️", text: q === "where-next" ? (g.next ? g.next.sentence : g.lastStop) : g.afterCheckin },
+    ];
+    if (q === "how-room-laid") {
+      lines.splice(1, lines.length, { icon: "🗺️", text: g.answers["how-room-laid"] }, { icon: "🟩", text: g.lastStop });
+    }
+    for (const line of lines.slice(0, 4)) {
+      brief.append(el("span", { class: "partnerbrief__line" }, [
+        el("span", { class: "partnerbrief__icon", text: line.icon }),
+        el("span", { text: line.text }),
+      ]));
+    }
+    brief.append(el("span", { class: "partnerbrief__more", text: sheetKind === "steps" ? "收起 ▾" : "看步驟 ▸" }));
+  }
+
+  function renderFreshmanSteps(): void {
+    const g = app.freshmanGuide();
+    sheetTitle.textContent = "進教室之後怎麼走";
+    sheetBody.innerHTML = "";
+    const list = el("ol", { class: "partnersteps" });
+    g.journey.forEach((stop, i) => {
+      list.append(el("li", { class: "partnerstep" }, [
+        el("span", { class: "partnerstep__no", text: String(i + 1) }),
+        el("span", { text: stop.sentence }),
+      ]));
+    });
+    sheetBody.append(list);
+    if (g.photos.length) {
+      const photos = el("div", { class: "campusmap__photos" });
+      for (const photo of g.photos) {
+        photos.append(el("div", { class: "campusmap__photo" }, [
+          el("div", { class: "campusmap__photo-title", text: photo.title }),
+          el("div", { class: "campusmap__photo-meta", text: `${photo.direction} · ${photo.status === "unbound" ? "照片場地尚未綁定" : "待現場確認"}` }),
+        ]));
+      }
+      sheetBody.append(el("div", { class: "subhead", text: "場地照片參考" }), photos);
+    }
+    const detail = app.session.partner?.freshmanDetail ?? false;
+    sheetBody.append(button(
+      detail ? "隱藏尺寸與校正" : "顯示尺寸與校正",
+      () => app.setFreshmanDetail(!detail),
+      "btn btn--ghost",
+    ));
+    if (detail) {
+      for (const c of g.callouts.filter((x) => x.layer === "second")) {
+        sheetBody.append(el("p", { class: "hint", text: c.label }));
+      }
+    }
+  }
+
   function render(): void {
     const state = app.store.getState();
-    const role = app.session.partner?.role ?? "all";
-    title.textContent = state.name || "活動場佈";
+    const partner = app.session.partner;
+    const freshman = partner?.audience === "freshman";
+    const role = partner?.role ?? "all";
+    title.textContent = freshman ? app.freshmanGuide().headline : (state.name || "活動場佈");
+    title.classList.toggle("partnerbar__title--freshman", freshman);
 
     const status = app.partnerStatus();
     const tone = TONE_LIGHT[status.tone] ?? TONE_LIGHT.ok;
     light.className = `partnerbar__light ${tone.cls}`;
-    light.textContent = `${tone.dot} ${status.text}`;
+    light.textContent = freshman ? "📍 新生夥伴" : `${tone.dot} ${status.text}`;
+    light.style.display = freshman ? "none" : "";
+
+    roles.style.display = freshman ? "none" : "";
+    questions.style.display = freshman ? "flex" : "none";
+    layers.style.display = freshman ? "flex" : "none";
+    actions.style.display = freshman ? "none" : "grid";
+    paneToggle.style.display = freshman ? "grid" : "none";
 
     roles.querySelectorAll<HTMLButtonElement>(".rolechip").forEach((chip) =>
       chip.setAttribute("aria-pressed", String(chip.dataset.role === role)));
+    questions.querySelectorAll<HTMLButtonElement>(".freshmanq").forEach((chip) =>
+      chip.setAttribute("aria-pressed", String(chip.dataset.q === (partner?.freshmanQuestion ?? "where-we-are"))));
+    layers.querySelectorAll<HTMLButtonElement>(".freshmanlayer").forEach((chip) =>
+      chip.setAttribute("aria-pressed", String(chip.dataset.layer === (partner?.freshmanLayer ?? "campus"))));
 
-    renderBrief();
+    if (freshman) renderFreshmanBrief();
+    else renderBrief();
 
-    // §85: App records the tapped station; the sheet follows it. Opening is
-    // driven from state rather than from a click handler here, because the tap
-    // happens on the 3D canvas, not on any element this module owns.
     const tapped = app.session.partner?.stationObjectId ?? null;
     const tick = app.session.partner?.stationTap ?? 0;
-    if (tapped && tick !== shownTap) sheetKind = "station";
+    if (!freshman && tapped && tick !== shownTap) sheetKind = "station";
     else if (!tapped && sheetKind === "station") sheetKind = "none";
     shownTap = tick;
 
     sheet.style.display = sheetKind === "none" ? "none" : "flex";
     sheetFoot.style.display = "none";
-    if (sheetKind === "steps") renderSteps();
-    else if (sheetKind === "marks") renderMarks();
+    if (sheetKind === "steps") {
+      if (freshman) renderFreshmanSteps();
+      else renderSteps();
+    } else if (sheetKind === "marks") renderMarks();
     else if (sheetKind === "timeline") renderTimeline();
     else if (sheetKind === "suggest") renderSuggest();
     else if (sheetKind === "station") renderStation();
 
-    // Keep the action labels short enough to stay on one row on a phone; the
-    // rehearsal figure belongs in the timeline, not on the button.
     const hint = actions.querySelector(".partneraction");
     if (hint instanceof HTMLElement) {
       hint.textContent = app.session.simResult ? "▶ 再彩排一次" : "▶ 開始彩排";
     }
+
+    const pane = partner?.freshmanPane ?? "layout";
+    paneToggle.querySelectorAll<HTMLButtonElement>("[data-pane]").forEach((b) => {
+      const on = b.dataset.pane === pane || (pane === "split" && b.dataset.pane === "map");
+      b.setAttribute("aria-pressed", String(on));
+    });
   }
 
   return {
     top,
+    chrome,
+    mapHost,
     dock,
     sheet,
     update: render,

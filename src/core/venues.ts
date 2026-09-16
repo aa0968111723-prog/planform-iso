@@ -27,6 +27,8 @@ import {
   type Zone,
 } from "./model";
 import { wallAnchorToPosition } from "./placement";
+import { campusRefForVenuePreset, campusRefFromPlace } from "./campusNav";
+import type { TkuPlace } from "./tkuCampus";
 
 export interface VenueFixture {
   kind: "door" | "screen";
@@ -192,6 +194,34 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
         note: "講台上的合理起點位置，待現場校正",
       },
     ],
+  },
+  {
+    id: "venue:tku-e305",
+    name: "E305 照片參考場地（待現場校正）",
+    builtin: true,
+    // Door-plate and window-AC photographs identify this room as E305.
+    // Dimensions stay the generic classroom starting point — not E310's 12×9,
+    // not a measurement read off the photograph.
+    note: "工學大樓 3F E305 照片參考場地。門牌與窗型冷氣標記為 E305。長寬待現場校正，入口待現場確認。不是 E310。",
+    classroom: { name: "教室", length: 10, width: 8, x: 0, z: 0 },
+    corridor: { name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+    tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
+    fixtures: [
+      { kind: "door", areaId: "classroom", edge: "s", offset: 8.6 },
+      { kind: "screen", areaId: "classroom", edge: "n", offset: 5 },
+    ],
+    extraObjects: [
+      {
+        assetId: "builtin:lectern",
+        x: 4.2,
+        z: 0.7,
+        locked: false,
+        surface: "floor",
+        note: "照片可見木製講桌，位置為起點，待現場校正",
+      },
+    ],
+    calibrationNote: "E305 照片參考場地，尺寸待現場校正。入口待現場確認。不得把照片中的房間尺寸當成精確測量。",
+    defaultView: "top",
   },
   {
     id: "venue:tku-booth",
@@ -440,6 +470,8 @@ export function applyVenuePreset(
   }
   if (preset.calibrationNote) project.calibration.note = preset.calibrationNote;
   project.venuePresetId = preset.id;
+  const pin = campusRefForVenuePreset(preset.id);
+  if (pin) project.campusRef = pin;
 }
 
 /**
@@ -494,6 +526,15 @@ export function createProjectFromVenuePreset(preset: VenuePreset, name?: string)
   // Only on a NEW project: applying a template to an existing plan must not
   // yank the camera out from under whoever is working in it.
   if (preset.defaultView) project.view = preset.defaultView;
+  else project.view = "top";
+  return project;
+}
+
+/** Open a named Tamkang place without inventing that room's geometry. */
+export function createProjectFromTkuPlace(place: TkuPlace, name?: string): Project {
+  const preset = venuePresetById(place.venuePresetId) ?? BUILTIN_VENUE_PRESETS[0];
+  const project = createProjectFromVenuePreset(preset, name ?? place.name);
+  project.campusRef = campusRefFromPlace(place);
   return project;
 }
 

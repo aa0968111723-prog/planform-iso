@@ -25,7 +25,11 @@ import { showNewProjectWizard } from "./quickStart";
 import { buildProjectHome, type ProjectHomeHandles } from "./projectHome";
 import { ProjectRepository } from "../state/projectRepository";
 import { BUILD_INFO } from "../buildInfo";
+import { buildCampusMap, defaultCampusRef, type CampusMapHandles } from "./campusMap";
 import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
+import { currentPlaceOf, campusRefsEqual } from "../core/campusNav";
+import type { TkuCampusRef } from "../core/tkuCampus";
+import { photosForVenue, photoBindingLabel } from "../core/venuePhotos";
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
@@ -85,6 +89,8 @@ export class UI {
   private viewport: WorkspaceViewport;
   private mode: WorkspaceMode = "desktop";
   private builtHeaderMode: WorkspaceMode | null = null;
+  private campusOverlay: CampusMapHandles | null = null;
+  private freshmanMap: CampusMapHandles | null = null;
 
   constructor(private app: App, private root: HTMLElement) {
     this.statusBadge.setAttribute("aria-label", "開啟現場校正");
@@ -95,7 +101,7 @@ export class UI {
     root.append(
       this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
       this.box, this.toast, this.ctxbar, this.menu.root,
-      this.partner.top, this.partner.dock, this.partner.sheet,
+      this.partner.chrome, this.partner.dock, this.partner.sheet,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
       openMatArranger: () => {
@@ -127,7 +133,7 @@ export class UI {
 
     this.viewport = new WorkspaceViewport(root, app.scene.domElement);
     this.viewport.registerChrome({
-      header: [this.topbar, this.partner.top],
+      header: [this.topbar, this.partner.chrome],
       nav: [this.nav, this.partner.dock],
       left: this.left,
       right: this.right,
@@ -367,12 +373,13 @@ export class UI {
     aiQuick.setAttribute("aria-label", "AI 建議");
     aiQuick.title = "AI 建議";
     const team = button("👥 夥伴模式", () => this.app.enterPartnerMode(), "chip chip--primary");
+    const freshman = button("🌱 新生", () => this.app.enterPartnerMode("all", "freshman"), "chip chip--primary");
     const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
       this.homeButton("← 我的專案"),
       el("div", { class: "topbar__title", text: BRAND.name }),
-      history, flows, views, more, el("div", { class: "topbar__spacer" }), aiQuick, team, moreBtn,
+      history, flows, views, more, el("div", { class: "topbar__spacer" }), aiQuick, freshman, team, moreBtn,
     );
     this.topbar.append(this.statusBadge);
   }
@@ -449,6 +456,8 @@ export class UI {
           { label: "現場校正", onSelect: () => { this.app.setWorkflow("site"); this.app.startCalibration(); this.setSheet("workflow"); } },
           { label: "✦ AI 建議", sub: "先預覽，再決定要不要套用", onSelect: () => { this.agentSheet.open(); return true; } },
           { label: "👥 夥伴模式", sub: "給夥伴看的乾淨視圖", onSelect: () => this.app.enterPartnerMode() },
+          { label: "🌱 新生夥伴", sub: "校園位置與教室場佈", onSelect: () => this.app.enterPartnerMode("all", "freshman") },
+          { label: "🗺️ 校園位置", sub: "淡江大學地圖", onSelect: () => { this.openCampusMapOverlay(); return true; } },
         ],
       },
       {
@@ -645,13 +654,14 @@ export class UI {
   }
 
   /**
-   * 場地 first level is deliberately five things — 場地模板 / 教室尺寸 / 地磚 /
+   * 場地 first level is: 淡江校園位置 / 場地模板 / 教室尺寸 / 地磚 /
    * 現場校正 / 固定設施. Engineering parameters (X, Z, tile origin, tile
    * rotation) are real but rarely touched, so they sit in 進階設定 instead of
    * being the first thing a phone or tablet user meets.
    */
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
+      this.campusLocationSection(),
       this.venuePresetSection(),
       this.roomSizeSection(),
       this.tileSection(),
@@ -659,6 +669,29 @@ export class UI {
       this.fixtureSection(onPick),
       this.siteAdvancedSection(),
     ];
+  }
+
+  private campusLocationSection(): HTMLElement {
+    const s = this.app.store.getState();
+    const guideHeadline = this.app.freshmanGuide().headline;
+    const photos = s.venuePresetId ? photosForVenue(s.venuePresetId) : [];
+    const body: HTMLElement[] = [
+      el("p", { class: "campusmap__headline", text: guideHeadline }),
+      el("p", { class: "hint", text: "給第一次到淡江的新生看：哪個校園、哪一棟樓、幾樓、哪一間教室。" }),
+      button("🗺️ 看淡江校園地圖", () => this.openCampusMapOverlay(), "btn btn--primary"),
+      button("🌱 新生夥伴視圖", () => this.app.enterPartnerMode("all", "freshman"), "btn btn--big"),
+    ];
+    if (photos.length) {
+      const row = el("div", { class: "campusmap__photos" });
+      for (const photo of photos) {
+        row.append(el("div", { class: "campusmap__photo" }, [
+          el("div", { class: "campusmap__photo-title", text: photo.title }),
+          el("div", { class: "campusmap__photo-meta", text: `${photo.direction} · ${photoBindingLabel(photo)}` }),
+        ]));
+      }
+      body.push(el("div", { class: "subhead", text: "場地照片參考" }), row);
+    }
+    return section("淡江校園位置", body);
   }
 
   private venuePresetSection(): HTMLElement {
@@ -1269,6 +1302,7 @@ export class UI {
       // 「給夥伴看」是主流程第四步的一半 — 夥伴模式在這裡有一級入口
       // （手機不用再鑽 ⋯ 選單）。
       button("👥 夥伴模式（給志工看的現場畫面）", () => this.app.enterPartnerMode(), "btn btn--big"),
+      button("🌱 新生夥伴（校園位置＋教室場佈）", () => this.app.enterPartnerMode("all", "freshman"), "btn btn--big"),
       preExportChecklist,
       planSection,
       el("div", { class: "subhead", text: "活動資訊" }),
@@ -1459,22 +1493,105 @@ export class UI {
    */
   private updatePartnerMode(): void {
     const on = !!this.app.session.partner;
+    const freshman = this.app.session.partner?.audience === "freshman";
     this.root.classList.toggle("partner", on);
+    this.root.classList.toggle("freshman", !!on && freshman);
+    const pane = this.app.session.partner?.freshmanPane ?? "layout";
+    this.root.dataset.freshmanPane = on && freshman ? pane : "";
+    this.root.dataset.freshmanLayer = on && freshman ? (this.app.session.partner?.freshmanLayer ?? "") : "";
     if (on) {
       this.setSheet("none");
       this.menu.close();
       this.partner.update();
-    } else if (this.partner.currentSheet() !== "none") {
-      this.partner.closeSheet();
+      if (freshman && this.mode !== "phone" && pane === "map") {
+        this.app.session.partner!.freshmanPane = "split";
+        this.root.dataset.freshmanPane = "split";
+      }
+      this.syncFreshmanMap(freshman);
+    } else {
+      this.syncFreshmanMap(false);
+      if (this.partner.currentSheet() !== "none") this.partner.closeSheet();
     }
     if (on !== this.partnerWasOn) {
       this.partnerWasOn = on;
-      // Swapping the whole chrome changes the visible canvas rect, so re-frame
-      // once the new strips have actually been laid out and measured.
       requestAnimationFrame(() => requestAnimationFrame(() => {
         this.viewport.measure();
         this.app.recenterView();
+        this.freshmanMap?.invalidateSize();
       }));
+    }
+  }
+
+  private syncFreshmanMap(freshman: boolean): void {
+    const pane = this.app.session.partner?.freshmanPane ?? "layout";
+    const showMap = freshman && (pane === "map" || pane === "split");
+    const host = this.partner.mapHost;
+    if (!showMap) {
+      host.style.display = "none";
+      this.freshmanMap?.setVisible(false);
+      return;
+    }
+    host.style.display = "block";
+    if (!this.freshmanMap) {
+      this.freshmanMap = buildCampusMap({
+        initial: this.app.store.getState().campusRef ?? defaultCampusRef(),
+        mode: "embedded",
+        onRefChange: (ref) => this.app.setCampusRef(ref),
+        onEnterLayout: (ref) => {
+          this.applyCampusPlaceIfNeeded(ref);
+          this.app.setFreshmanLayer("layout");
+          this.app.setFreshmanQuestion("how-room-laid");
+        },
+      });
+      host.append(this.freshmanMap.root);
+    } else {
+      const ref = this.app.store.getState().campusRef ?? defaultCampusRef();
+      if (!campusRefsEqual(this.freshmanMap.currentRef(), ref)) {
+        this.freshmanMap.setRef(ref);
+      }
+    }
+    this.freshmanMap.setVisible(true);
+    requestAnimationFrame(() => this.freshmanMap?.invalidateSize());
+  }
+
+  private openCampusMapOverlay(): void {
+    this.campusOverlay?.destroy();
+    const overlay = el("div", { class: "campusmap-overlay" });
+    const map = buildCampusMap({
+      initial: this.app.store.getState().campusRef ?? defaultCampusRef(),
+      mode: "overlay",
+      onRefChange: (ref) => this.app.setCampusRef(ref),
+      onEnterLayout: (ref) => {
+        this.applyCampusPlaceIfNeeded(ref);
+        overlay.remove();
+        this.campusOverlay = null;
+        this.app.setView("top");
+        this.app.recenterView();
+        this.showToast("已進入室內場佈");
+      },
+      onClose: () => {
+        overlay.remove();
+        this.campusOverlay = null;
+      },
+    });
+    overlay.append(map.root);
+    this.root.append(overlay);
+    this.campusOverlay = map;
+    requestAnimationFrame(() => map.invalidateSize());
+  }
+
+  /**
+   * Pin a Tamkang place onto the current plan. Switching E305 ↔ E310 is an
+   * explicit venue change — photographs and room sizes never silently mix.
+   */
+  private applyCampusPlaceIfNeeded(ref: TkuCampusRef): void {
+    this.app.setCampusRef(ref);
+    const place = currentPlaceOf(ref);
+    if (!place?.venuePresetId) return;
+    if (place.venuePresetId === this.app.store.getState().venuePresetId) return;
+    if (window.confirm(`要把目前場地改成「${place.name}」嗎？E305 與 E310 是不同教室，不會互相覆蓋照片。`)) {
+      this.app.applyVenuePresetById(place.venuePresetId);
+      this.app.setCampusRef(ref);
     }
   }
 
