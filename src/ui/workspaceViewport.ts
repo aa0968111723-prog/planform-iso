@@ -247,6 +247,15 @@ export class WorkspaceViewport {
   private publish(s: WorkspaceViewportState): void {
     const style = this.root.style;
     style.setProperty("--ws-header-h", `${Math.round(s.metrics.headerHeight)}px`);
+    // Overlays such as the campus map must sit under the partner/editor bar,
+    // not under `--ws-header-h`, which already includes those overlays so the
+    // 3D canvas can frame the remaining pane. Using the combined value here
+    // would push the map down by its own height until the CTA leaves the
+    // viewport.
+    const chromeHeader = this.chrome
+      ? Math.max(0, ...headers(this.chrome).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)))
+      : 0;
+    style.setProperty("--ws-chrome-header-h", `${Math.round(chromeHeader)}px`);
     style.setProperty("--ws-nav-h", `${Math.round(s.metrics.bottomNavHeight)}px`);
     style.setProperty("--ws-safe-x", `${Math.round(s.safeRect.x - s.canvas.x)}px`);
     style.setProperty("--ws-safe-y", `${Math.round(s.safeRect.y - s.canvas.y)}px`);

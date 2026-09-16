@@ -40,6 +40,7 @@
   --topbar-h: 52px;
   /* Measured live by WorkspaceViewport; these are first-paint fallbacks. */
   --ws-header-h: 52px;
+  --ws-chrome-header-h: 52px;
   --ws-nav-h: 0px;
   --rail-left-w: 300px;
   --rail-right-w: 320px;
@@ -730,7 +731,7 @@ html, body {
 .tkumap {
   position: fixed;
   left: 0; right: 0;
-  top: var(--ws-header-h, 88px);
+  top: var(--ws-chrome-header-h, var(--ws-header-h, 88px));
   bottom: var(--ws-nav-h, 148px);
   z-index: 8;
   display: none;

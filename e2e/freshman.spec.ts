@@ -57,7 +57,9 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator(".tkumap__hit").first()).not.toContainText("E305");
       await page.locator('[data-testid="tku-map-search"]').fill("");
       await settle(page);
-      await page.locator(".tkumap__enter").click();
+      const enter = page.locator(".tkumap__enter");
+      await expect(enter).toBeInViewport();
+      await enter.click();
       await settle(page);
       await expect(page.locator("#app")).toHaveAttribute("data-freshman-stage", "layout");
       await expect(page.locator('[data-testid="tku-map"]')).toBeHidden();
