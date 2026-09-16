@@ -98,7 +98,10 @@ describe("freshman partner reading", () => {
     expect(view.boxes.some((b) => b.kind === "screen")).toBe(true);
     expect(view.boxes.some((b) => b.kind === "mat")).toBe(true);
     expect(view.boxes.some((b) => b.kind === "here")).toBe(true);
+    expect(view.boxes.some((b) => b.kind === "zone" && b.label === "報到區")).toBe(true);
     expect(view.labels.some((l) => l.tone === "here" && l.text === "你在這裡")).toBe(true);
+    expect(view.labels.some((l) => l.tone === "door")).toBe(false);
+    expect(view.labels.some((l) => l.tone === "zone")).toBe(false);
     expect(view.arrows.length).toBeGreaterThan(0);
     expect(view.detailLine).toBeNull();
     const detailed = layoutFreshmanPlan(project, buildFreshmanGuide(project, 0), true);

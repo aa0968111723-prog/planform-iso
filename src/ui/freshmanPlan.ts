@@ -108,6 +108,21 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
     svg.insertBefore(defs, svg.firstChild);
     plot.append(svg);
 
+    for (const box of view.boxes) {
+      if (!["zone", "mat", "staff", "door"].includes(box.kind) || !box.label) continue;
+      if (box.kind !== "door" && box.w < 4 && box.h < 4) continue;
+      const node = el("span", {
+        class: `fplan__inlabel fplan__inlabel--${box.kind}`,
+        text: `${box.icon ?? ""} ${box.label}`.trim(),
+      });
+      node.style.left = `${box.x + box.w / 2}%`;
+      node.style.top = box.kind === "door"
+        ? `${Math.max(4, box.y - 4)}%`
+        : `${box.y + box.h / 2}%`;
+      node.style.maxWidth = `${Math.max(box.w, 16)}%`;
+      plot.append(node);
+    }
+
     for (const label of view.labels) {
       const node = el("button", {
         type: "button",
@@ -116,12 +131,9 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
       }) as HTMLButtonElement;
       node.style.left = `${label.x}%`;
       node.style.top = `${label.y}%`;
-      if (label.id === "here" || label.id === "next" || label.id.startsWith("zone:")) {
-        const idx = guide.stops.findIndex((s) =>
-          label.id === "here" ? s === guide.stops[guide.stopIndex]
-            : label.id === "next" ? s === guide.stops[guide.stopIndex + 1]
-              : label.text.includes(s.title));
-        if (idx >= 0) {
+      if (label.id === "here" || label.id === "next") {
+        const idx = label.id === "here" ? guide.stopIndex : guide.stopIndex + 1;
+        if (idx >= 0 && idx < guide.stops.length) {
           node.addEventListener("click", () => app.setFreshmanStop(idx));
         }
       }

@@ -260,34 +260,15 @@ export function layoutFreshmanPlan(
     rawLabels.push({ id, x, y, text, tone, width, height: 16, priority });
   };
 
-  if (screen) {
-    const p = toPlot(project, screen.x, c.z + 0.2);
-    pushLabel("front", p.x, p.y + 4, "前方 · 投影幕", "front", 1, 88);
-  }
-  if (door) {
-    const p = toPlot(project, door.x, door.z);
-    pushLabel("door", p.x, p.y + 6, "入口", "door", 1, 48);
-  }
-  for (const zone of project.zones.filter((z) => !z.hidden)) {
-    const p = toPlot(project, zone.x, zone.z);
-    const title = `${zoneIcon(zone.type)} ${freshmanZoneTitle(zone.type, zone.name)}`;
-    pushLabel(`zone:${zone.id}`, p.x, p.y, title, "zone", 2, 72);
-  }
-  if (field) {
-    const p = toPlot(
-      project,
-      field.anchorX + (field.cols * field.itemWidth) / 2,
-      field.anchorZ + (field.rows * field.itemDepth) / 2,
-    );
-    pushLabel("mat", p.x, p.y, "地墊區", "zone", 1, 56);
-  }
+  // Zone / mat names sit inside their boxes. Overlay pills are only
+  // you-are-here and next so they never fight the door or zone titles.
   if (here) {
     const p = toPlot(project, here.x, here.z);
-    pushLabel("here", p.x, Math.min(94, p.y + 11), "你在這裡", "here", 0, 76);
+    pushLabel("here", p.x, Math.min(94, p.y + 12), "你在這裡", "here", 0, 76);
   }
   if (next) {
     const p = toPlot(project, next.x, next.z);
-    pushLabel("next", p.x, Math.max(8, p.y - 11), `下一步：${next.title}`, "next", 0, 100);
+    pushLabel("next", p.x, Math.max(8, p.y - 12), `下一步：${next.title}`, "next", 0, 100);
   }
   for (const arrow of arrows) {
     const mx = (arrow.from.x + arrow.to.x) / 2;

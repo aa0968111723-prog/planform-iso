@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { enterPartnerMode, isOnScreen, openWorkspace, probe, seedPlan, settle } from "./helpers";
+import { buildE310ClubGoldenProject } from "../src/core/quickStart";
+import { venuePresetById } from "../src/core/venues";
 
 const ENGINEERING = /latitude|longitude|\blat\b|\blng\b|mesh|shader|object id|debug|rotationDeg|\bX\s*[:：]|\bZ\s*[:：]/i;
 
@@ -10,17 +12,13 @@ const VIEWPORTS = [
 ];
 
 async function seedTamkangPlan(page: Page): Promise<void> {
-  await seedPlan(page);
-  await page.evaluate(() => {
+  const project = buildE310ClubGoldenProject(venuePresetById("venue:tku-e310")!);
+  await page.evaluate((payload) => {
     const pf = (window as unknown as {
-      planform: { store: { mutate(fn: (p: Record<string, unknown>) => void): void } };
+      planform: { store: { loadProject(p: unknown): void } };
     }).planform;
-    pf.store.mutate((p) => {
-      p.placeId = "E310";
-      p.venuePresetId = "venue:tku-e310";
-      p.name = "E310 新生場佈";
-    });
-  });
+    pf.store.loadProject(payload);
+  }, project);
 }
 
 async function enterFreshman(page: Page): Promise<void> {
@@ -51,6 +49,14 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator(".partnertop")).toContainText("工學大樓");
       await expect(page.locator(".partnertop")).toContainText("E310");
       await expect(page.locator(".layerchip")).toHaveCount(4);
+      if (vp.mode === "phone") {
+        for (const chip of await page.locator(".layerchip").all()) {
+          const box = await chip.boundingBox();
+          expect(box).toBeTruthy();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(vp.width + 1);
+        }
+      }
       await expect(page.locator(".campusmap")).toBeVisible();
       await expect(page.locator(".campuschip")).toHaveCount(3);
       await expect(page.locator(".campusmap__attr")).toContainText("OpenStreetMap");
@@ -83,8 +89,17 @@ for (const vp of VIEWPORTS) {
       const plot = await page.locator(".freshmanplan__plot").boundingBox();
       expect(plot?.height ?? 0).toBeGreaterThan(160);
       await expect(page.locator(".fplan__label--here")).toContainText("你在這裡");
+      await expect(page.locator(".fplan__inlabel--door")).toContainText("入口");
+      await expect(page.locator(".fplan__inlabel--mat")).toContainText("地墊區");
+      await expect(page.locator(".fplan__inlabel--zone").filter({ hasText: "報到區" })).toBeVisible();
+      await expect(page.locator(".fplan__inlabel--zone").filter({ hasText: "鞋子區" }).first()).toBeVisible();
       await expect(page.locator(".freshmanplan__legend")).toContainText("入口");
       await expect(page.locator(".freshmanplan__legend")).toContainText("地墊");
+      const here = await page.locator(".fplan__label--here").boundingBox();
+      const dock = await page.locator(".partnerdock").boundingBox();
+      expect(here).toBeTruthy();
+      expect(dock).toBeTruthy();
+      expect(here!.y + here!.height).toBeLessThan(dock!.y + 2);
       await page.locator(".freshmanactions .freshmanaction--accent").click();
       await expect(page.locator(".partnerbrief")).toContainText("你在這裡");
       await noHorizontalOverflow(page);
