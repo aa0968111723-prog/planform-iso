@@ -12,7 +12,8 @@ import {
   resolveProjectPlace,
 } from "./campusGuide";
 import { photosForPlace, type VenuePhotoRef } from "./venuePhotos";
-import type { Project, Zone, ZoneType } from "./model";
+import type { Project, SceneObject, Zone, ZoneType } from "./model";
+import type { PartnerEmphasis } from "./partner";
 
 export type FreshmanLayer = "campus" | "building" | "classroom" | "indoor";
 export type FreshmanInfoLayer = "essential" | "detail";
@@ -76,6 +77,48 @@ const JOURNEY: { type: ZoneType | "entrance" | "mats"; name: string }[] = [
   { type: "life", name: "生活組區" },
 ];
 
+/** First-layer indoor zones a freshman needs to name. Everything else is muted. */
+export const FRESHMAN_ZONE_TYPES: ReadonlySet<ZoneType> = new Set([
+  "registration", "shoe", "backpack", "meditation", "life",
+]);
+
+const FRESHMAN_ZONE_CAPTION: Record<string, string> = {
+  registration: "報到區",
+  shoe: "鞋子區",
+  backpack: "背包區",
+  meditation: "講師區",
+  life: "生活組區",
+};
+
+export function freshmanZoneCaption(zone: Pick<Zone, "type" | "name" | "icon">): string {
+  const caption = FRESHMAN_ZONE_CAPTION[zone.type];
+  if (caption) return `${zone.icon ? `${zone.icon} ` : ""}${caption}`;
+  return zone.name.replace(/[｜|].*$/, "").trim() || zone.name;
+}
+
+export function freshmanKeepsObject(object: Pick<SceneObject, "kind" | "assetId">): boolean {
+  if (object.kind === "door" || object.kind === "screen" || object.kind === "mat" || object.kind === "regTable") {
+    return true;
+  }
+  const id = object.assetId ?? "";
+  return /stage|lectern|blackboard|chalkboard|podium/i.test(id);
+}
+
+/** Mute desks, group zones and other editor clutter in the freshman indoor view. */
+export function freshmanEmphasis(project: Project): PartnerEmphasis {
+  const zones: PartnerEmphasis["zones"] = {};
+  const routes: PartnerEmphasis["routes"] = {};
+  const objects: PartnerEmphasis["objects"] = {};
+  for (const zone of project.zones) {
+    zones[zone.id] = FRESHMAN_ZONE_TYPES.has(zone.type) ? "primary" : "muted";
+  }
+  for (const route of project.routes) routes[route.id] = "muted";
+  for (const object of project.objects) {
+    objects[object.id] = freshmanKeepsObject(object) ? "primary" : "muted";
+  }
+  return { zones, routes, objects, empty: false };
+}
+
 function doorOf(project: Project): { x: number; z: number } | null {
   const door = project.objects.find((o) => o.kind === "door" && !o.hidden);
   if (door) return { x: door.x, z: door.z };
@@ -133,12 +176,10 @@ function journeyStops(project: Project, door: { x: number; z: number }): {
     const zone = project.zones.find((z) => z.type === step.type && !z.hidden);
     if (!zone) continue;
     const side = sideOf(door.x, zone.x);
-    const name = zone.name || step.name;
-    const phrase = step.type === "registration"
+    const name = FRESHMAN_ZONE_CAPTION[step.type] ?? (zone.name || step.name);
+    const phrase = step.type === "registration" || step.type === "shoe" || step.type === "backpack"
       ? `${side}${name}`
-      : step.type === "shoe" || step.type === "backpack"
-        ? `${side}${name}`
-        : name;
+      : name;
     stops.push({ key: zone.id, name, phrase, point: zoneCenter(zone) });
   }
   return stops;

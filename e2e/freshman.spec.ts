@@ -45,6 +45,12 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator(".campusmap__card")).toContainText("入口待現場確認");
       await expect(page.locator(".campusmap")).toContainText("OpenStreetMap");
       await page.locator(".tku-pin__dot, .campusmap__fallback").first().waitFor({ timeout: 8000 }).catch(() => undefined);
+      await Promise.race([
+        page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 8000 }),
+        page.locator(".campusmap__fallback").waitFor({ timeout: 8000 }),
+      ]).catch(() => undefined);
+      await expect(page.locator(".left")).toBeHidden();
+      await expect(page.locator(".right")).toBeHidden();
       if (process.env.WALKTHROUGH_DIR) {
         await page.screenshot({
           path: `${process.env.WALKTHROUGH_DIR}/freshman_campus_${vp.name}_layout.png`,

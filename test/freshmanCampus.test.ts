@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { photosForPlace, photosForVenue, photosLeakAcrossVenues, unboundPhotos, VENUE_PHOTO_REFS } from "../src/core/venuePhotos";
 import { createProjectFromVenuePreset, venuePresetById } from "../src/core/venues";
-import { buildFreshmanGuide, freshmanBriefLines, freshmanCopyLeaks } from "../src/core/freshman";
+import {
+  buildFreshmanGuide,
+  freshmanBriefLines,
+  freshmanCopyLeaks,
+  freshmanEmphasis,
+  freshmanZoneCaption,
+} from "../src/core/freshman";
 import { buildQuickStartProject, DEFAULT_NEEDS } from "../src/core/quickStart";
 
 function installLocalStorage(): void {
@@ -57,6 +63,7 @@ describe("freshman copy stays in plain Chinese", () => {
     expect(guide.headline).toContain("E310");
     expect(guide.howToRoom).toMatch(/工學大樓/);
     expect(guide.howLayout).toMatch(/入口/);
+    expect(guide.howLayout).toMatch(/報到區/);
     expect(guide.youAreNow).toContain("入口");
     expect(guide.path.length).toBeGreaterThan(1);
     const indoor = freshmanBriefLines(guide, "indoor");
@@ -66,6 +73,15 @@ describe("freshman copy stays in plain Chinese", () => {
     expect(freshmanBriefLines(guide, "campus")[3]?.text).toContain("校園位置圖");
     expect(freshmanCopyLeaks(guide)).toEqual([]);
     expect(guide.lines.join("\n")).not.toMatch(/latitude|longitude|mesh|shader/i);
+    const emphasis = freshmanEmphasis(project);
+    const group = project.zones.find((z) => z.type === "group");
+    if (group) expect(emphasis.zones[group.id]).toBe("muted");
+    const registration = project.zones.find((z) => z.type === "registration");
+    if (registration) {
+      expect(emphasis.zones[registration.id]).toBe("primary");
+      expect(freshmanZoneCaption(registration)).toContain("報到區");
+    }
+    expect(project.objects.filter((o) => o.kind === "chair").every((o) => emphasis.objects[o.id] === "muted")).toBe(true);
   });
 
   it("does not describe an E305 event as E310", () => {

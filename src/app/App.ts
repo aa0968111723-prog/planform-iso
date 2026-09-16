@@ -114,6 +114,7 @@ import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
 import { applyVenuePreset, isTkuClassroomVenue, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
 import {
   buildFreshmanGuide,
+  freshmanEmphasis,
   type FreshmanInfoLayer,
   type FreshmanLayer,
   type PartnerAudience,
@@ -1848,7 +1849,9 @@ export class App {
     const showCue = !!guide?.youArePoint && (p.layer === "indoor" || p.splitView);
     return {
       role: p.audience === "freshman" ? "all" : p.role,
-      emphasis: partnerEmphasis(this.viewState, p.audience === "freshman" ? "all" : p.role),
+      emphasis: p.audience === "freshman"
+        ? freshmanEmphasis(this.viewState)
+        : partnerEmphasis(this.viewState, p.role),
       marks: p.audience === "freshman" ? [] : partnerMarks(this.session.issues),
       freshman: showCue && guide?.youArePoint
         ? {

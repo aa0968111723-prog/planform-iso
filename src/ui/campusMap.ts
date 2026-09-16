@@ -241,7 +241,7 @@ export function buildCampusMap(opts: {
       if (tilesOk === 0) showFallback(navigator.onLine === false
         ? "目前沒有網路，改用已儲存的校園資料。"
         : "地圖圖磚載入較慢或失敗，改用已儲存的校園資料。");
-    }, 5000);
+    }, 1800);
     map.on("moveend", declutter);
     map.on("zoomend", declutter);
     frameMap();
@@ -288,7 +288,9 @@ export function buildCampusMap(opts: {
     for (const pin of pins) {
       const icon = L.divIcon({
         className: `tku-pin tku-pin--${pin.weight}`,
-        html: `<span class="tku-pin__dot"></span><span class="tku-pin__label" data-pin="${escapeHtml(pin.id)}">${escapeHtml(pin.shortLabel)}</span>`,
+        html: pin.weight === "muted"
+          ? `<span class="tku-pin__dot"></span>`
+          : `<span class="tku-pin__dot"></span><span class="tku-pin__label" data-pin="${escapeHtml(pin.id)}">${escapeHtml(pin.shortLabel)}</span>`,
         iconSize: [0, 0],
         iconAnchor: [0, 0],
       });
@@ -335,7 +337,7 @@ export function buildCampusMap(opts: {
       if (!label) continue;
       const pinId = label.dataset.pin ?? "";
       const pin = byId.get(pinId);
-      const show = visible.has(pinId) || pin?.weight === "active";
+      const show = (visible.has(pinId) || pin?.weight === "active") && pin?.weight !== "muted";
       label.style.visibility = show ? "visible" : "hidden";
     }
   }

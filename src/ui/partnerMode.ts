@@ -217,9 +217,7 @@ export function buildPartnerMode(
     const freshman = isFreshman();
     const layer = app.session.partner?.layer ?? "indoor";
     if (freshman) {
-      if (layer !== "indoor") {
-        actions.append(button("進入室內場佈", () => app.setPartnerLayer("indoor"), "btn partneraction partneraction--accent"));
-      } else {
+      if (layer === "indoor") {
         actions.append(button("看校園位置", () => app.setPartnerLayer("campus"), "btn partneraction"));
       }
       actions.append(button("🖼 存成圖", sharePartnerImage, "btn partneraction"));

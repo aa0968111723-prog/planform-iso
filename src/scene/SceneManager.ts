@@ -60,6 +60,7 @@ import {
 import { propFaceOptions, propForAssetId } from "../core/propCatalog";
 import type { PlaybackStationResult } from "../core/eventFlow";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
+import { freshmanKeepsObject, freshmanZoneCaption } from "../core/freshman";
 
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
@@ -693,14 +694,18 @@ export class SceneManager {
       const path = partner.freshman.path ?? [];
       if (path.length > 1) this.addFreshmanPath(path);
       if (partner.freshman.screen) this.addFreshmanScreen(partner.freshman.screen);
-      this.addFreshmanCue(partner.freshman.youAre.x, partner.freshman.youAre.z, "#22d3ee", partner.freshman.youAre.label, 1.55);
+      const you = partner.freshman.youAre;
+      // Sit in the corridor just outside the door so 「你在這裡」 is not buried
+      // under the ① badge on the threshold.
+      this.addFreshmanCue(you.x, you.z + 1.05, "#22d3ee", "你在這裡", 1.7);
       if (partner.freshman.nextStop) {
+        const next = partner.freshman.nextStop;
         this.addFreshmanCue(
-          partner.freshman.nextStop.x,
-          partner.freshman.nextStop.z,
+          next.x + 0.85,
+          next.z,
           "#fb923c",
-          `下一站：${partner.freshman.nextStop.label}`,
-          1.2,
+          `下一站：${next.label}`,
+          1.35,
         );
       }
     }
@@ -731,17 +736,29 @@ export class SceneManager {
       head.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
       this.partnerGroup.add(head);
     }
-    for (const stop of path) {
+    for (let i = 0; i < path.length; i++) {
+      const stop = path[i];
+      let bx = stop.x, bz = stop.z;
+      if (i > 0) {
+        const prev = path[i - 1];
+        const span = Math.hypot(stop.x - prev.x, stop.z - prev.z);
+        if (span > 0.4) {
+          bx = stop.x - ((stop.x - prev.x) / span) * 0.7;
+          bz = stop.z - ((stop.z - prev.z) / span) * 0.7;
+        }
+      } else {
+        bz += 0.45;
+      }
       const badge = new Mesh(
         new CylinderGeometry(0.22, 0.22, 0.06, 20),
         new MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
       );
-      badge.position.set(stop.x, 0.08, stop.z);
+      badge.position.set(bx, 0.08, bz);
       this.partnerGroup.add(badge);
       const label = new TextLabel({ width: 160, height: 160, fontSize: 108 });
       label.set(circledNumber(stop.index), "#f8fafc");
       label.sprite.scale.set(0.85, 0.85, 1);
-      label.sprite.position.set(stop.x, 0.7, stop.z);
+      label.sprite.position.set(bx, 0.7, bz);
       this.partnerLabels.push(label);
       this.partnerGroup.add(label.sprite);
     }
@@ -827,7 +844,11 @@ export class SceneManager {
     const { tile } = project;
     this.floorGroup.visible = this.layersState.areas;
     this.tileGroup.visible = this.layersState.tiles && tile.visible && !simplify;
-    const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile, venue: project.venuePresetId, theme: this.theme });
+    const freshmanEssential = !!this.partner?.freshman?.essential;
+    const sig = JSON.stringify({
+      c: project.classroom, k: project.corridor, t: tile,
+      venue: project.venuePresetId, theme: this.theme, freshman: freshmanEssential,
+    });
     if (sig === this.lastAreaSig) return;
     this.lastAreaSig = sig;
     if (!this.hasCentered) { this.recenter(project); this.hasCentered = true; }
@@ -854,21 +875,23 @@ export class SceneManager {
       floor.receiveShadow = true;
       areaGroup.add(floor);
       areaGroup.add(outdoor ? this.buildAreaOutline(area) : this.buildAreaWalls(area));
-      const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
-      // Always the pale palette colour. TextLabel paints its own dark pill
-      // behind the text (label.ts: rgba(15,23,42,.72)), so the label's contrast
-      // is against the PILL, never against the floor. An E310-only override to
-      // a dark slate `#43534f` was reading it as floor text and landed at
-      // 1.04:1 — the room and corridor names were invisible on the venue the
-      // release uses as its visual baseline.
-      label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
-      label.sprite.scale.set(1.55, 0.36, 1);
-      label.sprite.position.set(area.x + 1.25, 0.14, area.z + 0.55);
-      label.sprite.userData.sceneLabel = { id: `area:${area.id}`, priority: 1 as LabelPriority };
-      areaGroup.add(label.sprite);
+      if (!freshmanEssential) {
+        const label = new TextLabel({ width: 320, height: 72, fontSize: 34 });
+        // Always the pale palette colour. TextLabel paints its own dark pill
+        // behind the text (label.ts: rgba(15,23,42,.72)), so the label's contrast
+        // is against the PILL, never against the floor. An E310-only override to
+        // a dark slate `#43534f` was reading it as floor text and landed at
+        // 1.04:1 — the room and corridor names were invisible on the venue the
+        // release uses as its visual baseline.
+        label.set(area.name, area.id === "classroom" ? this.palette.areaLabelClassroom : this.palette.areaLabelCorridor);
+        label.sprite.scale.set(1.55, 0.36, 1);
+        label.sprite.position.set(area.x + 1.25, 0.14, area.z + 0.55);
+        label.sprite.userData.sceneLabel = { id: `area:${area.id}`, priority: 1 as LabelPriority };
+        areaGroup.add(label.sprite);
+      }
       this.floorGroup.add(areaGroup);
     }
-    if (e310) this.floorGroup.add(this.buildE310Fixtures(project));
+    if (e310 && !freshmanEssential) this.floorGroup.add(this.buildE310Fixtures(project));
     this.tileGroup.add(this.buildTileGrid(project, project.classroom, e310 ? 0x8b918c : 0x64748b, e310 ? 0.26 : 0.42));
     this.tileGroup.add(this.buildTileGrid(project, project.corridor, e310 ? 0x8f5f64 : 0x64748b, e310 ? 0.3 : 0.42));
   }
@@ -1059,7 +1082,8 @@ export class SceneManager {
       // their materials are shared from a cache, so fading them would tint every
       // other object of the same kind too.
       const roleMuted = !!this.partner && this.partner.emphasis.objects[o.id] === "muted";
-      entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind)) && !roleMuted;
+      const freshmanHide = freshmanEssential && !freshmanKeepsObject(o);
+      entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind)) && !roleMuted && !freshmanHide;
       if (entry.label) {
         entry.label.sprite.visible = showLabels && labelMode !== "none" && !o.hidden;
         if (showLabels) {
@@ -1208,8 +1232,9 @@ export class SceneManager {
         entry = { mesh, overlay, sig };
         this.arrayNodes.set(g.id, entry);
       }
-      entry.mesh.visible = !g.hidden;
-      entry.overlay.visible = !g.hidden;
+      const freshmanHideArray = !!this.partner?.freshman?.essential && !isFieldMatGroup(g);
+      entry.mesh.visible = !g.hidden && !freshmanHideArray;
+      entry.overlay.visible = !g.hidden && !freshmanHideArray;
     }
     for (const [id, entry] of this.arrayNodes) {
       if (!seen.has(id)) {
@@ -1287,23 +1312,27 @@ export class SceneManager {
         this.zoneNodes.set(zone.id, entry);
       }
       entry.group.position.set(zone.x, 0.02, zone.z);
-      entry.group.visible = !zone.hidden;
+      const freshmanEssential = !!partner?.freshman?.essential;
+      const muted = !!partner && partner.emphasis.zones[zone.id] === "muted";
+      entry.group.visible = !zone.hidden && !(freshmanEssential && muted);
       const fill = entry.group.getObjectByName("fill") as Mesh;
       const edges = entry.group.getObjectByName("edges") as LineSegments;
       const fillMat = fill.material as MeshStandardMaterial;
       const edgeMat = edges.material as LineBasicMaterial;
       fillMat.color.set(zone.color);
       edgeMat.color.set(zone.color);
-      const cap = zone.capacity && !partner?.freshman?.essential ? ` · ${zone.capacity}人` : "";
+      const cap = zone.capacity && !freshmanEssential ? ` · ${zone.capacity}人` : "";
       entry.label.sprite.position.y = partner ? 0.8 : 0.5;
       if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the
         // rest stay as faint context so the room still makes sense.
-        const muted = partner.emphasis.zones[zone.id] === "muted";
-        fillMat.opacity = muted ? 0.05 : 0.16;
+        fillMat.opacity = muted ? 0.05 : freshmanEssential ? 0.22 : 0.16;
         edgeMat.opacity = muted ? 0.25 : 1;
         entry.label.sprite.visible = !muted;
-        entry.label.set(`${zone.icon ?? ""} ${zone.name}${cap}`.trim(), "#f8fafc");
+        entry.label.set(
+          freshmanEssential ? freshmanZoneCaption(zone) : `${zone.icon ?? ""} ${zone.name}${cap}`.trim(),
+          "#f8fafc",
+        );
       } else {
         fillMat.opacity = selection.has(zone.id) ? 0.16 : 0.1;
         edgeMat.opacity = selection.has(zone.id) ? 1 : 0.72;

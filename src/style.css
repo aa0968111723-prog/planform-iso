@@ -818,7 +818,7 @@ html, body {
 }
 .tku-pin--active .tku-pin__dot { width: 18px; height: 18px; background: var(--accent); }
 .tku-pin--related .tku-pin__dot { background: #38bdf8; }
-.tku-pin--muted { opacity: 0.42; }
+.tku-pin--muted .tku-pin__label { display: none; }
 .tku-pin__label {
   position: absolute; left: 16px; top: -2px; white-space: nowrap;
   padding: 2px 6px; border-radius: 8px; font-size: 12px; font-weight: 700;
@@ -828,11 +828,14 @@ html, body {
 .tku-pin--active .tku-pin__label { border-color: var(--accent); color: var(--accent-text); }
 
 #app[data-partner-audience="freshman"] .partnerbrief {
-  max-height: 34dvh; overflow-y: auto; align-items: stretch;
-  flex-direction: column; gap: 4px; font-size: 13px;
+  max-height: none; overflow-y: visible; align-items: stretch;
+  flex-direction: column; gap: 2px; font-size: 13px;
 }
 #app[data-partner-audience="freshman"] .partnerbrief__line {
   display: flex; width: 100%;
+}
+#app[data-partner-audience="freshman"]:not([data-partner-layer="indoor"]) .partneractions {
+  grid-template-columns: 1fr 1fr;
 }
 #app.partner .toast { display: none !important; }
 #app.partner, #app.partner .partnertop, #app.partner .partnerdock, #app.partner .campusmap {
@@ -842,6 +845,22 @@ html, body {
 #app[data-ws-mode="phone"] .layerchip {
   padding: 6px 10px; font-size: 12px;
 }
+#app[data-ws-mode="phone"][data-partner-audience="freshman"] .partnerbrief {
+  font-size: 12px; padding: 6px 10px; gap: 1px;
+}
+#app[data-ws-mode="phone"][data-partner-audience="freshman"] .partnerbrief__line {
+  line-height: 1.35;
+}
+#app[data-ws-mode="phone"] .campusmap__photos { display: none; }
+#app[data-ws-mode="phone"] .campusmap__stage { min-height: 240px; }
+#app[data-ws-mode="phone"] .campusmap__card {
+  padding: 8px 12px 6px;
+}
+#app[data-ws-mode="phone"] .campusmap__card-actions {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+#app[data-ws-mode="phone"] .campusmap__enter { grid-column: 1 / -1; }
+#app[data-ws-mode="phone"] .campusmap__nav { min-height: 40px; font-size: 12px; padding: 6px 8px; }
 .campusmap__canvas.leaflet-container {
   width: 100%; height: 100%;
   background: var(--surface-2);
