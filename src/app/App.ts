@@ -93,6 +93,16 @@ import {
   type RoleBriefing,
 } from "../core/partner";
 import {
+  freshmanBriefing,
+  freshmanJourney,
+  freshmanLayoutView,
+  resolveProjectCampusRef,
+  type FreshmanBriefing,
+  type FreshmanMapFocus,
+  type FreshmanStage,
+} from "../core/freshmanGuide";
+import { campusRefFromPlace, placeById, type TkuCampusId } from "../core/tkuCampus";
+import {
   buildRehearsalTimeline,
   comparePlainMetrics,
   plainMetrics,
@@ -111,7 +121,7 @@ import {
 import { applyCalibrationPath, type CalibrationPath } from "../core/calibration";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
-import { applyVenuePreset, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
+import { applyVenuePreset, saveUserVenuePreset, usesFieldMats, venuePresetById, venuePresetFromProject } from "../core/venues";
 import {
   agentPositions,
   detectBottlenecks,
@@ -211,9 +221,15 @@ export interface Session {
   };
 }
 
+export type PartnerAudience = "staff" | "freshman";
+
 /** Live state of Partner Mode — the visual-first, read-only view of a plan. */
 export interface PartnerSession {
   role: PartnerRole;
+  audience: PartnerAudience;
+  freshmanStage: FreshmanStage;
+  freshmanStep: number;
+  freshmanFocus?: FreshmanMapFocus;
   /** Rehearsal beats from the last run; empty until 演練 is pressed. */
   timeline: RehearsalEvent[];
   /** Pending AI suggestion, shown as a visual before/after. */
@@ -1736,9 +1752,19 @@ export class App {
    * Enter the visual-first partner view. Nothing about the plan changes — the
    * editor state is left exactly as it was so leaving returns you to your work.
    */
-  enterPartnerMode(role: PartnerRole = "all"): void {
+  enterPartnerMode(role: PartnerRole = "all", audience: PartnerAudience = "staff"): void {
     this.partnerReturnView = this.state.view;
-    this.session.partner = { role, timeline: [], suggestion: null, busy: false, stationObjectId: null };
+    this.session.partner = {
+      role,
+      audience,
+      freshmanStage: audience === "freshman" ? "campus" : "layout",
+      freshmanStep: 0,
+      freshmanFocus: audience === "freshman" ? this.freshmanFocusFromProject() : undefined,
+      timeline: [],
+      suggestion: null,
+      busy: false,
+      stationObjectId: null,
+    };
     this.session.selection = new Set();
     this.cancelPlacement();
     if (this.session.mode === "measure") this.stopMeasure();
@@ -1748,6 +1774,76 @@ export class App {
     this.render();
     // Framing is left to the UI: the partner chrome has not been laid out yet,
     // so fitting here would frame the plan against the editor's rect.
+  }
+
+  enterFreshmanPartnerMode(): void {
+    this.enterPartnerMode("all", "freshman");
+  }
+
+  setFreshmanStage(stage: FreshmanStage): void {
+    if (!this.session.partner) return;
+    this.session.partner.audience = "freshman";
+    this.session.partner.freshmanStage = stage;
+    if (stage === "layout") this.setView("top");
+    this.render();
+  }
+
+  patchFreshmanMap(patch: {
+    campusId?: TkuCampusId;
+    buildingCode?: string;
+    placeId?: string;
+    stage?: FreshmanStage;
+  }): void {
+    if (!this.session.partner) return;
+    this.session.partner.audience = "freshman";
+    const cur = this.session.partner.freshmanFocus ?? this.freshmanFocusFromProject();
+    const next: FreshmanMapFocus = { campusId: patch.campusId ?? cur.campusId };
+    if ("buildingCode" in patch) {
+      if (patch.buildingCode) next.buildingCode = patch.buildingCode;
+    } else if (cur.buildingCode) {
+      next.buildingCode = cur.buildingCode;
+    }
+    if ("placeId" in patch) {
+      if (patch.placeId) next.placeId = patch.placeId;
+    } else if (cur.placeId) {
+      next.placeId = cur.placeId;
+    }
+    this.session.partner.freshmanFocus = next;
+    if (patch.stage) this.session.partner.freshmanStage = patch.stage;
+    if (patch.stage === "layout") this.setView("top");
+    this.render();
+  }
+
+  private freshmanFocusFromProject(): FreshmanMapFocus {
+    const ref = resolveProjectCampusRef(this.state);
+    return {
+      campusId: ref.campusId === "cyber" ? "tamsui" : ref.campusId,
+      buildingCode: ref.buildingCode,
+      placeId: ref.placeId,
+    };
+  }
+
+  setFreshmanStep(step: number): void {
+    if (!this.session.partner) return;
+    const n = freshmanJourney(this.state).length;
+    this.session.partner.freshmanStep = n ? Math.min(n - 1, Math.max(0, step)) : 0;
+    this.render();
+  }
+
+  advanceFreshmanStep(): void {
+    const p = this.session.partner;
+    if (!p) return;
+    this.setFreshmanStep(p.freshmanStep + 1);
+  }
+
+  applyTkuPlace(placeId: string): boolean {
+    const place = placeById(placeId);
+    if (!place) return false;
+    const ok = this.applyVenuePresetById(place.venuePresetId);
+    this.store.mutate((p) => {
+      p.campusRef = campusRefFromPlace(place);
+    }, { history: false });
+    return ok;
   }
 
   exitPartnerMode(): void {
@@ -1766,19 +1862,30 @@ export class App {
   }
 
   /** Emphasis + marks the scene needs to render the partner view. */
-  private partnerView(): { role: PartnerRole; emphasis: PartnerEmphasis; marks: PartnerMark[] } | null {
+  private partnerView(): {
+    role: PartnerRole;
+    emphasis: PartnerEmphasis;
+    marks: PartnerMark[];
+    freshman: ReturnType<typeof freshmanLayoutView> | null;
+  } | null {
     const p = this.session.partner;
     if (!p) return null;
+    const freshman = p.audience === "freshman";
     return {
-      role: p.role,
-      emphasis: partnerEmphasis(this.viewState, p.role),
-      marks: partnerMarks(this.session.issues),
+      role: freshman ? "all" : p.role,
+      emphasis: partnerEmphasis(this.viewState, freshman ? "all" : p.role),
+      marks: freshman ? [] : partnerMarks(this.session.issues),
+      freshman: freshman ? freshmanLayoutView(this.viewState, p.freshmanStep) : null,
     };
   }
 
   partnerBriefing(): RoleBriefing {
     const role = this.session.partner?.role ?? "all";
     return buildRoleBriefing(this.state, role, this.activeScenario());
+  }
+
+  freshmanBriefing(): FreshmanBriefing {
+    return freshmanBriefing(this.state, this.session.partner?.freshmanStep ?? 0);
   }
 
   partnerMarks(): PartnerMark[] {
@@ -2021,7 +2128,7 @@ export class App {
       gap: opts?.gap ?? 0.1,
       aisleWidth: opts?.centralAisleWidth ?? Math.max(vs.minAisleWidth, 0.9),
       bounds,
-      mode: opts?.mode ?? (this.state.venuePresetId === "venue:tku-classroom" || this.state.venuePresetId === "venue:tku-e310" ? "field" : "individual"),
+      mode: opts?.mode ?? (usesFieldMats(this.state.venuePresetId) ? "field" : "individual"),
     });
     this.notifyUi();
     return this.session.matCandidates;

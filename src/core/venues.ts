@@ -27,6 +27,7 @@ import {
   type Zone,
 } from "./model";
 import { wallAnchorToPosition } from "./placement";
+import { uniquePlaceForVenuePreset } from "./tkuCampus";
 
 export interface VenueFixture {
   kind: "door" | "screen";
@@ -194,6 +195,33 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
     ],
   },
   {
+    id: "venue:tku-e305",
+    name: "E305 照片參考（待現場校正）",
+    builtin: true,
+    note: "工學大樓 3F E305 照片參考場地。門牌與冷氣標記為 E305。尺寸待現場校正。不是 E310。",
+    // Same generic classroom starting box as 淡江教室模板 — deliberately
+    // not E310's 12×9 photo-count estimate. Photos are recognition, not a survey.
+    classroom: { name: "教室", length: 10, width: 8, x: 0, z: 0 },
+    corridor: { name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+    tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
+    fixtures: [
+      { kind: "door", areaId: "classroom", edge: "s", offset: 8.6 },
+      { kind: "screen", areaId: "classroom", edge: "n", offset: 5 },
+    ],
+    extraObjects: [
+      {
+        assetId: "builtin:lectern",
+        x: 3.8,
+        z: 0.7,
+        locked: false,
+        surface: "floor",
+        note: "木製講桌示意，待現場校正",
+      },
+    ],
+    calibrationNote: "照片參考起點，尺寸待現場校正。不得把照片裡的距離當成實測。",
+    defaultView: "top",
+  },
+  {
     id: "venue:tku-booth",
     name: "戶外攤位（3×3 帳篷）",
     builtin: true,
@@ -281,6 +309,13 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
 
 export function boothVenuePreset(): VenuePreset {
   return BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-booth")!;
+}
+
+/** Continuous teal 巧拼 field, not individual sit-mats. */
+export function usesFieldMats(venuePresetId: string | undefined): boolean {
+  return venuePresetId === "venue:tku-classroom"
+    || venuePresetId === "venue:tku-e310"
+    || venuePresetId === "venue:tku-e305";
 }
 
 /** Resolve a preset asset id against the builtin catalog, then the booth one. */
@@ -439,7 +474,20 @@ export function applyVenuePreset(
     project.validationSettings = { ...project.validationSettings, ...preset.validationOverrides };
   }
   if (preset.calibrationNote) project.calibration.note = preset.calibrationNote;
+  const previousVenue = project.venuePresetId;
   project.venuePresetId = preset.id;
+  const place = uniquePlaceForVenuePreset(preset.id);
+  if (place) {
+    project.campusRef = {
+      campusId: place.campusId,
+      buildingCode: place.buildingCode,
+      floor: place.floor,
+      room: place.room,
+      placeId: place.id,
+    };
+  } else if (uniquePlaceForVenuePreset(previousVenue)) {
+    delete project.campusRef;
+  }
 }
 
 /**

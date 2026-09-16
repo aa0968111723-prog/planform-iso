@@ -710,6 +710,119 @@ html, body {
 }
 #app[data-ws-mode="phone"].partner .comparerow__arrow { display: none; }
 
+#app.partner.freshman { overflow-x: hidden; }
+#app.partner.freshman .partnerroles { display: none; }
+#app.partner .partnerstages { display: none; gap: 6px; overflow-x: auto; padding: 0 24px 2px 0; }
+#app.partner.freshman .partnerstages { display: flex; }
+.stagechip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); background: var(--surface-1);
+  border-radius: 999px; padding: 6px 10px; min-height: 36px;
+  font: inherit; color: var(--text); white-space: nowrap;
+}
+.stagechip[aria-pressed="true"] { border-color: var(--accent); background: rgba(2, 132, 199, 0.12); color: var(--accent-text); }
+.partneractions--freshman { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#app[data-ws-mode="desktop"].partner .partneractions--freshman {
+  grid-template-columns: repeat(4, minmax(0, 180px));
+}
+.partneraction.is-on { border-color: var(--accent); color: var(--accent-text); }
+
+.tkumap {
+  position: fixed;
+  left: 0; right: 0;
+  top: var(--ws-header-h, 88px);
+  bottom: var(--ws-nav-h, 148px);
+  z-index: 8;
+  display: none;
+  flex-direction: column;
+  background: #dce7ee;
+  overflow: hidden;
+  min-width: 0;
+}
+.tkumap[hidden] { display: none !important; }
+#app.partner.freshman .tkumap:not([hidden]) { display: flex; }
+#app.partner.freshman[data-freshman-stage="layout"] .tkumap { display: none !important; }
+#app[data-ws-mode="tablet"].partner.freshman:not([data-freshman-stage="layout"]) .tkumap,
+#app[data-ws-mode="desktop"].partner.freshman:not([data-freshman-stage="layout"]) .tkumap {
+  bottom: auto;
+  height: min(46vh, 520px);
+  border-bottom: 1px solid var(--border);
+}
+.tkumap__bar {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 12px 6px;
+  background: var(--panel-solid);
+  flex: 0 0 auto;
+}
+.tkumap__search { width: 100%; min-height: 40px; }
+.tkumap__campuses { display: flex; gap: 6px; }
+.tkumap__campus { flex: 1; min-height: 36px; }
+.tkumap__campus[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); }
+.tkumap__results {
+  display: none; flex-direction: column; gap: 4px;
+  padding: 0 12px 8px; background: var(--panel-solid); max-height: 28vh; overflow: auto;
+}
+.tkumap__hit { text-align: left; width: 100%; }
+.tkumap__stage { position: relative; flex: 1 1 auto; min-height: 160px; min-width: 0; }
+.tkumap__canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.tkumap__fallback {
+  display: none; position: absolute; inset: 12px 12px 12px 12px;
+  background: var(--panel-solid); border-radius: 14px; padding: 12px;
+  border: 1px solid var(--border); z-index: 3; max-height: none; overflow: auto;
+}
+.tkumap__fallback--on { display: block; }
+.tkumap__north {
+  position: absolute; top: 10px; right: 12px; z-index: 2;
+  width: 32px; height: 32px; border-radius: 999px;
+  background: rgba(15, 23, 42, 0.86); color: #f8fafc;
+  font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+}
+.tkumap__attrib {
+  position: absolute; left: 8px; bottom: 8px;
+  font-size: 11px; color: #334155; background: rgba(255,255,255,.86);
+  padding: 2px 6px; border-radius: 4px; z-index: 2;
+}
+.tkumap__fallback-title { margin: 0 0 8px; font-weight: 700; }
+.tkumap__dir { display: flex; flex-direction: column; gap: 6px; }
+.tkumap__dir-btn { text-align: left; }
+.tkumap__dir-btn.is-active { border-color: var(--accent); }
+.tkumap__sheet {
+  flex: 0 0 auto;
+  max-height: 34%;
+  overflow: auto;
+  padding: 10px 12px 12px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: var(--panel-solid);
+  border-top: 1px solid var(--border);
+}
+.tkumap__sheet-title { font-weight: 760; font-size: 16px; }
+.tkumap__sheet-line { margin: 4px 0 8px; color: var(--text-dim); font-size: 13px; }
+.tkumap__sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.tkumap__enter { width: 100%; }
+.tkumap__photos { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+.tkumap__photo { margin: 0; width: 148px; flex: 0 0 auto; }
+.tkumap__photo img { width: 148px; height: 92px; object-fit: cover; border-radius: 10px; display: block; }
+.tkumap__photo figcaption { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.tkumap__photo-tag { display: block; font-size: 11px; color: var(--warn-text); }
+.tkumap__rooms { display: flex; flex-wrap: wrap; gap: 6px; }
+.tkumap-pin { background: none !important; border: none !important; }
+.tkumap-pin__dot {
+  display: block; width: 16px; height: 16px; margin: 6px auto 0;
+  border-radius: 50%; background: #64748b; box-shadow: 0 0 0 3px rgba(255,255,255,.9);
+}
+.tkumap-pin.is-active .tkumap-pin__dot { width: 22px; height: 16px; background: #e11d48; }
+.tkumap-pin.is-muted .tkumap-pin__dot { opacity: 0.45; transform: scale(0.75); }
+.tkumap-pin__label {
+  display: block; margin-top: 2px; padding: 1px 6px; border-radius: 999px;
+  background: #0f172a; color: #f8fafc; font-size: 11px; text-align: center;
+  white-space: nowrap;
+}
+.leaflet-container { background: #dce7ee; width: 100%; height: 100%; }
+
+#app.partner.freshman .partnersheet {
+  max-height: min(42dvh, 360px);
+}
+
 /* --- quick start -------------------------------------------------------- */
 .quickstart {
   /* Above Project Home (z-index 70): the new-project wizard opens on top of

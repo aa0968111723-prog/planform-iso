@@ -15,6 +15,8 @@ import {
   formatCampusLine,
   parseTkuRoomCode,
   placesWithPublishedCapacity,
+  searchTkuDirectory,
+  uniquePlaceForVenuePreset,
 } from "../src/core/tkuCampus";
 import { venuePresetById } from "../src/core/venues";
 
@@ -65,7 +67,7 @@ describe("Tamkang campus directory", () => {
 
   it("featured Quick Start places stay a short honest list", () => {
     expect(featuredTkuPlaces().map((p) => p.id)).toEqual([
-      "E308", "E310", "SG320", "SG109", "scroll-plaza",
+      "E308", "E305", "E310", "SG320", "SG109", "scroll-plaza",
     ]);
   });
 
@@ -150,6 +152,23 @@ describe("Tamkang campus directory", () => {
   it("formats a campus pin without claiming a survey", () => {
     expect(formatCampusLine({ campusId: "tamsui", buildingCode: "E", floor: 3, room: "10" }))
       .toBe("淡水校園 · E 工學大樓 · 3F · 室 10");
+  });
+
+  it("search keeps E305 and E310 as different rooms", () => {
+    const e305 = searchTkuDirectory("E305");
+    const e310 = searchTkuDirectory("E310");
+    expect(e305[0]?.placeId).toBe("E305");
+    expect(e310[0]?.placeId).toBe("E310");
+    expect(e305[0]?.placeId).not.toBe(e310[0]?.placeId);
+    expect(searchTkuDirectory("SG320")[0]?.placeId).toBe("SG320");
+    expect(searchTkuDirectory("工學大樓")[0]?.buildingCode).toBe("E");
+    expect(searchTkuDirectory("淡水")[0]?.kind).toBe("campus");
+  });
+
+  it("unique venue presets do not share a place", () => {
+    expect(uniquePlaceForVenuePreset("venue:tku-e305")?.id).toBe("E305");
+    expect(uniquePlaceForVenuePreset("venue:tku-e310")?.id).toBe("E310");
+    expect(uniquePlaceForVenuePreset("venue:tku-classroom")).toBeUndefined();
   });
 });
 

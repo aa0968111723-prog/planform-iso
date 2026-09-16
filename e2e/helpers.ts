@@ -230,3 +230,14 @@ export async function enterPartnerMode(page: Page): Promise<void> {
   await expect(page.locator("#app")).toHaveClass(/partner/);
   await settle(page);
 }
+
+export async function enterFreshmanPartnerMode(page: Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as {
+    planform: { app: { applyVenuePresetById(id: string): boolean; enterFreshmanPartnerMode(): void } };
+  }).planform.app.applyVenuePresetById("venue:tku-e310"));
+  await page.evaluate(() => (window as unknown as {
+    planform: { app: { enterFreshmanPartnerMode(): void } };
+  }).planform.app.enterFreshmanPartnerMode());
+  await expect(page.locator("#app")).toHaveClass(/freshman/);
+  await settle(page);
+}

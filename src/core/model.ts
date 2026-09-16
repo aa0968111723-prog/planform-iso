@@ -22,6 +22,15 @@
 
 export const PROJECT_VERSION = 8;
 
+/** Directory pin. Same shape as TkuCampusRef; kept here so older builds can ignore it. */
+export interface ProjectCampusRef {
+  campusId: "tamsui" | "taipei" | "lanyang" | "cyber";
+  buildingCode?: string;
+  floor?: number;
+  room?: string;
+  placeId?: string;
+}
+
 export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
 export interface AreaConfig {
@@ -832,6 +841,12 @@ export interface Project {
   eventDate?: string;
   /** Built-in venue identity, retained so honest calibration copy survives reload. */
   venuePresetId?: string;
+  /**
+   * Pin into the Tamkang directory. Optional: older files omit it, and the
+   * freshman view then derives a campus from the venue preset when it uniquely
+   * identifies a room (E305 / E310). Never stores indoor room coordinates.
+   */
+  campusRef?: ProjectCampusRef;
   /** Short activity description shown in the team/partner view. */
   description: string;
   classroom: AreaConfig;
@@ -1024,6 +1039,7 @@ function validationEqual(a: ValidationSettings, b: ValidationSettings): boolean 
  */
 export function venueNeedsCalibration(project: Project): boolean {
   if (project.venuePresetId === "venue:tku-e310") return true;
+  if (project.venuePresetId === "venue:tku-e305") return true;
   return (project.calibration.note ?? "").trim() !== "";
 }
 

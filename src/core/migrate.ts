@@ -17,6 +17,7 @@ import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog"
 import { BOOTH_STATION_TYPES, BOOTH_ZONE_ROLES, defaultBoothParams } from "./boothCatalog";
 import { templateFromBooth } from "./interactionCompile";
 import { syncPropEntries } from "./propCatalog";
+import type { TkuCampusRef } from "./tkuCampus";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
@@ -1065,22 +1066,26 @@ export function migrateProject(input: Partial<Project>): Project {
   p.props = migrateProps(input.props);
   if (!p.props) delete p.props;
   rebindPropStations(p);
-  // Regenerate the mirrored catalog entries from the definitions on EVERY
-  // load. They are derived data, and nothing guaranteed they were present:
-  // a project whose `catalogExtras` was stripped (an older build, a
-  // hand-edited file, an import) came back with its props intact and no
-  // entries, so every placed prop resolved to a plain grey table — no faces,
-  // no anchors, no plan symbol — and nothing would ever have corrected it.
-  if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
-  // Regenerate the mirrored catalog entries from the definitions on EVERY
-  // load. They are derived data, and nothing guaranteed they were present:
-  // a project whose `catalogExtras` was stripped (an older build, a
-  // hand-edited file, an import) came back with its props intact and no
-  // entries, so every placed prop resolved to a plain grey table — no faces,
-  // no anchors, no plan symbol — and nothing would ever have corrected it.
+  p.campusRef = migrateCampusRef(input.campusRef);
+  if (!p.campusRef) delete p.campusRef;
   if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
 
   return p;
+}
+
+function migrateCampusRef(raw: unknown): TkuCampusRef | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const campusId = o.campusId;
+  if (campusId !== "tamsui" && campusId !== "taipei" && campusId !== "lanyang" && campusId !== "cyber") {
+    return undefined;
+  }
+  const ref: TkuCampusRef = { campusId };
+  if (typeof o.buildingCode === "string" && o.buildingCode.trim()) ref.buildingCode = o.buildingCode.trim().toUpperCase();
+  if (typeof o.floor === "number" && Number.isFinite(o.floor)) ref.floor = o.floor;
+  if (typeof o.room === "string" && o.room.trim()) ref.room = o.room;
+  if (typeof o.placeId === "string" && o.placeId.trim()) ref.placeId = o.placeId.trim();
+  return ref;
 }
 
 export function catalogFromProject(project: Project): AssetCatalog {

@@ -16,7 +16,8 @@
 
 import type { Project } from "../core/model";
 import { buildE310ClubGoldenProject, buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
-import { BUILTIN_VENUE_PRESETS, createProjectFromVenuePreset, listUserVenuePresets, type VenuePreset } from "../core/venues";
+import { BUILTIN_VENUE_PRESETS, createProjectFromVenuePreset, listUserVenuePresets, venuePresetById, type VenuePreset } from "../core/venues";
+import { campusRefFromPlace, placeById, searchTkuDirectory } from "../core/tkuCampus";
 import { button, el } from "./dom";
 
 export interface NewProjectResult {
@@ -120,10 +121,36 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     card.innerHTML = "";
     card.append(...stepHead(2, "在哪裡辦？", `專案：${projectName}`));
 
+    const search = el("input", {
+      type: "search",
+      class: "field__input",
+      placeholder: "搜尋教室代碼，例如 E305、E308、E310、SG320",
+      "aria-label": "搜尋淡江教室",
+    }) as HTMLInputElement;
+    const hitsBox = el("div", { class: "quickstart__hits" });
+    const pickPlace = (placeId: string): void => {
+      const place = placeById(placeId);
+      if (!place) return;
+      const venue = venuePresetById(place.venuePresetId);
+      if (!venue) return;
+      renderNeedsStep(venue, place.id);
+    };
+    search.addEventListener("input", () => {
+      hitsBox.innerHTML = "";
+      const q = search.value.trim();
+      if (!q) return;
+      for (const hit of searchTkuDirectory(q).slice(0, 6)) {
+        if (hit.kind !== "place" || !hit.placeId) continue;
+        hitsBox.append(button(`${hit.title} · ${hit.subtitle}`, () => pickPlace(hit.placeId!), "btn btn--ghost"));
+      }
+    });
+    card.append(search, hitsBox);
+
     const tku = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-classroom") ?? BUILTIN_VENUE_PRESETS[0];
     const rect = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:rect-classroom");
     const blank = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:blank");
     const e310 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e310");
+    const e305 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e305");
 
     if (e310) {
       // The 30-person club class is the setup the club actually photographs
@@ -153,6 +180,18 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
             participants: 60,
           });
         }, "btn btn--big btn--ghost"),
+      );
+    }
+
+    if (e305) {
+      card.append(
+        el("div", { class: "quickstart__recommended" }, [
+          el("span", { class: "quickstart__eyebrow", text: "照片參考場地（不是 E310）" }),
+          el("strong", { text: "E305 工學大樓教室" }),
+          el("span", { class: "hint", text: "門牌與冷氣標記為 E305。尺寸待現場校正。" }),
+          button("用 E305 照片參考場地", () => renderNeedsStep(e305), "btn btn--big"),
+        ]),
+        el("p", { class: "hint", text: e305.note }),
       );
     }
 
@@ -203,13 +242,14 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
 
   // --- step 3: needs + head count ---------------------------------------
 
-  const renderNeedsStep = (venue: VenuePreset): void => {
+  const renderNeedsStep = (venue: VenuePreset, placeId?: string): void => {
     card.innerHTML = "";
     // E310 exists for one purpose — the club's real events there are lectures
     // with on-site payment, a teacher zone and a life-crew corner. Default the
     // ticks (and 60 people below) to that reality instead of a generic 30.
-    const isE310 = venue.id === "venue:tku-e310";
-    const needs: QuickStartNeeds = isE310
+        const isE310 = venue.id === "venue:tku-e310";
+    const isE305 = venue.id === "venue:tku-e305";
+    const needs: QuickStartNeeds = isE310 || isE305
       ? { ...DEFAULT_NEEDS, payment: true, life: true, teacher: true }
       : { ...DEFAULT_NEEDS };
     let centralAisle = true;
@@ -261,17 +301,21 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     card.append(
       button("建立專案", () => {
         const participants = Math.max(1, Math.min(300, Number(countInput.value) || 30));
+        const project = buildQuickStartProject({
+          venue,
+          eventName: projectName,
+          participants,
+          needs,
+          centralAisle,
+        });
+        const place = placeId ? placeById(placeId) : undefined;
+        if (place) project.campusRef = campusRefFromPlace(place);
+        if (isE305) project.view = "top";
         finish({
           name: projectName,
           participants,
           venue,
-          project: buildQuickStartProject({
-            venue,
-            eventName: projectName,
-            participants,
-            needs,
-            centralAisle,
-          }),
+          project,
         });
       }, "btn btn--big btn--primary"),
       el("div", { class: "quickstart__foot" }, [

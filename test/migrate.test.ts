@@ -105,10 +105,18 @@ describe("project migration", () => {
     expect(a.id).not.toBe(b.id);
   });
 
-  it("migrateProject({ id: \"proj_keep\" }) 保留原本的 id", () => {
-    expect(migrateProject({ id: "proj_keep" } as never).id).toBe("proj_keep");
-    // "" and non-strings from hand-edited or foreign JSON get a fresh one.
-    expect(migrateProject({ id: "" } as never).id).toBeTruthy();
-    expect(migrateProject({ id: 7 } as never).id).toBeTruthy();
+  it("keeps campusRef optional so old files still open", () => {
+    const p = migrateProject({ version: 8, name: "legacy" } as never);
+    expect(p.campusRef).toBeUndefined();
+    const withRef = migrateProject({
+      version: 8,
+      name: "e310",
+      campusRef: { campusId: "tamsui", buildingCode: "E", floor: 3, room: "10", placeId: "E310" },
+    } as never);
+    expect(withRef.campusRef).toEqual({
+      campusId: "tamsui", buildingCode: "E", floor: 3, room: "10", placeId: "E310",
+    });
+    const junk = migrateProject({ version: 8, campusRef: { campusId: "mars" } } as never);
+    expect(junk.campusRef).toBeUndefined();
   });
 });

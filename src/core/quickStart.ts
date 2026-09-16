@@ -21,7 +21,7 @@ import {
   type ZoneType,
 } from "./model";
 import { routePreset } from "./routes";
-import { createProjectFromVenuePreset, type VenuePreset } from "./venues";
+import { createProjectFromVenuePreset, usesFieldMats, type VenuePreset } from "./venues";
 
 export interface QuickStartNeeds {
   mats: boolean;
@@ -228,7 +228,7 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
       gap: 0,
       aisleWidth: 0.9,
       bounds: matArea,
-      mode: project.venuePresetId === "venue:tku-classroom" || project.venuePresetId === "venue:tku-e310" ? "field" : "individual",
+      mode: usesFieldMats(project.venuePresetId) ? "field" : "individual",
     });
     const preferred =
       (config.centralAisle ? candidates.find((cand) => cand.id === "aisle" || cand.id === "field-aisle") : null) ??

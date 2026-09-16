@@ -87,7 +87,26 @@ export interface TkuPlace {
   clubUse?: "primary" | "frequent" | "office" | "outdoor" | "fallback";
   mentionCount?: number;
   publishedCapacity?: number;
+  /**
+   * Indoor entrance on the campus map. Unsurveyed doors stay `pending` —
+   * the UI must say 「入口待現場確認」 instead of inventing a pin.
+   */
+  entranceStatus?: "surveyed" | "pending";
+  entranceHint?: string;
   note: string;
+}
+
+export type TkuSearchKind = "campus" | "building" | "place";
+
+export interface TkuSearchHit {
+  kind: TkuSearchKind;
+  id: string;
+  title: string;
+  subtitle: string;
+  campusId: TkuCampusId;
+  buildingCode?: string;
+  placeId?: string;
+  score: number;
 }
 
 export interface TkuMapLink {
@@ -218,7 +237,7 @@ export function findTkuPlaceInText(query: string): { place: TkuPlace; evidence: 
 }
 
 export function featuredTkuPlaces(): TkuPlace[] {
-  const order = ["E308", "E310", "SG320", "SG109", "scroll-plaza"];
+  const order = ["E308", "E305", "E310", "SG320", "SG109", "scroll-plaza"];
   return order.map(placeById).filter((p): p is TkuPlace => !!p);
 }
 
@@ -259,4 +278,114 @@ export function formatCampusLine(ref: TkuCampusRef): string {
     ref.room ? `室 ${ref.room}` : null,
   ].filter(Boolean);
   return bits.join(" · ");
+}
+
+function scoreNeedle(hay: string, needle: string): number {
+  if (!needle) return 0;
+  if (hay === needle) return 100;
+  if (hay.startsWith(needle)) return 80;
+  if (hay.includes(needle)) return 50;
+  return 0;
+}
+
+/**
+ * Search campuses, buildings and classrooms. Room codes win (E305 vs D305).
+ * Building coordinates are never implied by a classroom hit.
+ */
+export function searchTkuDirectory(query: string): TkuSearchHit[] {
+  const q = query.trim();
+  if (!q) return [];
+  const n = norm(q);
+  const hits: TkuSearchHit[] = [];
+
+  const parsed = parseTkuRoomCode(q);
+  if (parsed) {
+    const exact = TKU_PLACES.find((p) => p.id.toUpperCase() === parsed.code);
+    if (exact) {
+      hits.push(placeHit(exact, 200));
+    } else {
+      const fallback = findTkuPlace(parsed.code);
+      if (fallback) hits.push(placeHit(fallback, 120));
+    }
+  }
+
+  for (const campus of TKU_CAMPUSES) {
+    if (campus.id === "cyber") continue;
+    const s = Math.max(scoreNeedle(norm(campus.name), n), scoreNeedle(norm(campus.nameEn), n), scoreNeedle(campus.id, n));
+    if (s) {
+      hits.push({
+        kind: "campus",
+        id: `campus:${campus.id}`,
+        title: campus.name,
+        subtitle: campus.address ?? campus.note,
+        campusId: campus.id,
+        score: s + 10,
+      });
+    }
+  }
+
+  for (const b of TKU_BUILDINGS) {
+    const needles = [b.code, b.name, b.nameEn, ...(b.aliases ?? [])];
+    let s = 0;
+    for (const needle of needles) s = Math.max(s, scoreNeedle(norm(needle), n));
+    if (b.code.toUpperCase() === q.toUpperCase()) s = Math.max(s, 160);
+    if (s) {
+      hits.push({
+        kind: "building",
+        id: `b:${b.code}`,
+        title: `${b.code} ${b.name}`,
+        subtitle: campusById(b.campusId)?.name ?? "",
+        campusId: b.campusId,
+        buildingCode: b.code,
+        score: s,
+      });
+    }
+  }
+
+  for (const p of TKU_PLACES) {
+    if (hits.some((h) => h.kind === "place" && h.placeId === p.id)) continue;
+    const needles = [p.id, p.name, ...(p.aliases ?? [])];
+    let s = 0;
+    for (const needle of needles) s = Math.max(s, scoreNeedle(norm(needle), n));
+    if (s) hits.push(placeHit(p, s));
+  }
+
+  hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "zh-Hant"));
+  const seen = new Set<string>();
+  return hits.filter((h) => {
+    if (seen.has(h.id)) return false;
+    seen.add(h.id);
+    return true;
+  }).slice(0, 24);
+}
+
+function placeHit(p: TkuPlace, score: number): TkuSearchHit {
+  const b = p.buildingCode ? buildingByCode(p.buildingCode) : undefined;
+  const floor = p.floor != null ? `${p.floor}F` : null;
+  return {
+    kind: "place",
+    id: `p:${p.id}`,
+    title: p.id.match(/^[A-Z]{1,2}\d/) ? `${p.id} ${p.name.replace(p.id, "").trim()}`.trim() : p.name,
+    subtitle: [campusById(p.campusId)?.name, b?.name, floor].filter(Boolean).join(" · "),
+    campusId: p.campusId,
+    buildingCode: p.buildingCode,
+    placeId: p.id,
+    score,
+  };
+}
+
+export function uniquePlaceForVenuePreset(venuePresetId: string | undefined): TkuPlace | undefined {
+  if (venuePresetId === "venue:tku-e310") return placeById("E310");
+  if (venuePresetId === "venue:tku-e305") return placeById("E305");
+  return undefined;
+}
+
+export function campusRefFromPlace(place: TkuPlace): TkuCampusRef {
+  return {
+    campusId: place.campusId,
+    buildingCode: place.buildingCode,
+    floor: place.floor,
+    room: place.room,
+    placeId: place.id,
+  };
 }

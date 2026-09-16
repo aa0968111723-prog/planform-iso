@@ -92,14 +92,26 @@
 沒有 utilization、throughput、bottleneck station id 這類字眼。若 agent 交回來的方案
 和現況完全一樣，直接說「目前的排法已經夠順」，不會端出一組沒有差別的對照圖。
 
+## 新生夥伴視圖（校園位置＋教室場佈）
+
+給第一次來淡江的新生看，不是給場佈工程師看。頂部固定路徑：
+
+`淡江大學 · 淡水校園 · 工學大樓 · E310 · 3F`
+
+四個畫面：校園 → 樓館 → 教室 → 室內場佈。地圖用 OpenStreetMap＋Leaflet，不需要 API Key。
+樓館針腳只標「樓館位置」，沒有實測的教室入口就寫「入口待現場確認」。
+
+室內場佈預設正上方俯視。第一層只留入口、區域名稱、動線、你在這裡、下一站。
+
+E305 是照片參考場地，E310 是既有模板，兩者不得混用。
+
 ## 驗收
 
 - `test/partner.test.ts`：角色 focus / emphasis、briefing 文案（含「不得出現工程用語」
   的正規表達式斷言）、marks 排序與上限、時鐘與時長格式、Timeline 敘事、before/after
   比較的三種結論。
-- `e2e/partner.spec.ts`（`npm run test:e2e`）：在 390×844、360×800、768×1024、
-  1024×768、1366×1024 逐一驗證 canvas-first 無 sidebar、五個角色、演練時間軸、
-  before/after 圖與數字、唯讀、離開後編輯器完好、專案資料未被修改。
+- `test/freshmanGuide.test.ts`、`test/e305.test.ts`、`test/campusMap.test.ts`：E305／E310 不混淆、校園搜尋、新生文案。
+- `e2e/freshman.spec.ts`：390×844、834×1112、1440×1000 新生地圖與場佈；地圖失敗不白屏。
 
 ## 與舊「檢視給團隊」的關係
 

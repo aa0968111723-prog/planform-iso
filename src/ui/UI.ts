@@ -25,7 +25,7 @@ import { showNewProjectWizard } from "./quickStart";
 import { buildProjectHome, type ProjectHomeHandles } from "./projectHome";
 import { ProjectRepository } from "../state/projectRepository";
 import { BUILD_INFO } from "../buildInfo";
-import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
+import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets, usesFieldMats } from "../core/venues";
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
@@ -95,7 +95,7 @@ export class UI {
     root.append(
       this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
       this.box, this.toast, this.ctxbar, this.menu.root,
-      this.partner.top, this.partner.dock, this.partner.sheet,
+      this.partner.top, this.partner.dock, this.partner.sheet, this.partner.map,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
       openMatArranger: () => {
@@ -133,6 +133,7 @@ export class UI {
       right: this.right,
       sheets: [this.partner.sheet],
       bars: [this.ctxbar, this.placebar, this.measurebar, this.agentSheet.root],
+      topOverlays: [this.partner.map],
     });
     this.viewport.start();
     this.viewport.subscribe((state) => {
@@ -140,6 +141,7 @@ export class UI {
       // Everything that frames the world uses the measured visible rect, so the
       // camera never assumes the whole window is canvas.
       this.app.scene.setViewportRects(state.canvas, state.safeRect, state.focusRect);
+      this.partner.resizeMap();
       this.onModeMaybeChanged();
     });
 
@@ -367,12 +369,13 @@ export class UI {
     aiQuick.setAttribute("aria-label", "AI 建議");
     aiQuick.title = "AI 建議";
     const team = button("👥 夥伴模式", () => this.app.enterPartnerMode(), "chip chip--primary");
+    const freshman = button("🗺️ 新生", () => this.app.enterFreshmanPartnerMode(), "chip chip--primary");
     const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
       this.homeButton("← 我的專案"),
       el("div", { class: "topbar__title", text: BRAND.name }),
-      history, flows, views, more, el("div", { class: "topbar__spacer" }), aiQuick, team, moreBtn,
+      history, flows, views, more, el("div", { class: "topbar__spacer" }), aiQuick, team, freshman, moreBtn,
     );
     this.topbar.append(this.statusBadge);
   }
@@ -449,6 +452,7 @@ export class UI {
           { label: "現場校正", onSelect: () => { this.app.setWorkflow("site"); this.app.startCalibration(); this.setSheet("workflow"); } },
           { label: "✦ AI 建議", sub: "先預覽，再決定要不要套用", onSelect: () => { this.agentSheet.open(); return true; } },
           { label: "👥 夥伴模式", sub: "給夥伴看的乾淨視圖", onSelect: () => this.app.enterPartnerMode() },
+          { label: "🗺️ 新生夥伴", sub: "校園位置與教室場佈", onSelect: () => this.app.enterFreshmanPartnerMode() },
         ],
       },
       {
@@ -653,6 +657,7 @@ export class UI {
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
       this.venuePresetSection(),
+      this.campusMapSection(),
       this.roomSizeSection(),
       this.tileSection(),
       this.calibrationSection(),
@@ -696,6 +701,17 @@ export class UI {
       }, "btn btn--ghost"),
     ]));
     return section("場地模板", body);
+  }
+
+  private campusMapSection(): HTMLElement {
+    return section("淡江校園位置", [
+      el("p", { class: "hint", text: "給第一次來的夥伴看：哪個校園、哪一棟、幾樓、哪一間教室。" }),
+      button("🗺️ 看淡江校園地圖", () => this.app.enterFreshmanPartnerMode(), "btn btn--big"),
+      button("新生場佈圖", () => {
+        this.app.enterFreshmanPartnerMode();
+        this.app.setFreshmanStage("layout");
+      }, "btn btn--ghost"),
+    ]);
   }
 
   private roomSizeSection(): HTMLElement {
@@ -880,7 +896,7 @@ export class UI {
     const venueId = this.app.store.getState().venuePresetId;
     if (venueId !== this.matModeVenue) {
       this.matModeVenue = venueId;
-      if (venueId === "venue:tku-classroom" || venueId === "venue:tku-e310") this.matMode = "field";
+      if (usesFieldMats(venueId)) this.matMode = "field";
     }
     // One head count everywhere: follow the session (seeded from the event's
     // scenario) unless the user has typed something here since.
@@ -1268,6 +1284,7 @@ export class UI {
     return section("分享 / 匯出", [
       // 「給夥伴看」是主流程第四步的一半 — 夥伴模式在這裡有一級入口
       // （手機不用再鑽 ⋯ 選單）。
+      button("🗺️ 新生夥伴（校園位置＋教室場佈）", () => this.app.enterFreshmanPartnerMode(), "btn btn--big"),
       button("👥 夥伴模式（給志工看的現場畫面）", () => this.app.enterPartnerMode(), "btn btn--big"),
       preExportChecklist,
       planSection,
@@ -1460,6 +1477,12 @@ export class UI {
   private updatePartnerMode(): void {
     const on = !!this.app.session.partner;
     this.root.classList.toggle("partner", on);
+    this.root.classList.toggle("freshman", on && this.app.session.partner?.audience === "freshman");
+    if (on && this.app.session.partner?.audience === "freshman") {
+      this.root.dataset.freshmanStage = this.app.session.partner.freshmanStage;
+    } else {
+      delete this.root.dataset.freshmanStage;
+    }
     if (on) {
       this.setSheet("none");
       this.menu.close();

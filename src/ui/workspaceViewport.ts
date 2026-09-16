@@ -32,6 +32,8 @@ export interface WorkspaceChrome {
   bars: HTMLElement[];
   /** Extra bottom sheets that behave like `left`/`right` (partner sheet). */
   sheets?: HTMLElement[];
+  /** Top-covering overlays (campus map split) counted as extra header. */
+  topOverlays?: HTMLElement[];
 }
 
 export interface WorkspaceViewportState {
@@ -100,6 +102,7 @@ export class WorkspaceViewport {
     const nodes = [
       ...headers(chrome), ...navs(chrome), chrome.left, chrome.right,
       ...(chrome.sheets ?? []), ...chrome.bars,
+      ...(chrome.topOverlays ?? []),
     ];
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver?.disconnect();
@@ -192,7 +195,16 @@ export class WorkspaceViewport {
     const c = this.chrome;
     if (!c) return { ...EMPTY_CHROME };
     // Team view swaps the editing header for its own bar; take whichever is up.
-    const header = Math.max(0, ...headers(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
+    const headerFromChrome = Math.max(0, ...headers(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
+    let header = headerFromChrome;
+    for (const node of c.topOverlays ?? []) {
+      if (!visible(node)) continue;
+      const r = node.getBoundingClientRect();
+      // Full-bleed overlays (phone map) hide the canvas on purpose. Only a
+      // split map that leaves a layout pane should steal header height.
+      if (r.height > canvas.height * 0.6) continue;
+      header = Math.max(header, r.bottom - canvas.y);
+    }
     // Editor bottom nav and partner dock are mutually exclusive; take whichever is up.
     const nav = Math.max(0, ...navs(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
     const partnerDock = Math.max(0, ...navs(c)

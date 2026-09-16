@@ -60,6 +60,7 @@ import {
 import { propFaceOptions, propForAssetId } from "../core/propCatalog";
 import type { PlaybackStationResult } from "../core/eventFlow";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
+import type { FreshmanLayoutView } from "../core/freshmanGuide";
 
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
@@ -130,6 +131,7 @@ export interface PartnerPresentation {
   role: PartnerRole;
   emphasis: PartnerEmphasis;
   marks: PartnerMark[];
+  freshman?: FreshmanLayoutView | null;
 }
 
 /** Same language as the §85 sentences: your post, the visitor, the queue, the way out. */
@@ -648,7 +650,9 @@ export class SceneManager {
    * handful and they change with every validation pass.
    */
   private syncPartner(partner: PartnerPresentation | null): void {
-    const sig = partner ? JSON.stringify(partner.marks) : "";
+    const sig = partner
+      ? JSON.stringify({ marks: partner.marks, freshman: partner.freshman ?? null })
+      : "";
     if (sig === this.lastPartnerSig) { this.partnerGroup.visible = !!partner; return; }
     this.lastPartnerSig = sig;
     for (const label of this.partnerLabels) label.dispose();
@@ -671,17 +675,96 @@ export class SceneManager {
       halo.rotation.x = -Math.PI / 2;
       halo.position.set(mark.x, 0.05, mark.z);
       this.partnerGroup.add(halo);
-      // Only things you must act on get words on the plan. A green mark is a
-      // reassuring dot; its sentence lives in the 要注意的地方 sheet.
       if (mark.tone === "ok") return;
       const label = new TextLabel({ width: 512, height: 128, fontSize: 54 });
       label.set(mark.text, color);
       label.sprite.scale.set(2.6, 0.65, 1);
-      // Stagger heights so two nearby problems do not overprint each other.
       label.sprite.position.set(mark.x, 1.35 + (i % 3) * 0.55, mark.z);
       this.partnerLabels.push(label);
       this.partnerGroup.add(label.sprite);
     });
+    if (partner.freshman) this.drawFreshmanLayout(partner.freshman);
+  }
+
+  private drawFreshmanLayout(view: FreshmanLayoutView): void {
+    const bar = new Mesh(
+      new BoxGeometry(view.screenBar.width, 0.04, 0.18),
+      new MeshBasicMaterial({ color: "#0f172a" }),
+    );
+    bar.position.set(view.screenBar.x, 0.08, view.screenBar.z);
+    this.partnerGroup.add(bar);
+
+    for (const zone of view.zones) {
+      const fill = new Mesh(
+        new PlaneGeometry(zone.width, zone.depth),
+        new MeshBasicMaterial({
+          color: zone.color,
+          transparent: true,
+          opacity: zone.id === "mats" || zone.label === "地墊區" ? 0.28 : 0.14,
+          depthWrite: false,
+        }),
+      );
+      fill.rotation.x = -Math.PI / 2;
+      fill.position.set(zone.x, 0.04, zone.z);
+      this.partnerGroup.add(fill);
+      const label = new TextLabel({ width: 640, height: 140, fontSize: 58 });
+      label.set(`${zone.icon} ${zone.label}`.trim(), "#0f172a");
+      label.sprite.scale.set(2.4, 0.55, 1);
+      label.sprite.position.set(zone.x, 0.85, zone.z);
+      label.sprite.userData.sceneLabel = { id: `freshman-zone:${zone.id}`, priority: 1 };
+      this.partnerLabels.push(label);
+      this.partnerGroup.add(label.sprite);
+    }
+
+    for (let i = 0; i < view.path.length - 1; i++) {
+      const a = view.path[i], b = view.path[i + 1];
+      const len = Math.hypot(b.x - a.x, b.z - a.z);
+      if (len < 0.05) continue;
+      const ribbon = new Mesh(
+        new BoxGeometry(len, 0.02, 0.34),
+        new MeshBasicMaterial({ color: "#0284c7", transparent: true, opacity: 0.9 }),
+      );
+      ribbon.position.set((a.x + b.x) / 2, 0.09, (a.z + b.z) / 2);
+      ribbon.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+      this.partnerGroup.add(ribbon);
+    }
+    for (const node of view.path) {
+      const badge = new TextLabel({ width: 256, height: 256, fontSize: 120 });
+      const circled = "①②③④⑤⑥⑦⑧⑨⑩"[node.index - 1] ?? String(node.index);
+      badge.set(circled, "#0284c7");
+      badge.sprite.scale.set(0.7, 0.7, 1);
+      badge.sprite.position.set(node.x, 1.05, node.z);
+      badge.sprite.userData.sceneLabel = { id: `freshman-step:${node.index}`, priority: 1 };
+      this.partnerLabels.push(badge);
+      this.partnerGroup.add(badge.sprite);
+    }
+
+    const add = (pin: { x: number; z: number; label: string }, color: string, y: number, scale: [number, number], priority: 0 | 1) => {
+      const halo = new Mesh(
+        new PlaneGeometry(1.4, 1.4),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.32, depthWrite: false }),
+      );
+      halo.rotation.x = -Math.PI / 2;
+      halo.position.set(pin.x, 0.06, pin.z);
+      this.partnerGroup.add(halo);
+      const stem = new Mesh(
+        new BoxGeometry(0.42, 0.85, 0.42),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
+      );
+      stem.position.set(pin.x, 0.5, pin.z);
+      this.partnerGroup.add(stem);
+      const label = new TextLabel({ width: 640, height: 140, fontSize: 58 });
+      label.set(pin.label, color);
+      label.sprite.scale.set(scale[0], scale[1], 1);
+      label.sprite.position.set(pin.x, y, pin.z);
+      label.sprite.userData.sceneLabel = { id: `freshman:${pin.label}`, priority };
+      this.partnerLabels.push(label);
+      this.partnerGroup.add(label.sprite);
+    };
+    const pins = view.pins;
+    add(pins.youAreHere, "#ef4444", 1.95, [2.8, 0.68], 0);
+    if (pins.nextStop) add(pins.nextStop, "#f59e0b", 1.55, [2.6, 0.62], 0);
+    if (pins.entrance) add(pins.entrance, "#0ea5e9", 1.15, [2.2, 0.55], 1);
   }
 
   private lastPartnerSig = "";
@@ -734,6 +817,7 @@ export class SceneManager {
     clearGroup(this.floorGroup);
     clearGroup(this.tileGroup);
     const e310 = project.venuePresetId === "venue:tku-e310";
+    const e305 = project.venuePresetId === "venue:tku-e305";
     // An outdoor pitch is grass and paving, and it has no walls — a raised
     // wall rail around it would read as a room the stall is standing inside.
     const outdoor = isBoothProject(project);
@@ -769,6 +853,7 @@ export class SceneManager {
       this.floorGroup.add(areaGroup);
     }
     if (e310) this.floorGroup.add(this.buildE310Fixtures(project));
+    if (e305) this.floorGroup.add(this.buildE305Fixtures(project));
     this.tileGroup.add(this.buildTileGrid(project, project.classroom, e310 ? 0x8b918c : 0x64748b, e310 ? 0.26 : 0.42));
     this.tileGroup.add(this.buildTileGrid(project, project.corridor, e310 ? 0x8f5f64 : 0x64748b, e310 ? 0.3 : 0.42));
   }
@@ -876,6 +961,46 @@ export class SceneManager {
     return g;
   }
 
+  /**
+   * Visual recognition cues from E305 photographs. Not a survey — the AC
+   * boxes, blackboard and door plate help a freshman recognise the room.
+   * Dimensions stay on the venue preset as 待現場校正.
+   */
+  private buildE305Fixtures(project: Project): Group {
+    const g = new Group();
+    const c = project.classroom;
+    const board = new Mesh(
+      new BoxGeometry(Math.min(4.2, c.length * 0.42), 0.9, 0.06),
+      new MeshStandardMaterial({ color: 0x1f4d3a, roughness: 0.92 }),
+    );
+    board.position.set(c.x + c.length * 0.28, 0.7, c.z + 0.04);
+    g.add(board);
+    const ac = new MeshStandardMaterial({ color: 0x8a9aa3, roughness: 0.55, metalness: 0.08 });
+    for (let i = 0; i < 2; i++) {
+      const unit = new Mesh(new BoxGeometry(0.9, 0.32, 0.42), ac);
+      unit.position.set(c.x + 0.28, 1.15, c.z + 1.8 + i * 2.4);
+      g.add(unit);
+    }
+    const plate = new Mesh(
+      new BoxGeometry(0.42, 0.22, 0.04),
+      new MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 }),
+    );
+    plate.position.set(c.x + c.length - 0.35, 1.35, c.z + c.width - 0.08);
+    g.add(plate);
+    const glass = new MeshStandardMaterial({ color: 0xc9dde0, roughness: 0.28, metalness: 0.04 });
+    const curtain = new MeshStandardMaterial({ color: 0x7f929b, roughness: 1 });
+    for (let i = 0; i < 3; i++) {
+      const z = c.z + 1.4 + i * 2.0;
+      const pane = new Mesh(new BoxGeometry(0.035, 1.2, 1.4), glass);
+      pane.position.set(c.x + 0.02, 0.9, z);
+      g.add(pane);
+      const drape = new Mesh(new BoxGeometry(0.08, 1.3, 0.22), curtain);
+      drape.position.set(c.x + 0.08, 0.85, z - 0.68);
+      g.add(drape);
+    }
+    return g;
+  }
+
   private syncObjects(project: Project, session: SessionView, simplify: boolean): void {
     this.objectGroup.visible = this.layersState.objects;
     const showLabels = session.showLabels;
@@ -941,10 +1066,14 @@ export class SceneManager {
       entry.group.rotation.y = o.rotationDeg * D2R;
       const persistentLabel = LANDMARKS.has(o.kind) || catalogEntry.category === "service";
       const selected = session.selection.has(o.id);
+      const freshman = !!this.partner?.freshman;
       const wantsLabel = o.showLabel !== false && (
-        labelMode === "all"
-        || selected
-        || (labelMode === "essential" && persistentLabel)
+        freshman ? (o.kind === "door" || o.kind === "screen")
+        : (
+          labelMode === "all"
+          || selected
+          || (labelMode === "essential" && persistentLabel)
+        )
       );
       if (wantsLabel && !entry.label) {
         entry.label = new TextLabel();
@@ -1189,13 +1318,12 @@ export class SceneManager {
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
       entry.label.sprite.position.y = partner ? 0.8 : 0.5;
       if (partner) {
-        // A zone the current role owns reads as a solid, labelled place; the
-        // rest stay as faint context so the room still makes sense.
+        const freshman = !!partner.freshman;
         const muted = partner.emphasis.zones[zone.id] === "muted";
-        fillMat.opacity = muted ? 0.05 : 0.16;
+        fillMat.opacity = muted ? 0.05 : freshman && zone.type === "group" ? 0.08 : 0.16;
         edgeMat.opacity = muted ? 0.25 : 1;
-        entry.label.sprite.visible = !muted;
-        entry.label.set(`${zone.icon ?? ""} ${zone.name}${cap}`.trim(), "#f8fafc");
+        entry.label.sprite.visible = freshman ? false : !muted;
+        entry.label.set(`${zone.icon ?? ""} ${zone.name}`.trim(), "#f8fafc");
       } else {
         fillMat.opacity = selection.has(zone.id) ? 0.16 : 0.1;
         edgeMat.opacity = selection.has(zone.id) ? 1 : 0.72;
@@ -1297,7 +1425,7 @@ export class SceneManager {
         this.routeGroup.add(entry.group);
         this.routeNodes.set(route.id, entry);
       }
-      entry.group.visible = route.visible;
+      entry.group.visible = route.visible || !!partner?.freshman;
       // In the 全部 overview the arrows, colours and ①②③ badges carry the flow;
       // adding four route names on top is what made a phone-sized plan
       // unreadable. Names come back as soon as a role narrows the picture.
