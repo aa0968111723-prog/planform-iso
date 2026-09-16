@@ -409,6 +409,9 @@ export function buildPartnerMode(
     light.style.display = freshman ? "none" : "";
 
     roles.style.display = freshman ? "none" : "";
+    roles.hidden = freshman;
+    questions.hidden = !freshman;
+    layers.hidden = !freshman;
     questions.style.display = freshman ? "flex" : "none";
     layers.style.display = freshman ? "flex" : "none";
     actions.style.display = freshman ? "none" : "grid";

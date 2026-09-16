@@ -62,6 +62,8 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
   let leafletMap: L.Map | null = null;
   const markerLayer = L.layerGroup();
   let ready = false;
+  let tileLoaded = false;
+  let tileWatchdog: number | null = null;
 
   const searchInput = el("input", {
     type: "search",
@@ -157,6 +159,13 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
         maxZoom: 19,
         crossOrigin: true,
       });
+      tiles.on("tileload", () => {
+        tileLoaded = true;
+        if (tileWatchdog != null) {
+          window.clearTimeout(tileWatchdog);
+          tileWatchdog = null;
+        }
+      });
       tiles.on("tileerror", () => {
         tileErrors += 1;
         if (shouldShowMapFallback(tileErrors) && !tileFailed) {
@@ -167,6 +176,13 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
       markerLayer.addTo(leafletMap);
       leafletMap.on("zoomend", () => renderMarkers());
       leafletMap.on("moveend", () => renderMarkers());
+      // Playwright abort() and some offline paths never fire tileerror.
+      // If no tile actually paints, swap in the directory so the stage is never blank.
+      tileWatchdog = window.setTimeout(() => {
+        if (!tileLoaded && !tileFailed) {
+          showFallback("離線或圖資載入失敗時，仍可從下方目錄找到校園、樓館與教室。");
+        }
+      }, 2500);
     } catch {
       showFallback("這台裝置無法顯示地圖圖資，改用校園目錄。");
     }
@@ -423,6 +439,7 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
       }
     },
     destroy: () => {
+      if (tileWatchdog != null) window.clearTimeout(tileWatchdog);
       leafletMap?.remove();
       leafletMap = null;
       root.remove();

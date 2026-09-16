@@ -25,7 +25,7 @@ export const OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 export const BUILDING_PIN_KIND = "樓館位置" as const;
 export const ENTRANCE_UNCONFIRMED = "入口待現場確認";
 /** Consecutive OSM tile errors before the directory fallback replaces a blank map. */
-export const MAP_TILE_ERROR_LIMIT = 4;
+export const MAP_TILE_ERROR_LIMIT = 1;
 
 export function shouldShowMapFallback(tileErrors: number): boolean {
   return tileErrors >= MAP_TILE_ERROR_LIMIT;

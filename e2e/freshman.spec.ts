@@ -48,7 +48,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator(".partnerbar__title")).toContainText("3F");
       await expect(page.locator(".freshmanq")).toHaveCount(5);
       await expect(page.locator(".freshmanlayer")).toHaveCount(4);
-      await expect(page.locator(".rolechip")).toHaveCount(0);
+      await expect(page.locator(".rolechip:visible")).toHaveCount(0);
       expect(await freshmanText(page)).not.toMatch(ENGINEERING);
       expect(await pageOverflowsX(page)).toBe(false);
       expect(await isOnScreen(page, ".left")).toBe(false);

@@ -1252,7 +1252,7 @@ html, body {
 }
 #app[data-ws-mode="phone"] .campusmap__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #app[data-ws-mode="phone"] .campusmap__card { max-height: 38dvh; }
-#app.freshman .partnerdock { overflow-x: hidden; }
+#app.freshman .partnerroles { display: none !important; }
 #app.freshman .freshman-chrome { overflow-x: hidden; }
 .campusmap--embedded .campusmap__photos { display: none; }
 
