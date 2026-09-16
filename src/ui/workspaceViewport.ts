@@ -32,6 +32,8 @@ export interface WorkspaceChrome {
   bars: HTMLElement[];
   /** Extra bottom sheets that behave like `left`/`right` (partner sheet). */
   sheets?: HTMLElement[];
+  /** Extra overlays that cover the canvas (split campus map). */
+  overlays?: HTMLElement[];
 }
 
 export interface WorkspaceViewportState {
@@ -99,7 +101,7 @@ export class WorkspaceViewport {
     this.chrome = chrome;
     const nodes = [
       ...headers(chrome), ...navs(chrome), chrome.left, chrome.right,
-      ...(chrome.sheets ?? []), ...chrome.bars,
+      ...(chrome.sheets ?? []), ...chrome.bars, ...(chrome.overlays ?? []),
     ];
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver?.disconnect();
@@ -110,11 +112,11 @@ export class WorkspaceViewport {
     // any element's size, so ResizeObserver never fires — re-measure when the
     // slide finishes (and once mid-flight, so focus targeting keeps up).
     for (const node of nodes) {
-      node.addEventListener("transitionend", (e) => {
-        if ((e as TransitionEvent).propertyName === "transform") this.schedule();
+      node.addEventListener("transitionend", (e: TransitionEvent) => {
+        if (e.propertyName === "transform") this.schedule();
       });
-      node.addEventListener("transitionstart", (e) => {
-        if ((e as TransitionEvent).propertyName === "transform") this.schedule();
+      node.addEventListener("transitionstart", (e: TransitionEvent) => {
+        if (e.propertyName === "transform") this.schedule();
       });
     }
     this.measure();
@@ -217,6 +219,18 @@ export class WorkspaceViewport {
     sheet = Math.max(0, sheet - nav);
     bar = Math.max(0, bar - nav - sheet);
 
+    let topOverlay = 0;
+    let leftOverlay = 0;
+    for (const node of c.overlays ?? []) {
+      if (!visible(node) || !node.classList.contains("is-split")) continue;
+      const r = node.getBoundingClientRect();
+      if (r.width <= canvas.width * 0.55 && r.height >= canvas.height * 0.45) {
+        leftOverlay = Math.max(leftOverlay, r.width);
+      } else {
+        topOverlay = Math.max(topOverlay, r.height);
+      }
+    }
+
     return {
       headerHeight: header,
       bottomNavHeight: nav,
@@ -225,6 +239,8 @@ export class WorkspaceViewport {
       rightPanelWidth: right,
       bottomSheetHeight: sheet,
       bottomBarHeight: bar,
+      topOverlayHeight: topOverlay,
+      leftOverlayWidth: leftOverlay,
     };
   }
 

@@ -832,6 +832,11 @@ export interface Project {
   eventDate?: string;
   /** Built-in venue identity, retained so honest calibration copy survives reload. */
   venuePresetId?: string;
+  /**
+   * Tamkang place id (E305, E310, SG320…). Optional: older files omit it and
+   * the campus guide infers from `venuePresetId`. Never invent indoor coords.
+   */
+  placeId?: string;
   /** Short activity description shown in the team/partner view. */
   description: string;
   classroom: AreaConfig;
@@ -1023,7 +1028,7 @@ function validationEqual(a: ValidationSettings, b: ValidationSettings): boolean 
  * well, because projects saved before templates carried notes have none.
  */
 export function venueNeedsCalibration(project: Project): boolean {
-  if (project.venuePresetId === "venue:tku-e310") return true;
+  if (project.venuePresetId === "venue:tku-e310" || project.venuePresetId === "venue:tku-e305") return true;
   return (project.calibration.note ?? "").trim() !== "";
 }
 

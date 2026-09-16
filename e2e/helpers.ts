@@ -230,3 +230,12 @@ export async function enterPartnerMode(page: Page): Promise<void> {
   await expect(page.locator("#app")).toHaveClass(/partner/);
   await settle(page);
 }
+
+export async function enterFreshmanMode(page: Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as {
+    planform: { app: { enterPartnerMode(role?: string, opts?: { audience?: string }): void } };
+  }).planform.app.enterPartnerMode("all", { audience: "freshman" }));
+  await expect(page.locator("#app")).toHaveClass(/partner/);
+  await expect(page.locator("#app")).toHaveAttribute("data-partner-audience", "freshman");
+  await settle(page);
+}

@@ -111,7 +111,13 @@ import {
 import { applyCalibrationPath, type CalibrationPath } from "../core/calibration";
 import { routePreset } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
-import { applyVenuePreset, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
+import { applyVenuePreset, isTkuClassroomVenue, saveUserVenuePreset, venuePresetById, venuePresetFromProject } from "../core/venues";
+import {
+  buildFreshmanGuide,
+  type FreshmanInfoLayer,
+  type FreshmanLayer,
+  type PartnerAudience,
+} from "../core/freshman";
 import {
   agentPositions,
   detectBottlenecks,
@@ -214,6 +220,10 @@ export interface Session {
 /** Live state of Partner Mode — the visual-first, read-only view of a plan. */
 export interface PartnerSession {
   role: PartnerRole;
+  audience: PartnerAudience;
+  layer: FreshmanLayer;
+  splitView: boolean;
+  infoLayer: FreshmanInfoLayer;
   /** Rehearsal beats from the last run; empty until 演練 is pressed. */
   timeline: RehearsalEvent[];
   /** Pending AI suggestion, shown as a visual before/after. */
@@ -458,7 +468,9 @@ export class App {
       // Partner Mode names places (zones) and flows (routes); per-object name
       // tags on top of that is what turns the plan into label soup.
       showLabels: this.session.showLabels && labelDisplayMode !== "none",
-      showObjectLabels: this.session.showObjectLabels || labelDisplayMode === "all",
+      showObjectLabels: this.session.partner?.audience === "freshman" && this.session.partner.infoLayer !== "detail"
+        ? false
+        : this.session.showObjectLabels || labelDisplayMode === "all",
       labelDisplayMode,
       tabletopHostId: this.session.tabletopHostId,
       focusRouteId: this.session.focusRouteId,
@@ -473,7 +485,8 @@ export class App {
       // A booth is 7 m across with eight station badges on it — the flow names
       // on top of that make the plan unreadable exactly when you are watching
       // the crowd. The ribbons and arrows stay; only the names step aside.
-      hideRouteLabels: this.hasFlow() && this.session.simPlaying,
+      hideRouteLabels: (this.hasFlow() && this.session.simPlaying)
+        || (this.session.partner?.audience === "freshman" && this.session.partner.infoLayer !== "detail"),
     });
   }
 
@@ -1736,9 +1749,20 @@ export class App {
    * Enter the visual-first partner view. Nothing about the plan changes — the
    * editor state is left exactly as it was so leaving returns you to your work.
    */
-  enterPartnerMode(role: PartnerRole = "all"): void {
+  enterPartnerMode(role: PartnerRole = "all", opts?: { audience?: PartnerAudience }): void {
     this.partnerReturnView = this.state.view;
-    this.session.partner = { role, timeline: [], suggestion: null, busy: false, stationObjectId: null };
+    const audience = opts?.audience ?? "crew";
+    this.session.partner = {
+      role: audience === "freshman" ? "all" : role,
+      audience,
+      layer: audience === "freshman" ? "campus" : "indoor",
+      splitView: false,
+      infoLayer: "essential",
+      timeline: [],
+      suggestion: null,
+      busy: false,
+      stationObjectId: null,
+    };
     this.session.selection = new Set();
     this.cancelPlacement();
     if (this.session.mode === "measure") this.stopMeasure();
@@ -1748,6 +1772,46 @@ export class App {
     this.render();
     // Framing is left to the UI: the partner chrome has not been laid out yet,
     // so fitting here would frame the plan against the editor's rect.
+  }
+
+  setPartnerLayer(layer: FreshmanLayer): void {
+    if (!this.session.partner) return;
+    this.session.partner.layer = layer;
+    if (layer !== "indoor") this.session.partner.stationObjectId = null;
+    if (this.session.partner.audience === "freshman") this.setView("top");
+    this.render();
+  }
+
+  setPartnerSplit(on: boolean): void {
+    if (!this.session.partner) return;
+    const phone = workspaceModeForWidth(window.innerWidth) === "phone";
+    this.session.partner.splitView = phone ? false : on;
+    this.render();
+  }
+
+  setPartnerInfoLayer(layer: FreshmanInfoLayer): void {
+    if (!this.session.partner) return;
+    this.session.partner.infoLayer = layer;
+    this.render();
+  }
+
+  setPartnerAudience(audience: PartnerAudience): void {
+    if (!this.session.partner) return;
+    this.session.partner.audience = audience;
+    if (audience === "freshman") {
+      this.session.partner.role = "all";
+      this.session.partner.layer = "campus";
+    } else {
+      this.session.partner.layer = "indoor";
+      this.session.partner.splitView = false;
+    }
+    this.render();
+  }
+
+  setPlaceId(placeId: string): void {
+    this.store.mutate((p) => {
+      p.placeId = placeId;
+    });
   }
 
   exitPartnerMode(): void {
@@ -1766,14 +1830,40 @@ export class App {
   }
 
   /** Emphasis + marks the scene needs to render the partner view. */
-  private partnerView(): { role: PartnerRole; emphasis: PartnerEmphasis; marks: PartnerMark[] } | null {
+  private partnerView(): {
+    role: PartnerRole;
+    emphasis: PartnerEmphasis;
+    marks: PartnerMark[];
+    freshman?: {
+      youAre: { x: number; z: number; label: string };
+      nextStop: { x: number; z: number; label: string } | null;
+      path: { index: number; x: number; z: number; label: string }[];
+      screen: { x: number; z: number; width: number } | null;
+      essential: boolean;
+    };
+  } | null {
     const p = this.session.partner;
     if (!p) return null;
+    const guide = p.audience === "freshman" ? buildFreshmanGuide(this.viewState) : null;
+    const showCue = !!guide?.youArePoint && (p.layer === "indoor" || p.splitView);
     return {
-      role: p.role,
-      emphasis: partnerEmphasis(this.viewState, p.role),
-      marks: partnerMarks(this.session.issues),
+      role: p.audience === "freshman" ? "all" : p.role,
+      emphasis: partnerEmphasis(this.viewState, p.audience === "freshman" ? "all" : p.role),
+      marks: p.audience === "freshman" ? [] : partnerMarks(this.session.issues),
+      freshman: showCue && guide?.youArePoint
+        ? {
+          youAre: { x: guide.youArePoint.x, z: guide.youArePoint.z, label: "你在這裡" },
+          nextStop: guide.nextPoint,
+          path: guide.path,
+          screen: guide.screen,
+          essential: p.infoLayer !== "detail",
+        }
+        : undefined,
     };
+  }
+
+  freshmanGuide() {
+    return buildFreshmanGuide(this.viewState);
   }
 
   partnerBriefing(): RoleBriefing {
@@ -2021,7 +2111,7 @@ export class App {
       gap: opts?.gap ?? 0.1,
       aisleWidth: opts?.centralAisleWidth ?? Math.max(vs.minAisleWidth, 0.9),
       bounds,
-      mode: opts?.mode ?? (this.state.venuePresetId === "venue:tku-classroom" || this.state.venuePresetId === "venue:tku-e310" ? "field" : "individual"),
+      mode: opts?.mode ?? (isTkuClassroomVenue(this.state.venuePresetId) ? "field" : "individual"),
     });
     this.notifyUi();
     return this.session.matCandidates;

@@ -102,6 +102,14 @@ export interface ChromeMetrics {
    * keep focus targets and the placement ghost from hiding behind them.
    */
   bottomBarHeight: number;
+  /**
+   * Height of a split campus map sitting on top of the canvas. This is *not*
+   * folded into `headerHeight`: `--ws-header-h` positions the map itself, so
+   * counting it as header would push the map down in a loop.
+   */
+  topOverlayHeight?: number;
+  /** Width of a split campus map sitting on the left of the canvas. */
+  leftOverlayWidth?: number;
 }
 
 export const EMPTY_CHROME: ChromeMetrics = {
@@ -112,6 +120,8 @@ export const EMPTY_CHROME: ChromeMetrics = {
   rightPanelWidth: 0,
   bottomSheetHeight: 0,
   bottomBarHeight: 0,
+  topOverlayHeight: 0,
+  leftOverlayWidth: 0,
 };
 
 /** Never shrink the usable canvas below this, whatever the chrome claims. */
@@ -125,12 +135,12 @@ export const MIN_CANVAS_SIZE = 120;
 export function persistentInsets(mode: WorkspaceMode, m: ChromeMetrics): ChromeInsets {
   const policy = dockingPolicy(mode);
   return {
-    top: Math.max(0, m.headerHeight),
+    top: Math.max(0, m.headerHeight) + Math.max(0, m.topOverlayHeight ?? 0),
     right: policy.dockRight ? Math.max(0, m.rightPanelWidth) : 0,
     bottom: policy.bottomNav
       ? Math.max(0, m.bottomNavHeight)
       : Math.max(0, m.partnerDockHeight ?? 0),
-    left: policy.dockLeft ? Math.max(0, m.leftPanelWidth) : 0,
+    left: (policy.dockLeft ? Math.max(0, m.leftPanelWidth) : 0) + Math.max(0, m.leftOverlayWidth ?? 0),
   };
 }
 

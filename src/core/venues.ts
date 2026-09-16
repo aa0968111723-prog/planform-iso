@@ -194,6 +194,31 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
     ],
   },
   {
+    id: "venue:tku-e305",
+    name: "E305 照片參考（尺寸待現場校正）",
+    builtin: true,
+    note: "工學大樓 3F E305。現場照片可見門牌與冷氣標記；尺寸不是從照片量出來的，待現場校正。不是 E310。",
+    classroom: { name: "教室", length: 10, width: 8, x: 0, z: 0 },
+    corridor: { name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+    tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
+    fixtures: [
+      { kind: "door", areaId: "classroom", edge: "s", offset: 8.6 },
+      { kind: "screen", areaId: "classroom", edge: "n", offset: 5 },
+    ],
+    extraObjects: [
+      {
+        assetId: "builtin:lectern",
+        x: 5,
+        z: 0.7,
+        locked: false,
+        surface: "floor",
+        note: "木製講桌參考位置，待現場校正",
+      },
+    ],
+    calibrationNote: "E305 尺寸待現場校正；照片只作設施辨識，不是實測。",
+    defaultView: "top",
+  },
+  {
     id: "venue:tku-booth",
     name: "戶外攤位（3×3 帳篷）",
     builtin: true,
@@ -281,6 +306,17 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
 
 export function boothVenuePreset(): VenuePreset {
   return BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-booth")!;
+}
+
+/** Classroom presets that default to continuous 巧拼 rather than personal mats. */
+export function isTkuClassroomVenue(id: string | undefined): boolean {
+  return id === "venue:tku-classroom" || id === "venue:tku-e310" || id === "venue:tku-e305";
+}
+
+export function placeIdForVenuePreset(id: string | undefined): string | undefined {
+  if (id === "venue:tku-e310") return "E310";
+  if (id === "venue:tku-e305") return "E305";
+  return undefined;
 }
 
 /** Resolve a preset asset id against the builtin catalog, then the booth one. */
@@ -440,6 +476,8 @@ export function applyVenuePreset(
   }
   if (preset.calibrationNote) project.calibration.note = preset.calibrationNote;
   project.venuePresetId = preset.id;
+  const mappedPlace = placeIdForVenuePreset(preset.id);
+  if (mappedPlace) project.placeId = mappedPlace;
 }
 
 /**

@@ -25,7 +25,9 @@ import { showNewProjectWizard } from "./quickStart";
 import { buildProjectHome, type ProjectHomeHandles } from "./projectHome";
 import { ProjectRepository } from "../state/projectRepository";
 import { BUILD_INFO } from "../buildInfo";
-import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
+import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, isTkuClassroomVenue, listUserVenuePresets } from "../core/venues";
+import { formatFreshmanHeadline, resolveProjectPlace, searchTkuDirectory } from "../core/campusGuide";
+import { photosForPlace, photoBindingLabel } from "../core/venuePhotos";
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";
@@ -95,7 +97,7 @@ export class UI {
     root.append(
       this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
       this.box, this.toast, this.ctxbar, this.menu.root,
-      this.partner.top, this.partner.dock, this.partner.sheet,
+      this.partner.top, this.partner.dock, this.partner.sheet, this.partner.map,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
       openMatArranger: () => {
@@ -132,6 +134,7 @@ export class UI {
       left: this.left,
       right: this.right,
       sheets: [this.partner.sheet],
+      overlays: [this.partner.map],
       bars: [this.ctxbar, this.placebar, this.measurebar, this.agentSheet.root],
     });
     this.viewport.start();
@@ -448,6 +451,7 @@ export class UI {
           { label: "現場量測", onSelect: () => this.app.startMeasure(sess.measureType) },
           { label: "現場校正", onSelect: () => { this.app.setWorkflow("site"); this.app.startCalibration(); this.setSheet("workflow"); } },
           { label: "✦ AI 建議", sub: "先預覽，再決定要不要套用", onSelect: () => { this.agentSheet.open(); return true; } },
+          { label: "🧭 新生夥伴", sub: "校園位置與教室場佈", onSelect: () => this.app.enterPartnerMode("all", { audience: "freshman" }) },
           { label: "👥 夥伴模式", sub: "給夥伴看的乾淨視圖", onSelect: () => this.app.enterPartnerMode() },
         ],
       },
@@ -652,6 +656,7 @@ export class UI {
    */
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
+      this.campusPlaceSection(),
       this.venuePresetSection(),
       this.roomSizeSection(),
       this.tileSection(),
@@ -659,6 +664,45 @@ export class UI {
       this.fixtureSection(onPick),
       this.siteAdvancedSection(),
     ];
+  }
+
+  private campusPlaceSection(): HTMLElement {
+    const project = this.app.store.getState();
+    const place = resolveProjectPlace(project);
+    const body: HTMLElement[] = [
+      el("p", { class: "hint", text: place ? formatFreshmanHeadline(place) : "還沒指定淡江教室。搜尋代碼不會捏造房間座標。" }),
+    ];
+    const input = el("input", {
+      type: "search",
+      class: "field__input",
+      placeholder: "E305、E310、SG320、工學大樓",
+      "aria-label": "搜尋淡江樓館或教室",
+    }) as HTMLInputElement;
+    const hitsBox = el("div", { class: "campus-search" });
+    const run = (): void => {
+      hitsBox.innerHTML = "";
+      const hits = searchTkuDirectory(input.value);
+      for (const hit of hits.slice(0, 8)) {
+        if (hit.kind !== "place" || !hit.placeId) continue;
+        hitsBox.append(button(hit.title, () => {
+          this.app.setPlaceId(hit.placeId!);
+          this.update();
+        }, "chip chip--sm"));
+      }
+    };
+    input.addEventListener("input", run);
+    body.push(input, hitsBox);
+    if (place) {
+      const photos = photosForPlace(place.id);
+      if (photos.length) {
+        body.push(el("div", { class: "subhead", text: "照片參考" }));
+        for (const photo of photos) {
+          body.push(el("div", { class: "hint", text: `${photo.title} · ${photo.capturedToward} · ${photoBindingLabel(photo)}` }));
+        }
+      }
+      body.push(button("🧭 新生夥伴視圖", () => this.app.enterPartnerMode("all", { audience: "freshman" }), "btn btn--ghost"));
+    }
+    return section("校園與教室", body);
   }
 
   private venuePresetSection(): HTMLElement {
@@ -880,7 +924,7 @@ export class UI {
     const venueId = this.app.store.getState().venuePresetId;
     if (venueId !== this.matModeVenue) {
       this.matModeVenue = venueId;
-      if (venueId === "venue:tku-classroom" || venueId === "venue:tku-e310") this.matMode = "field";
+      if (isTkuClassroomVenue(venueId)) this.matMode = "field";
     }
     // One head count everywhere: follow the session (seeded from the event's
     // scenario) unless the user has typed something here since.
@@ -1268,6 +1312,7 @@ export class UI {
     return section("分享 / 匯出", [
       // 「給夥伴看」是主流程第四步的一半 — 夥伴模式在這裡有一級入口
       // （手機不用再鑽 ⋯ 選單）。
+      button("🧭 新生夥伴（第一次來淡江）", () => this.app.enterPartnerMode("all", { audience: "freshman" }), "btn btn--big btn--primary"),
       button("👥 夥伴模式（給志工看的現場畫面）", () => this.app.enterPartnerMode(), "btn btn--big"),
       preExportChecklist,
       planSection,

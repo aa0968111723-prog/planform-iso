@@ -156,6 +156,14 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
       );
     }
 
+    const e305 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e305");
+    if (e305) {
+      card.append(
+        button(`🏫 ${e305.name}`, () => renderNeedsStep(e305), "btn btn--big"),
+        el("p", { class: "hint", text: e305.note }),
+      );
+    }
+
     // 攤位 skips step 3 on purpose: the template already ships its own tent,
     // table, zones, flows and stations, so there is nothing left to tick.
     const booth = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-booth");
@@ -209,6 +217,7 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     // with on-site payment, a teacher zone and a life-crew corner. Default the
     // ticks (and 60 people below) to that reality instead of a generic 30.
     const isE310 = venue.id === "venue:tku-e310";
+    const isE305 = venue.id === "venue:tku-e305";
     const needs: QuickStartNeeds = isE310
       ? { ...DEFAULT_NEEDS, payment: true, life: true, teacher: true }
       : { ...DEFAULT_NEEDS };
@@ -246,6 +255,9 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     ]));
     if (isE310) {
       card.append(el("p", { class: "hint", text: "已繳／現場繳的人數，之後在「▶ 模擬」裡填就可以。" }));
+    }
+    if (isE305) {
+      card.append(el("p", { class: "hint", text: "這是 E305 照片參考場地，不是 E310。尺寸待現場校正。" }));
     }
 
     const aisleChip = button("✓ 留中央走道", () => {

@@ -85,6 +85,15 @@ describe("chrome insets", () => {
     expect(insets.bottom).toBe(48);
   });
 
+  it("adds a split campus map as extra inset without replacing the header", () => {
+    const top = persistentInsets("tablet", chrome({ topOverlayHeight: 200 }));
+    expect(top.top).toBe(252);
+    expect(top.left).toBe(0);
+    const side = persistentInsets("desktop", chrome({ leftOverlayWidth: 420 }));
+    expect(side.left).toBe(720);
+    expect(side.top).toBe(52);
+  });
+
   it("layers the workspace budget, the visible rect and the focus rect", () => {
     const m = chrome({ bottomSheetHeight: 300, bottomBarHeight: 60 });
     // The permanent budget is what the canvas-first target is measured against.

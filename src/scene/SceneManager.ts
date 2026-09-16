@@ -130,6 +130,13 @@ export interface PartnerPresentation {
   role: PartnerRole;
   emphasis: PartnerEmphasis;
   marks: PartnerMark[];
+  freshman?: {
+    youAre: { x: number; z: number; label: string };
+    nextStop: { x: number; z: number; label: string } | null;
+    path?: { index: number; x: number; z: number; label: string }[];
+    screen?: { x: number; z: number; width: number } | null;
+    essential?: boolean;
+  };
 }
 
 /** Same language as the §85 sentences: your post, the visitor, the queue, the way out. */
@@ -648,7 +655,9 @@ export class SceneManager {
    * handful and they change with every validation pass.
    */
   private syncPartner(partner: PartnerPresentation | null): void {
-    const sig = partner ? JSON.stringify(partner.marks) : "";
+    const sig = partner
+      ? JSON.stringify({ marks: partner.marks, freshman: partner.freshman })
+      : "";
     if (sig === this.lastPartnerSig) { this.partnerGroup.visible = !!partner; return; }
     this.lastPartnerSig = sig;
     for (const label of this.partnerLabels) label.dispose();
@@ -671,17 +680,107 @@ export class SceneManager {
       halo.rotation.x = -Math.PI / 2;
       halo.position.set(mark.x, 0.05, mark.z);
       this.partnerGroup.add(halo);
-      // Only things you must act on get words on the plan. A green mark is a
-      // reassuring dot; its sentence lives in the 要注意的地方 sheet.
       if (mark.tone === "ok") return;
       const label = new TextLabel({ width: 512, height: 128, fontSize: 54 });
       label.set(mark.text, color);
       label.sprite.scale.set(2.6, 0.65, 1);
-      // Stagger heights so two nearby problems do not overprint each other.
       label.sprite.position.set(mark.x, 1.35 + (i % 3) * 0.55, mark.z);
       this.partnerLabels.push(label);
       this.partnerGroup.add(label.sprite);
     });
+    if (partner.freshman) {
+      const path = partner.freshman.path ?? [];
+      if (path.length > 1) this.addFreshmanPath(path);
+      if (partner.freshman.screen) this.addFreshmanScreen(partner.freshman.screen);
+      this.addFreshmanCue(partner.freshman.youAre.x, partner.freshman.youAre.z, "#22d3ee", partner.freshman.youAre.label, 1.55);
+      if (partner.freshman.nextStop) {
+        this.addFreshmanCue(
+          partner.freshman.nextStop.x,
+          partner.freshman.nextStop.z,
+          "#fb923c",
+          `下一站：${partner.freshman.nextStop.label}`,
+          1.2,
+        );
+      }
+    }
+  }
+
+  private addFreshmanPath(path: { index: number; x: number; z: number; label: string }[]): void {
+    const color = "#0284c7";
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i], b = path[i + 1];
+      const len = Math.hypot(b.x - a.x, b.z - a.z);
+      if (len < 1e-4) continue;
+      const ribbon = new Mesh(
+        new BoxGeometry(len, 0.02, 0.34),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }),
+      );
+      ribbon.position.set((a.x + b.x) / 2, 0.05, (a.z + b.z) / 2);
+      ribbon.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+      this.partnerGroup.add(ribbon);
+      const head = new Mesh(
+        new BoxGeometry(0.55, 0.02, 0.42),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
+      );
+      head.position.set(
+        (a.x + b.x) / 2 + ((b.x - a.x) / len) * (len * 0.28),
+        0.06,
+        (a.z + b.z) / 2 + ((b.z - a.z) / len) * (len * 0.28),
+      );
+      head.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+      this.partnerGroup.add(head);
+    }
+    for (const stop of path) {
+      const badge = new Mesh(
+        new CylinderGeometry(0.22, 0.22, 0.06, 20),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
+      );
+      badge.position.set(stop.x, 0.08, stop.z);
+      this.partnerGroup.add(badge);
+      const label = new TextLabel({ width: 160, height: 160, fontSize: 108 });
+      label.set(circledNumber(stop.index), "#f8fafc");
+      label.sprite.scale.set(0.85, 0.85, 1);
+      label.sprite.position.set(stop.x, 0.7, stop.z);
+      this.partnerLabels.push(label);
+      this.partnerGroup.add(label.sprite);
+    }
+  }
+
+  private addFreshmanScreen(screen: { x: number; z: number; width: number }): void {
+    const bar = new Mesh(
+      new BoxGeometry(Math.max(screen.width, 3.2), 0.04, 0.18),
+      new MeshBasicMaterial({ color: "#0f172a", transparent: true, opacity: 0.92 }),
+    );
+    bar.position.set(screen.x, 0.08, screen.z);
+    this.partnerGroup.add(bar);
+    const label = new TextLabel({ width: 480, height: 120, fontSize: 56 });
+    label.set("前方投影幕", "#e2e8f0");
+    label.sprite.scale.set(2.4, 0.55, 1);
+    label.sprite.position.set(screen.x, 0.9, screen.z);
+    this.partnerLabels.push(label);
+    this.partnerGroup.add(label.sprite);
+  }
+
+  private addFreshmanCue(x: number, z: number, color: string, text: string, height: number): void {
+    const halo = new Mesh(
+      new PlaneGeometry(1.4, 1.4),
+      new MeshBasicMaterial({ color, transparent: true, opacity: 0.32, depthWrite: false }),
+    );
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.set(x, 0.04, z);
+    this.partnerGroup.add(halo);
+    const pin = new Mesh(
+      new CylinderGeometry(0.16, 0.28, 0.7, 16),
+      new MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
+    );
+    pin.position.set(x, 0.4, z);
+    this.partnerGroup.add(pin);
+    const label = new TextLabel({ width: 640, height: 140, fontSize: 58 });
+    label.set(text, color);
+    label.sprite.scale.set(3.1, 0.7, 1);
+    label.sprite.position.set(x, height, z);
+    this.partnerLabels.push(label);
+    this.partnerGroup.add(label.sprite);
   }
 
   private lastPartnerSig = "";
@@ -1038,7 +1137,7 @@ export class SceneManager {
     for (const g of project.groups) {
       seen.add(g.id);
       const members = groupMembers(g);
-      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
+      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${this.partner?.freshman?.essential ? "fe" : ""}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
       let entry = this.arrayNodes.get(g.id);
       if (!entry || entry.sig !== sig) {
         if (entry) {
@@ -1153,7 +1252,11 @@ export class SceneManager {
 
     const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
     const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
-    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, this.theme === "light" ? "#134e4a" : "#d1fae5");
+    const freshmanEssential = !!this.partner?.freshman?.essential;
+    label.set(
+      freshmanEssential ? name.replace(/·.*/, "").trim() || "地墊區" : `${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`,
+      this.theme === "light" ? "#134e4a" : "#d1fae5",
+    );
     label.sprite.scale.set(3.25, 0.52, 1);
     const center = groupCenter(g);
     label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
@@ -1186,7 +1289,7 @@ export class SceneManager {
       const edgeMat = edges.material as LineBasicMaterial;
       fillMat.color.set(zone.color);
       edgeMat.color.set(zone.color);
-      const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
+      const cap = zone.capacity && !partner?.freshman?.essential ? ` · ${zone.capacity}人` : "";
       entry.label.sprite.position.y = partner ? 0.8 : 0.5;
       if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the

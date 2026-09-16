@@ -1009,6 +1009,8 @@ export function migrateProject(input: Partial<Project>): Project {
     ? [...new Set(input.favoriteAssetIds.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 100)
     : [];
   p.description = input.description ?? "";
+  if (typeof input.placeId === "string" && input.placeId.trim()) p.placeId = input.placeId.trim();
+  else delete p.placeId;
   p.zones = (Array.isArray(input.zones) ? input.zones : []).map(migrateZone);
   p.routes = (Array.isArray(input.routes) ? input.routes : []).map(migrateRoute);
 

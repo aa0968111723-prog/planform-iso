@@ -23,6 +23,9 @@
    夥伴觀看圖 — 手機直接開分享傳 LINE
 7. **夥伴模式**：給夥伴的唯讀視圖（全部/報到組/收費組/引導組/生活組），
    10 秒看懂自己站哪、人從哪來、下一步去哪，一鍵存成圖
+8. **新生夥伴視圖**：第一次來淡江的人用。先看校園位置圖（淡水／臺北／蘭陽，
+   OpenStreetMap，免金鑰），再進樓館、樓層、教室，最後看俯視場佈：
+   入口、報到、鞋子、背包、青綠色地墊、講師與下一步。E305 與 E310 是不同場地。
 
 ## 功能總覽
 
@@ -33,13 +36,15 @@
 - 區域（報到/收費/鞋子/背包/生活組/講師/小組/自訂）：點畫面放置
 - 排地墊：人數 → A 整齊排列 / B 中央走道 / C 較寬鬆，看圖套用
 - 動線：畫布點選節點、粗箭頭、①②③、起點/終點
+- **新生夥伴視圖**：OpenStreetMap 校園位置圖（淡水／臺北／蘭陽）→ 樓館 → 教室 →
+  俯視場佈。E305 照片參考與 E310 既有模板分開；無付費金鑰，離線仍可看目錄
 - **活動流程模擬（本地 DES，不需網路/AI）**：人數/現場繳費/人力/到齊時間 →
   最多排隊、平均等待、最塞的站、全部完成時間 → ✦ 幫我改善
 - ✦ AI 幫我：用一句話說需求 → 產生 A/B/C 三個排法 → 比較 → 選一個 → 預覽 →
   套用。一律先預覽再套用，沒有雲端金鑰也全部可用（見下方「AI 幫我」）
 - 檢查中心：超界/重疊/擋門/走道過窄/視線 等規則（門檻在進階可調）
 - 三段 Responsive Workspace（手機 ≤600 / 平板 601–1199 / 桌機 ≥1200），
-  Canvas-first、單列 Header、Bottom Sheet
+  Canvas-first、單列 Header、Bottom Sheet；新生視圖在手機改上下切換地圖與場佈
 - **我的專案**：一場活動一份專案，各自獨立自動儲存；重新命名／複製／刪除
   （刪除有 4 秒復原）；一份壞掉不會影響其他份，原始資料可下載
 - 同一個專案裡可以存多版「場佈」（不同排法）；場地模板另外存
@@ -215,4 +220,5 @@ npm run verify    # lint + typecheck + test + build 一次跑完
 - 完整規格：[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)、
   Workspace 架構：[`docs/RESPONSIVE_WORKSPACE.md`](docs/RESPONSIVE_WORKSPACE.md)、
   夥伴模式：[`docs/PARTNER_MODE.md`](docs/PARTNER_MODE.md)、
-  多專案系統：[`docs/MULTI_PROJECT_SYSTEM.md`](docs/MULTI_PROJECT_SYSTEM.md)
+  多專案系統：[`docs/MULTI_PROJECT_SYSTEM.md`](docs/MULTI_PROJECT_SYSTEM.md)、
+  淡江校園目錄：[`docs/field-research/TKU_CAMPUS_MAP.md`](docs/field-research/TKU_CAMPUS_MAP.md)
