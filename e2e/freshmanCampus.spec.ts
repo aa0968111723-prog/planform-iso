@@ -68,7 +68,7 @@ for (const vp of VIEWPORTS) {
       await page.locator(".campusmap__search").fill("E305");
       await expect(page.locator(".campusmap__hit").first()).toContainText("E305");
       await expect(page.locator(".campusmap__hit").first()).not.toContainText("E310");
-      await page.locator(".campusmap__hit").first().click();
+      await page.locator(".campusmap__search").press("Enter");
       await expect(page.locator(".campusmap__where")).toContainText("E305");
       await expect(page.locator(".photocard__tag").first()).toContainText("待現場確認");
     });
@@ -108,6 +108,6 @@ test.describe("campus map failure and old projects", () => {
     await enterPartnerMode(page);
     await expect(page.locator(".rolechip")).toHaveCount(5);
     await expect(page.locator(".partneraction").first()).toContainText("彩排");
-    await expect(page.locator(".layerchip")).toBeHidden();
+    await expect(page.locator(".freshmanlayers")).toBeHidden();
   });
 });

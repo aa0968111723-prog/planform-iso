@@ -89,20 +89,16 @@ export function buildCampusMap(app: App, opts: {
   close.setAttribute("aria-label", "關閉校園位置圖");
 
   stage.append(leafletHost, fallback, failNote, compass);
-  root.append(
-    el("div", { class: "campusmap__toolbar" }, [
-      el("div", { class: "campusmap__title-row" }, [
-        el("strong", { class: "campusmap__title", text: "淡江校園位置" }),
-        close,
-      ]),
-      search,
-      campusBar,
+  const toolbar = el("div", { class: "campusmap__toolbar" }, [
+    el("div", { class: "campusmap__title-row" }, [
+      el("strong", { class: "campusmap__title", text: "淡江校園位置" }),
+      close,
     ]),
+    search,
+    campusBar,
     results,
-    stage,
-    attr,
-    sheet,
-  );
+  ]);
+  root.append(toolbar, stage, attr, sheet);
 
   let shown = false;
   let query = "";
