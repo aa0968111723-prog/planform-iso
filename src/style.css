@@ -491,6 +491,29 @@ html, body {
 .ctxbar__name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctxbar__size { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 .ctxbar__actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.ctxbar__meta, .ctxbar__flags {
+  font-size: 11px; color: var(--text-dim); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 46vw;
+}
+.placebar__hint--ok { color: #4ade80; }
+.placebar__hint--warn { color: #fbbf24; }
+.placebar__hint--bad { color: #f87171; }
+.ctxmenu {
+  position: fixed; z-index: 40; display: none; flex-direction: column; gap: 4px;
+  min-width: 148px; padding: 8px; background: var(--panel-solid);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 32px var(--shadow-strong);
+}
+.wb-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.wb-head__title { font-size: 15px; font-weight: 700; }
+.wb-head__meta { font-size: 12px; color: var(--text-dim); }
+.partnercopy { margin: 0 0 12px; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.partnercopy__line { font-size: 14px; color: var(--text); }
+
+#app[data-ws-mode="phone"] .ctxbar,
+#app[data-ws-mode="tablet"] .ctxbar { max-width: min(96vw, 640px); overflow: hidden; }
+#app[data-ws-mode="phone"] .placebar-wrap,
+#app[data-ws-mode="tablet"] .placebar-wrap { max-width: min(96vw, 640px); }
 
 /* --- overflow menu sheet ------------------------------------------------ */
 .menusheet {

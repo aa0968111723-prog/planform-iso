@@ -175,6 +175,9 @@ export function buildPartnerMode(
       return;
     }
     const lines: { icon: string; text: string }[] = [];
+    if (role === "all" && b.layoutCopy?.[0]) {
+      lines.push({ icon: "📍", text: b.layoutCopy[0] });
+    }
     if (b.youAre) lines.push({ icon: "📍", text: `你在「${b.youAre}」` });
     if (role === "all" && b.flowSummary) {
       lines.push({ icon: "➡️", text: `整體流程：${b.flowSummary}` });
@@ -202,12 +205,19 @@ export function buildPartnerMode(
 
   function renderSteps(): void {
     const b = app.partnerBriefing();
+    const role = b.role;
     sheetTitle.textContent = `${b.icon} ${b.title}：怎麼做`;
     sheetBody.innerHTML = "";
-    if (!b.steps.length) {
+    if (!b.steps.length && !(role === "all" && b.layoutCopy?.length)) {
       sheetBody.append(el("p", { class: "partnerempty", text: b.emptyHint ?? "還沒有安排這個角色。" }));
       return;
     }
+    if (b.layoutCopy?.length) {
+      const copy = el("ul", { class: "partnercopy" });
+      for (const line of b.layoutCopy) copy.append(el("li", { class: "partnercopy__line", text: line }));
+      sheetBody.append(copy);
+    }
+    if (!b.steps.length) return;
     const list = el("ol", { class: "partnersteps" });
     for (const step of b.steps) {
       list.append(el("li", { class: "partnerstep" }, [

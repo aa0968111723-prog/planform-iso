@@ -18,6 +18,7 @@ import { groupFootprint, groupMembers, memberLabel } from "../core/arrays";
 
 import { doorSweep, facingVec, rectCorners } from "../core/placement";
 import { MAT_COLORS } from "../core/theme";
+import { buildPartnerLayoutCopy } from "../core/partnerCopy";
 
 const NEUTRAL_STROKE = "#334155";
 const TEXT = "#0f172a";
@@ -259,6 +260,14 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   if (opt.preset === "inventory") return renderInventorySheet(project, opt);
   if (opt.preset === "flow") return renderFlowSheet(project, opt);
   project = applyRoleFilter(project, opt.roleFilter, opt.simplify);
+  if (opt.preset === "partner") {
+    project = {
+      ...project,
+      objects: project.objects.filter((o) => o.visibleInPartner !== false && o.visibleInExport !== false),
+      zones: project.zones.filter((z) => z.partnerVisible !== false),
+      routes: project.routes.filter((r) => r.partnerVisible !== false),
+    };
+  }
   const bounds = contentBounds(project);
   const minX = bounds.minX;
   const minZ = bounds.minZ;
@@ -270,7 +279,10 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   const { w: cw, h: ch } = pageDims(opt.page, opt.orientation);
   const phone = opt.page === "phone";
   const pad = phone ? 48 : 56;
-  const notes = opt.extraNotes?.slice(0, 6) ?? [];
+  const extraNotes = (opt.extraNotes && opt.extraNotes.length)
+    ? opt.extraNotes
+    : (opt.preset === "partner" ? buildPartnerLayoutCopy(project) : []);
+  const notes = extraNotes.slice(0, 6);
   const headerH = phone ? 132 + (notes.length ? notes.length * 36 + 10 : 0) : 86 + (notes.length ? notes.length * 21 + 8 : 0);
 
   // Size the footer from real content so the legend never collides with the
@@ -325,7 +337,7 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
   if (opt.preset !== "route") {
     // Furniture + fixtures.
     for (const o of project.objects) {
-      if (o.hidden) continue;
+      if (o.hidden || o.visibleInExport === false) continue;
       const fade = opt.preset === "mats"
         ? o.kind !== "door" && o.kind !== "screen"
         : fadeFurniture && (o.kind === "table" || o.kind === "chair");
@@ -336,14 +348,14 @@ export function renderConstructionPlan(project: Project, options?: Partial<PlanO
     // Route preset: keep the path readable while retaining the physical
     // landmarks that explain where a route actually ends.
     for (const o of project.objects) {
-      if (o.hidden) continue;
+      if (o.hidden || o.visibleInExport === false) continue;
       if (o.kind === "door" || o.kind === "screen") drawObject(ctx, o, t, opt.preset, project);
     }
     withAlpha(ctx, 0.28, () => {
       drawGroups(ctx, project, t, false);
       const catalog = catalogFromProject(project);
       for (const o of project.objects) {
-        if (o.hidden || o.kind === "door" || o.kind === "screen") continue;
+        if (o.hidden || o.visibleInExport === false || o.kind === "door" || o.kind === "screen") continue;
         if (catalog.resolve(o.assetId, o.kind).blocksFlow) drawObject(ctx, o, t, opt.preset, project);
       }
     });
@@ -688,7 +700,17 @@ function withAlpha(ctx: CanvasRenderingContext2D, a: number, fn: () => void): vo
 
 function drawFloors(ctx: CanvasRenderingContext2D, p: Project, t: Xform): void {
   const e310 = p.venuePresetId === "venue:tku-e310";
-  for (const a of [p.classroom, p.corridor]) {
+  const corridorAreas = p.corridorLayout?.segments?.length
+    ? p.corridorLayout.segments.map((seg) => ({
+      id: "corridor" as const,
+      name: seg.name,
+      x: seg.x,
+      z: seg.z,
+      length: seg.length,
+      width: seg.width,
+    }))
+    : [p.corridor];
+  for (const a of [p.classroom, ...corridorAreas]) {
     ctx.fillStyle = e310
       ? (a.id === "classroom" ? "#e2ded5" : "#d2a0a2")
       : (a.id === "classroom" ? "#ffffff" : "#f1f5f9");
@@ -839,13 +861,15 @@ function drawRoutes(ctx: CanvasRenderingContext2D, p: Project, t: Xform, bold: b
     // dedicated route/partner sheet must still be able to reveal the route.
     if ((!r.visible && !bold) || r.points.length < 2) continue;
     ctx.strokeStyle = r.color;
-    ctx.lineWidth = bold ? 5 : 3;
+    ctx.lineWidth = bold ? Math.max(5, (r.thickness ?? 0.12) * 40) : Math.max(3, (r.thickness ?? 0.12) * 24);
     ctx.beginPath();
     ctx.moveTo(t.X(r.points[0].x), t.Y(r.points[0].z));
     for (let i = 1; i < r.points.length; i++) ctx.lineTo(t.X(r.points[i].x), t.Y(r.points[i].z));
     ctx.stroke();
-    for (let i = 0; i < r.points.length - 1; i++) arrowHead(ctx, t.X(r.points[i].x), t.Y(r.points[i].z), t.X(r.points[i + 1].x), t.Y(r.points[i + 1].z), r.color);
-    if (bold) {
+    if (r.showArrows !== false) {
+      for (let i = 0; i < r.points.length - 1; i++) arrowHead(ctx, t.X(r.points[i].x), t.Y(r.points[i].z), t.X(r.points[i + 1].x), t.Y(r.points[i + 1].z), r.color);
+    }
+    if (bold && r.numbered !== false) {
       // Numbered stop badges ①②③ plus 起/終 so the walking order reads at a glance.
       for (let i = 0; i < r.points.length; i++) {
         const px = t.X(r.points[i].x);
@@ -910,7 +934,7 @@ function drawObject(ctx: CanvasRenderingContext2D, o: SceneObject, t: Xform, pre
 function drawObjectAnnotations(ctx: CanvasRenderingContext2D, project: Project, t: Xform): void {
   ctx.font = font(activePageSize === "phone" ? "600 22px" : "600 15px");
   for (const object of project.objects) {
-    if (object.hidden || object.showLabel === false) continue;
+    if (object.hidden || object.showLabel === false || object.visibleInExport === false) continue;
     const text = object.label ?? object.name;
     if (!text) continue;
     const pos = object.labelPosition ?? { offsetX: 0, offsetY: 0, offsetZ: 0 };

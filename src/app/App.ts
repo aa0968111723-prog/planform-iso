@@ -23,6 +23,11 @@ import {
   type PropDefinition,
   type Zone,
   type ZoneType,
+  type CorridorKind,
+  type CorridorSegment,
+  type EditorLayerId,
+  type FloorMaterial,
+  type WorkbenchLayers,
 } from "../core/model";
 import { assetDef } from "../core/assets";
 import { AssetCatalog, type AssetCatalogEntry } from "../core/catalog";
@@ -80,6 +85,30 @@ import {
   areaBounds,
   clampPointToAreas,
 } from "../core/placement";
+import { probePlacement, applyEditorSnap, pointInsideVenue } from "../core/placementFeedback";
+import {
+  alignPoses,
+  distributePoses,
+  gridArrangePoses,
+  scalePosesAroundCentroid,
+  type AlignEdge,
+} from "../core/alignTools";
+import {
+  addCorridorSegment,
+  applyCorridorLayout,
+  connectClassroomDoor,
+  connectCorridorSegments,
+  copyCorridorSegment,
+  deleteCorridorSegment,
+  ensureCorridorLayout,
+  layoutForKind,
+  listCorridorTemplates,
+  saveCorridorTemplate,
+  updateCorridorSegment,
+  type CorridorTemplate,
+} from "../core/corridorGeometry";
+import { applyLayoutStarter, type LayoutStarterId } from "../core/layoutStarters";
+import { cloneWorkbenchLayers, inferEditorLayer, objectLayerLocked } from "../core/editorLayers";
 import { groupCenter, groupFootprint, groupMembers, setGroupCenter } from "../core/arrays";
 import { validateProject, type Issue } from "../core/validation";
 import {
@@ -109,7 +138,7 @@ import {
   type SnappedPoint,
 } from "../core/measure";
 import { applyCalibrationPath, type CalibrationPath } from "../core/calibration";
-import { routePreset } from "../core/routes";
+import { COMMON_ROUTE_CHAIN, routePreset, zoneCenterForRoute } from "../core/routes";
 import { generateLayouts, type LayoutCandidate } from "../core/smartLayout";
 import {
   applyVenuePreset,
@@ -202,6 +231,8 @@ export interface Session {
   matCandidates: LayoutCandidate[];
   /** Zone type waiting for a canvas tap ("點畫面放區域"). */
   zonePlace: ZoneType | null;
+  /** Long-press object menu (phone). */
+  contextMenu: { clientX: number; clientY: number; ids: string[] } | null;
   simPositions: { id?: number; x: number; z: number; routeId?: string; state?: PlaybackAgent["state"] }[];
   /** §25/§26/§31 — latest rolled result per station while a rehearsal plays. */
   simStationResults: Record<string, PlaybackStationResult>;
@@ -321,6 +352,7 @@ export class App {
     participants: 30,
     matCandidates: [],
     zonePlace: null,
+    contextMenu: null,
     simPositions: [],
     simStationResults: {},
     bottlenecks: [],
@@ -382,6 +414,7 @@ export class App {
   private drag: DragState | null = null;
   private dragging = false;
   private tapClearStart: { x: number; y: number } | null = null;
+  private longPressTimer: number | null = null;
   private uiListeners = new Set<() => void>();
   private pointers = new Map<number, { x: number; y: number; type: string }>();
   private validationTimer: number | null = null;
@@ -399,6 +432,7 @@ export class App {
   private partnerReturnView: ViewName | null = null;
   onBox: ((rect: { minX: number; minY: number; maxX: number; maxY: number } | null) => void) | null = null;
   onToast: ((msg: string, undo?: boolean) => void) | null = null;
+  onGhostHint: ((text: string, validity: GhostState["validity"]) => void) | null = null;
   /** UI owns the compact sheet/menu used to disambiguate overlapping meshes. */
   onPickCandidates: ((items: PickResult[]) => void) | null = null;
 
@@ -577,15 +611,11 @@ export class App {
     this.session.mode = "place";
     this.session.ghostRotation = entry.defaultFacingDeg;
     this.rememberAsset(entry.id);
-    const c = this.centerOfClassroom();
-    this.updateGhostAt(c.x, c.z);
+    this.session.ghost = null;
     this.notifyUi();
-    // Placement mode is otherwise silent: the ghost appears in the middle of
-    // the room and nothing says the next tap puts it down. 「怎麼放到攤位」 was
-    // a blind tester's second blocker.
     this.toast(entry.placementType === "tabletop"
-      ? `點桌子放下「${entry.name}」`
-      : `點畫面選位置放下「${entry.name}」`);
+      ? `拖到桌子上，綠燈時點放置「${entry.name}」`
+      : `拖到要放的位置，綠燈時點放置「${entry.name}」`);
   }
 
   /**
@@ -655,43 +685,46 @@ export class App {
     const entry = this.placingEntry();
     if (!kind || !entry) return;
     const dims = this.currentDims(kind, this.session.placingPreset);
-    let x = px, z = pz, rotationDeg = this.session.ghostRotation;
-    let elevation: number;
-    let validity: GhostState["validity"];
+    const rich = applyEditorSnap(px, pz, this.state, this.session.snap);
+    const probe = probePlacement({
+      project: this.state,
+      x: rich.x,
+      z: rich.z,
+      width: dims.width,
+      depth: dims.depth,
+      height: dims.height,
+      rotationDeg: this.session.ghostRotation,
+      surface: entry.placementType,
+      snap: this.session.snap,
+    });
+    let elevation = 0;
     let door: GhostState["door"];
-
     if (entry.placementType === "wall") {
-      const snap = nearestWallSnap(px, pz, [this.state.classroom, this.state.corridor], dims.width);
-      if (snap) { x = snap.x; z = snap.z; rotationDeg = snap.rotationDeg; }
       elevation = entry.defaultElevation ?? 0;
-      validity = snap && snap.distance < 3 ? "ok" : "warn";
       if (kind === "door") door = { hinge: this.session.ghostHinge, openInward: true, openDeg: 90 };
     } else if (entry.placementType === "tabletop") {
-      const table = findParentTable(px, pz, this.state.objects, TABLE_KINDS);
-      const allowedHost = !this.session.tabletopHostId || table?.id === this.session.tabletopHostId;
-      if (table && allowedHost) {
-        elevation = table.elevation + table.height;
-        validity = this.tabletopContains(table, x, z, dims, rotationDeg) ? "ok" : "bad";
-      }
-      else { elevation = entry.defaultElevation ?? 0; validity = "bad"; }
-    } else {
-      const s = applySnap(px, pz, this.state.tile, this.session.snap);
-      x = s.x; z = s.z;
-      elevation = 0;
-      validity = this.insideAny(x, z) ? "ok" : "bad";
+      const table = findParentTable(probe.x, probe.z, this.state.objects, TABLE_KINDS);
+      elevation = table ? table.elevation + table.height : (entry.defaultElevation ?? 0);
     }
     this.session.ghost = {
       kind,
       assetId: entry.id,
       dims,
-      x,
-      z,
-      rotationDeg,
+      x: probe.x,
+      z: probe.z,
+      rotationDeg: probe.rotationDeg,
       elevation,
-      validity,
+      validity: probe.validity,
+      reason: probe.text,
       door,
     };
+    this.onGhostHint?.(probe.text, probe.validity);
     this.syncScene();
+  }
+
+  /** Toolbar 「放置」 — same as tapping the canvas in place mode. */
+  confirmGhostPlacement(): void {
+    this.confirmPlacement();
   }
 
   private confirmPlacement(): void {
@@ -711,11 +744,7 @@ export class App {
     const g = this.session.ghost;
     if (!g) return;
     if (g.validity === "bad") {
-      if (entry.placementType === "tabletop") {
-        const table = findParentTable(g.x, g.z, this.state.objects, TABLE_KINDS);
-        this.toast(table ? "這個小物超出桌面邊界，請往內放" : "點在桌子上才能放下", false);
-      }
-      else this.toast("點在教室或走廊裡才能放下", false);
+      this.toast(g.reason || "無法放置", false);
       return;
     }
     const id = uid("obj");
@@ -727,6 +756,14 @@ export class App {
       presetId: this.session.placingPreset ?? undefined,
       assetId: entry.id,
       serviceRole: entry.serviceRole,
+      snapEnabled: true,
+      collisionEnabled: entry.blocksFlow,
+      blocksCirculation: entry.blocksFlow,
+      visibleInEdit: true,
+      visibleInPartner: entry.kind === "door" || entry.kind === "screen" || entry.kind === "mat" || entry.category === "service",
+      visibleInExport: true,
+      originalSize: { width: g.dims.width, depth: g.dims.depth, height: g.dims.height },
+      editorLayer: inferEditorLayer({ kind, assetId: entry.id, serviceRole: entry.serviceRole }),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -1467,6 +1504,7 @@ export class App {
     this.store.mutate((p) => {
       const originals = [...p.objects];
       const copiedByOriginal = new Map<string, SceneObject>();
+      const groupMap = new Map<string, string>();
       // Copy selected roots first. A selected table retains a proper parent
       // relationship for its children instead of leaving its duplicated QR
       // stands at world coordinates with no tabletop host.
@@ -1477,6 +1515,16 @@ export class App {
           parentId: o.parentId && ids.has(o.parentId) ? undefined : o.parentId,
           createdAt: Date.now(), updatedAt: Date.now(),
         };
+        if (o.groupId) {
+          const members = originals.filter((x) => x.groupId === o.groupId);
+          const allSelected = members.every((m) => ids.has(m.id));
+          if (allSelected) {
+            if (!groupMap.has(o.groupId)) groupMap.set(o.groupId, uid("group"));
+            c.groupId = groupMap.get(o.groupId);
+          } else {
+            delete c.groupId;
+          }
+        }
         copiedByOriginal.set(o.id, c);
         p.objects.push(c); newIds.push(c.id); copiedObjects.push(c);
       }
@@ -1702,31 +1750,286 @@ export class App {
       for (const g of p.groups) if (ids.has(g.id) && !g.locked) g.rotationDeg = r;
     });
   }
-  alignSelection(edge: "left" | "right" | "top" | "bottom"): void {
+  alignSelection(edge: AlignEdge): void {
     const ids = this.session.selection;
     const objs = this.state.objects.filter((o) => ids.has(o.id) && !o.locked);
     if (objs.length < 2) return;
-    const val = edge === "left" ? Math.min(...objs.map((o) => o.x))
-      : edge === "right" ? Math.max(...objs.map((o) => o.x))
-      : edge === "top" ? Math.min(...objs.map((o) => o.z))
-      : Math.max(...objs.map((o) => o.z));
+    const next = alignPoses(objs.map((o) => ({ id: o.id, x: o.x, z: o.z, rotationDeg: o.rotationDeg, width: o.width, depth: o.depth })), edge);
     this.store.mutate((p) => {
-      for (const o of p.objects) if (ids.has(o.id) && !o.locked) { if (edge === "left" || edge === "right") o.x = val; else o.z = val; }
+      for (const pose of next) {
+        const o = p.objects.find((x) => x.id === pose.id);
+        if (o) { o.x = pose.x; o.z = pose.z; o.updatedAt = Date.now(); }
+      }
     });
   }
   distributeSelection(axis: "x" | "z"): void {
     const ids = this.session.selection;
-    const objs = this.state.objects.filter((o) => ids.has(o.id) && !o.locked).sort((a, b) => (axis === "x" ? a.x - b.x : a.z - b.z));
+    const objs = this.state.objects.filter((o) => ids.has(o.id) && !o.locked);
     if (objs.length < 3) return;
-    const lo = axis === "x" ? objs[0].x : objs[0].z;
-    const hi = axis === "x" ? objs[objs.length - 1].x : objs[objs.length - 1].z;
-    const step = (hi - lo) / (objs.length - 1);
+    const next = distributePoses(objs.map((o) => ({
+      id: o.id, x: o.x, z: o.z, rotationDeg: o.rotationDeg, width: o.width, depth: o.depth,
+    })), axis);
     this.store.mutate((p) => {
-      objs.forEach((o, i) => {
-        const t = p.objects.find((x) => x.id === o.id);
-        if (t) { if (axis === "x") t.x = lo + i * step; else t.z = lo + i * step; }
-      });
+      for (const pose of next) {
+        const o = p.objects.find((x) => x.id === pose.id);
+        if (o) { o.x = pose.x; o.z = pose.z; o.updatedAt = Date.now(); }
+      }
     });
+  }
+
+  gridArrangeSelection(gap = 0.1): void {
+    const ids = this.session.selection;
+    const objs = this.state.objects.filter((o) => ids.has(o.id) && !o.locked);
+    if (objs.length < 2) return;
+    const next = gridArrangePoses(objs.map((o) => ({
+      id: o.id, x: o.x, z: o.z, rotationDeg: o.rotationDeg, width: o.width, depth: o.depth,
+    })), { gapX: gap, gapZ: gap });
+    this.store.mutate((p) => {
+      for (const pose of next) {
+        const o = p.objects.find((x) => x.id === pose.id);
+        if (o) { o.x = pose.x; o.z = pose.z; o.updatedAt = Date.now(); }
+      }
+    });
+  }
+
+  scaleSelection(factor: number): void {
+    const ids = this.session.selection;
+    const objs = this.state.objects.filter((o) => ids.has(o.id) && !o.locked);
+    if (!objs.length) return;
+    const next = scalePosesAroundCentroid(objs.map((o) => ({
+      id: o.id, x: o.x, z: o.z, rotationDeg: o.rotationDeg, width: o.width, depth: o.depth,
+    })), factor);
+    this.store.mutate((p) => {
+      for (const pose of next) {
+        const o = p.objects.find((x) => x.id === pose.id);
+        if (o) {
+          o.x = pose.x; o.z = pose.z;
+          o.width = pose.width; o.depth = pose.depth;
+          o.updatedAt = Date.now();
+        }
+      }
+    });
+  }
+
+  flipSelection(): void {
+    this.rotateSelection(180);
+  }
+
+  faceSelection(target: "entrance" | "screen" | "lecturer" | "aisle"): void {
+    const ids = this.session.selection;
+    const c = this.state.classroom;
+    let tx = c.x + c.length / 2;
+    let tz = c.z + c.width / 2;
+    if (target === "entrance") {
+      const door = this.state.objects.find((o) => o.kind === "door" && !o.hidden);
+      if (door) { tx = door.x; tz = door.z; }
+    } else if (target === "screen") {
+      const screen = this.state.objects.find((o) => o.kind === "screen" && !o.hidden);
+      if (screen) { tx = screen.x; tz = screen.z; }
+    } else if (target === "lecturer") {
+      const lectern = this.state.objects.find((o) => o.assetId === "builtin:lectern")
+        ?? this.state.zones.find((z) => z.type === "meditation");
+      if (lectern) { tx = lectern.x; tz = lectern.z; }
+    } else {
+      tz = c.z + c.width / 2;
+    }
+    this.store.mutate((p) => {
+      for (const o of p.objects) {
+        if (!ids.has(o.id) || o.locked || o.surface === "wall") continue;
+        const deg = Math.atan2(tx - o.x, tz - o.z) * (180 / Math.PI);
+        o.rotationDeg = (deg + 360) % 360;
+      }
+    });
+  }
+
+  restoreOriginalSize(): void {
+    const obj = this.getSelectedObject();
+    if (!obj || obj.locked) return;
+    const size = obj.originalSize ?? this.getCatalog().resolve(obj.assetId, obj.kind).dimensions;
+    this.updateSelectedObject({ width: size.width, depth: size.depth, height: size.height });
+  }
+
+  setSelectedKeepAspect(keep: boolean): void {
+    this.updateSelectedObject({ keepAspect: keep });
+  }
+
+  setSelectedSize(patch: { width?: number; depth?: number; height?: number }): void {
+    const obj = this.getSelectedObject();
+    if (!obj || obj.locked) return;
+    const next = { ...patch };
+    if (obj.keepAspect && patch.width && obj.width) {
+      const s = patch.width / obj.width;
+      next.depth = obj.depth * s;
+      if (patch.height === undefined) next.height = obj.height * s;
+    } else if (obj.keepAspect && patch.depth && obj.depth) {
+      const s = patch.depth / obj.depth;
+      next.width = obj.width * s;
+    }
+    this.updateSelectedObject(next);
+  }
+
+  bringSelectionToFront(): void {
+    const ids = this.session.selection;
+    this.store.mutate((p) => {
+      const max = Math.max(0, ...p.objects.map((o) => o.layer ?? 0));
+      for (const o of p.objects) if (ids.has(o.id)) o.layer = max + 1;
+    });
+  }
+
+  sendSelectionToBack(): void {
+    const ids = this.session.selection;
+    this.store.mutate((p) => {
+      const min = Math.min(0, ...p.objects.map((o) => o.layer ?? 0));
+      for (const o of p.objects) if (ids.has(o.id)) o.layer = min - 1;
+    });
+  }
+
+  setShowCoords(show: boolean): void {
+    this.store.mutate((p) => { p.showCoords = show; }, { history: false });
+  }
+
+  applyLayoutStarter(id: LayoutStarterId): void {
+    const venueId = this.state.venuePresetId;
+    this.store.mutate((p) => {
+      applyLayoutStarter(p, id);
+      p.venuePresetId = venueId;
+    });
+    this.toast(id === "custom" ? "繼續自訂目前場佈" : "已套用起始場佈（可再改、可復原）", true);
+  }
+
+  setClassroomEnv(patch: { length?: number; width?: number; height?: number; floorMaterial?: FloorMaterial; name?: string }): void {
+    this.updateArea("classroom", patch);
+  }
+
+  setTileDirection(rotationDeg: number): void {
+    this.updateTile({ rotationDeg });
+  }
+
+  applyCorridorKind(kind: CorridorKind): void {
+    const classroomObjects = this.state.objects
+      .filter((o) => o.wallAnchor?.areaId !== "corridor")
+      .map((o) => ({ id: o.id, x: o.x, z: o.z }));
+    const width = this.state.corridor.width || 2;
+    this.store.mutate((p) => {
+      const layout = layoutForKind(kind, p.classroom, width);
+      const existingLinks = ensureCorridorLayout(p).links;
+      layout.links = existingLinks;
+      applyCorridorLayout(p, layout);
+    });
+    const after = this.state.objects;
+    for (const prev of classroomObjects) {
+      const now = after.find((o) => o.id === prev.id);
+      if (now && (Math.abs(now.x - prev.x) > 1e-6 || Math.abs(now.z - prev.z) > 1e-6)) {
+        this.store.mutate((p) => {
+          const o = p.objects.find((x) => x.id === prev.id);
+          if (o) { o.x = prev.x; o.z = prev.z; }
+        });
+      }
+    }
+    this.toast(`已改為${kind === "straight" ? "直線" : kind === "L" ? "L 型" : kind === "T" ? "T 型" : "多段"}走廊（教室物件未移動）`, true);
+  }
+
+  addCorridorSegment(): void {
+    this.store.mutate((p) => applyCorridorLayout(p, addCorridorSegment(ensureCorridorLayout(p))));
+  }
+
+  copyCorridorSegment(id: string): void {
+    this.store.mutate((p) => applyCorridorLayout(p, copyCorridorSegment(ensureCorridorLayout(p), id)));
+  }
+
+  deleteCorridorSegment(id: string): void {
+    this.store.mutate((p) => applyCorridorLayout(p, deleteCorridorSegment(ensureCorridorLayout(p), id)));
+  }
+
+  updateCorridorSegment(id: string, patch: Partial<CorridorSegment>): void {
+    this.store.mutate((p) => applyCorridorLayout(p, updateCorridorSegment(ensureCorridorLayout(p), id, patch)));
+  }
+
+  connectCorridorSegments(aId: string, bId: string): void {
+    this.store.mutate((p) => applyCorridorLayout(p, connectCorridorSegments(ensureCorridorLayout(p), aId, bId)));
+  }
+
+  connectClassroomToCorridor(doorId?: string): void {
+    const door = doorId
+      ? this.state.objects.find((o) => o.id === doorId)
+      : this.state.objects.find((o) => o.kind === "door" && o.wallAnchor?.areaId === "classroom");
+    if (!door) { this.toast("請先放一扇教室門", false); return; }
+    this.store.mutate((p) => {
+      const layout = ensureCorridorLayout(p);
+      const link = connectClassroomDoor(p, door);
+      layout.links = [...layout.links.filter((l) => l.doorObjectId !== door.id), link];
+      applyCorridorLayout(p, layout);
+    });
+    this.toast("已連接教室與走廊入口", true);
+  }
+
+  saveMyCorridorTemplate(name: string): boolean {
+    const layout = ensureCorridorLayout(this.state);
+    const saved = saveCorridorTemplate(name, layout, this.state.corridor.width);
+    this.toast(saved ? `已把走廊存成「${name}」` : "請先輸入走廊名稱");
+    return !!saved;
+  }
+
+  listMyCorridorTemplates(): CorridorTemplate[] {
+    return listCorridorTemplates();
+  }
+
+  applyCorridorTemplate(id: string): void {
+    const t = listCorridorTemplates().find((x) => x.id === id);
+    if (!t) return;
+    this.store.mutate((p) => applyCorridorLayout(p, JSON.parse(JSON.stringify(t.layout))));
+    this.toast(`已套用走廊「${t.name}」`, true);
+  }
+
+  setWorkbenchLayer(id: EditorLayerId, patch: Partial<WorkbenchLayers[EditorLayerId]>): void {
+    this.store.mutate((p) => {
+      const layers = cloneWorkbenchLayers(p.workbenchLayers);
+      layers[id] = { ...layers[id], ...patch };
+      p.workbenchLayers = layers;
+    });
+  }
+
+  reorderWorkbenchLayer(id: EditorLayerId, delta: number): void {
+    this.store.mutate((p) => {
+      const layers = cloneWorkbenchLayers(p.workbenchLayers);
+      layers[id].order = Math.max(0, Math.min(3, layers[id].order + delta));
+      p.workbenchLayers = layers;
+    });
+  }
+
+  addCommonRoute(kind: "entry-flow" | "staff" | "lecturer" | "custom" = "entry-flow"): void {
+    const points: { x: number; z: number }[] = [];
+    const door = this.state.objects.find((o) => o.kind === "door" && !o.hidden);
+    if (door) points.push({ x: door.x, z: door.z });
+    if (kind === "staff") {
+      const z = zoneCenterForRoute(this.state, "staff");
+      if (z) points.push(z);
+    } else if (kind === "lecturer") {
+      const z = this.state.zones.find((x) => x.type === "meditation");
+      if (z) points.push({ x: z.x, z: z.z });
+    } else if (kind === "entry-flow") {
+      for (const t of COMMON_ROUTE_CHAIN) {
+        const pt = t === "entry" ? (door ? { x: door.x, z: door.z } : null) : zoneCenterForRoute(this.state, t);
+        if (pt && !points.some((p) => Math.hypot(p.x - pt.x, p.z - pt.z) < 0.05)) points.push(pt);
+      }
+    }
+    if (points.length < 2) {
+      this.newRoutePreset(kind === "staff" ? "staff" : kind === "lecturer" ? "seating" : "entry");
+      return;
+    }
+    const pre = routePreset(kind === "staff" ? "staff" : kind === "lecturer" ? "seating" : "entry");
+    const route: Route = {
+      id: uid("route"), name: pre.label, color: pre.color, points, visible: true, type: pre.type,
+      thickness: 0.14, numbered: true, showArrows: true, partnerVisible: true,
+    };
+    this.store.mutate((p) => p.routes.push(route));
+    this.setSelection([route.id]);
+    this.toast(`已加上「${pre.label}」（可再拖節點）`, true);
+  }
+
+  closeContextMenu(): void {
+    this.session.contextMenu = null;
+    this.notifyUi();
   }
 
   updateValidationSettings(patch: Partial<ValidationSettings>): void {
@@ -1753,6 +2056,7 @@ export class App {
     this.validationTimer = window.setTimeout(() => this.runValidation(), 250);
   }
   private toast(msg: string, undo = false): void { this.onToast?.(msg, undo); }
+  refreshUi(): void { this.notifyUi(); }
 
   // --- partner mode ------------------------------------------------------
 
@@ -2909,13 +3213,12 @@ export class App {
 
   private centerOfClassroom(): { x: number; z: number } { const a = this.state.classroom; return { x: a.x + a.length / 2, z: a.z + a.width / 2 }; }
   private insideAny(x: number, z: number): boolean {
-    for (const a of [this.state.classroom, this.state.corridor]) {
-      if (x >= a.x && x <= a.x + a.length && z >= a.z && z <= a.z + a.width) return true;
-    }
-    return false;
+    return pointInsideVenue(x, z, this.state);
   }
   private isLocked(id: string): boolean {
-    return !!(this.state.objects.find((o) => o.id === id)?.locked
+    const obj = this.state.objects.find((o) => o.id === id);
+    if (obj && objectLayerLocked(this.state, obj)) return true;
+    return !!(obj?.locked
       || this.state.zones.find((z) => z.id === id)?.locked
       || this.state.groups.find((g) => g.id === id)?.locked);
   }
@@ -2963,16 +3266,32 @@ export class App {
       this.scene.setControlsEnabled(true);
       this.render();
     });
-    canvas.addEventListener("contextmenu", (e) => { if (this.session.mode === "place") { e.preventDefault(); this.cancelPlacement(); } });
+    canvas.addEventListener("contextmenu", (e) => {
+      if (this.session.mode === "place") { e.preventDefault(); this.cancelPlacement(); }
+      else if (this.session.selection.size) {
+        e.preventDefault();
+        this.session.contextMenu = { clientX: e.clientX, clientY: e.clientY, ids: [...this.session.selection] };
+        this.notifyUi();
+      }
+    });
+    window.addEventListener("keydown", (e) => this.onKeyDown(e));
   }
 
   /** Cancel any in-progress single-finger object drag (e.g. when a 2nd finger lands). */
   private abortDrag(): void {
+    this.clearLongPress();
     if (this.drag && (this.drag.kind === "move" || this.drag.kind === "routeNode")) this.store.cancelTransient();
     this.drag = null;
     this.dragging = false;
     this.tapClearStart = null;
     this.onBox?.(null);
+  }
+
+  private clearLongPress(): void {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
   }
 
   private onPointerDown(e: PointerEvent): void {
@@ -3070,6 +3389,15 @@ export class App {
       }
       this.render();
       if (!this.isLocked(pick.id)) { this.beginDrag(e, { kind: "move" }); this.scene.setControlsEnabled(false); }
+      if (e.pointerType === "touch") {
+        this.clearLongPress();
+        this.longPressTimer = window.setTimeout(() => {
+          this.longPressTimer = null;
+          this.abortDrag();
+          this.session.contextMenu = { clientX: e.clientX, clientY: e.clientY, ids: [...this.session.selection] };
+          this.notifyUi();
+        }, 520);
+      }
       return;
     }
 
@@ -3107,7 +3435,6 @@ export class App {
       const ar = rank(a), br = rank(b);
       return ar[0] - br[0] || ar[1] - br[1] || ar[2] - br[2];
     });
-    window.addEventListener("keydown", (e) => this.onKeyDown(e));
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -3122,7 +3449,7 @@ export class App {
       if (this.session.selection.size) { e.preventDefault(); this.deleteSelection(); }
       return;
     }
-    const delta = e.shiftKey ? 0.1 : 0.01;
+    const delta = e.ctrlKey || e.metaKey ? 0.5 : e.shiftKey ? 0.1 : 0.01;
     const move: Record<string, [number, number]> = {
       ArrowLeft: [-delta, 0], ArrowRight: [delta, 0], ArrowUp: [0, -delta], ArrowDown: [0, delta],
     };
@@ -3167,6 +3494,7 @@ export class App {
     const dy = e.clientY - drag.startClient.y;
     if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
     drag.moved = true;
+    this.clearLongPress();
     const ground = this.scene.groundPoint(e.clientX, e.clientY);
 
     if (drag.kind === "box") { this.updateBoxSelection(drag.startClient, { x: e.clientX, y: e.clientY }); return; }
@@ -3216,6 +3544,7 @@ export class App {
   private partnerTapStart: { x: number; y: number } | null = null;
 
   private onPointerUp(e?: PointerEvent): void {
+    this.clearLongPress();
     if (e) this.pointers.delete(e.pointerId);
     // §85: tapping an interactive station asks 「我站哪裡？」. Still read-only —
     // this sets no selection and moves nothing.

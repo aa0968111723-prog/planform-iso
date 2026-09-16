@@ -276,9 +276,16 @@ function catalogCard(app: App, d: AssetCatalogEntry, opts: LibraryOptions = {}):
 
 /** Compact placement-mode toolbar shown while placing. */
 export function buildPlacementToolbar(app: App): HTMLElement {
+  const g = app.session.ghost;
+  const validity = g?.validity ?? "ok";
+  const reason = g?.reason ?? "拖到要放的位置";
+  const cls = validity === "ok" ? "placebar__hint placebar__hint--ok"
+    : validity === "warn" ? "placebar__hint placebar__hint--warn"
+      : "placebar__hint placebar__hint--bad";
   return el("div", { class: "placebar" }, [
-    el("span", { class: "placebar__hint", text: "點擊放置 · 可連續放置" }),
+    el("span", { class: cls, text: reason }),
     button("旋轉 / 換向", () => app.rotateGhost(), "chip"),
-    button("完成", () => app.cancelPlacement(), "chip chip--primary"),
+    button("放置", () => app.confirmGhostPlacement(), "chip chip--primary"),
+    button("完成", () => app.cancelPlacement(), "chip"),
   ]);
 }
