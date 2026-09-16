@@ -632,6 +632,9 @@ export class SceneManager {
       const sprite = candidate.label instanceof TextLabel ? candidate.label.sprite : candidate.label;
       sprite.visible = visible.has(candidate.id);
     }
+    if (this.partner?.freshman?.essential) {
+      for (const label of this.partnerLabels) label.sprite.visible = true;
+    }
   }
 
   private labelScreenRect(sprite: Sprite): ScreenRect | null {
@@ -695,18 +698,11 @@ export class SceneManager {
       if (path.length > 1) this.addFreshmanPath(path);
       if (partner.freshman.screen) this.addFreshmanScreen(partner.freshman.screen);
       const you = partner.freshman.youAre;
-      // Sit in the corridor just outside the door so 「你在這裡」 is not buried
-      // under the ① badge on the threshold.
-      this.addFreshmanCue(you.x, you.z + 1.05, "#22d3ee", "你在這裡", 1.7);
+      // Sit in the corridor, clear of ① on the threshold.
+      this.addFreshmanCue(you.x, you.z + 1.55, "#22d3ee", "你在這裡", 1.85);
       if (partner.freshman.nextStop) {
         const next = partner.freshman.nextStop;
-        this.addFreshmanCue(
-          next.x + 0.85,
-          next.z,
-          "#fb923c",
-          `下一站：${next.label}`,
-          1.35,
-        );
+        this.addFreshmanCue(next.x, next.z, "#fb923c", "下一站", 1.45);
       }
     }
   }
@@ -755,10 +751,10 @@ export class SceneManager {
       );
       badge.position.set(bx, 0.08, bz);
       this.partnerGroup.add(badge);
-      const label = new TextLabel({ width: 160, height: 160, fontSize: 108 });
-      label.set(circledNumber(stop.index), "#f8fafc");
-      label.sprite.scale.set(0.85, 0.85, 1);
-      label.sprite.position.set(bx, 0.7, bz);
+      const label = new TextLabel({ width: 420, height: 140, fontSize: 56 });
+      label.set(`${circledNumber(stop.index)}${stop.label}`, "#f8fafc");
+      label.sprite.scale.set(1.85, 0.62, 1);
+      label.sprite.position.set(bx, 0.85, bz);
       this.partnerLabels.push(label);
       this.partnerGroup.add(label.sprite);
     }
@@ -795,7 +791,7 @@ export class SceneManager {
     this.partnerGroup.add(pin);
     const label = new TextLabel({ width: 640, height: 140, fontSize: 58 });
     label.set(text, color);
-    label.sprite.scale.set(3.1, 0.7, 1);
+    label.sprite.scale.set(text === "你在這裡" ? 3.6 : 2.8, 0.78, 1);
     label.sprite.position.set(x, height, z);
     this.partnerLabels.push(label);
     this.partnerGroup.add(label.sprite);
@@ -1284,9 +1280,10 @@ export class SceneManager {
     const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
     const freshmanEssential = !!this.partner?.freshman?.essential;
     label.set(
-      freshmanEssential ? name.replace(/·.*/, "").trim() || "地墊區" : `${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`,
+      freshmanEssential ? "" : `${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`,
       this.theme === "light" ? "#134e4a" : "#d1fae5",
     );
+    label.sprite.visible = !freshmanEssential;
     label.sprite.scale.set(3.25, 0.52, 1);
     const center = groupCenter(g);
     label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
@@ -1328,7 +1325,9 @@ export class SceneManager {
         // rest stay as faint context so the room still makes sense.
         fillMat.opacity = muted ? 0.05 : freshmanEssential ? 0.22 : 0.16;
         edgeMat.opacity = muted ? 0.25 : 1;
-        entry.label.sprite.visible = !muted;
+        // Freshman path badges already name each stop (①入口 ②報到區…);
+        // a second pill on the same spot is what hid the names.
+        entry.label.sprite.visible = freshmanEssential ? false : !muted;
         entry.label.set(
           freshmanEssential ? freshmanZoneCaption(zone) : `${zone.icon ?? ""} ${zone.name}${cap}`.trim(),
           "#f8fafc",
