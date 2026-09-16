@@ -208,7 +208,7 @@ export function entranceHint(place: TkuPlace | null): EntranceHint {
   if (!place) return { text: "入口待現場確認", pending: true };
   if (place.id === "E310") {
     return {
-      text: "請從教室後側入口進入。樓館入口方位待現場確認。",
+      text: "請從教室後側入口進入。入口待現場確認。",
       pending: true,
     };
   }

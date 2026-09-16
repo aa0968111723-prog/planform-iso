@@ -834,8 +834,13 @@ html, body {
 #app[data-partner-audience="freshman"] .partnerbrief__line {
   display: flex; width: 100%;
 }
+#app.partner .toast { display: none !important; }
 #app.partner, #app.partner .partnertop, #app.partner .partnerdock, #app.partner .campusmap {
   max-width: 100%; overflow-x: hidden;
+}
+#app[data-ws-mode="phone"] .layerchip__icon { display: none; }
+#app[data-ws-mode="phone"] .layerchip {
+  padding: 6px 10px; font-size: 12px;
 }
 .campusmap__canvas.leaflet-container {
   width: 100%; height: 100%;

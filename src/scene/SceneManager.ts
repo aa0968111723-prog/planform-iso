@@ -483,6 +483,7 @@ export class SceneManager {
     this.syncArrays(project);
     this.syncZones(project, session.selection);
     this.syncRoutes(project, session.focusRouteId ?? null, session.hideRouteLabels ?? false, session.showLabels);
+    if (partner?.freshman) this.routeGroup.visible = false;
     this.syncGhost(session.ghost);
     this.syncMeasurements(project, simplify);
     this.syncOverlay(project, session);
@@ -1038,12 +1039,13 @@ export class SceneManager {
       }
       entry.group.position.set(o.x, o.elevation, o.z);
       entry.group.rotation.y = o.rotationDeg * D2R;
+      const freshmanEssential = !!this.partner?.freshman?.essential;
       const persistentLabel = LANDMARKS.has(o.kind) || catalogEntry.category === "service";
       const selected = session.selection.has(o.id);
       const wantsLabel = o.showLabel !== false && (
-        labelMode === "all"
-        || selected
-        || (labelMode === "essential" && persistentLabel)
+        freshmanEssential
+          ? o.kind === "door"
+          : labelMode === "all" || selected || (labelMode === "essential" && persistentLabel)
       );
       if (wantsLabel && !entry.label) {
         entry.label = new TextLabel();
@@ -1063,7 +1065,10 @@ export class SceneManager {
         if (showLabels) {
           const pos = o.labelPosition ?? { offsetX: 0, offsetY: 0, offsetZ: 0 };
           const style = o.labelStyle;
-          entry.label.set(o.label ?? o.name ?? catalogEntry.name, selected ? "#e0f2fe" : (style?.color ?? "#f8fafc"), style);
+          const caption = freshmanEssential && o.kind === "door"
+            ? "入口"
+            : o.label ?? o.name ?? catalogEntry.name;
+          entry.label.set(caption, selected ? "#e0f2fe" : (style?.color ?? "#f8fafc"), style);
           entry.label.sprite.position.set(o.x + pos.offsetX, o.elevation + o.height + 0.35 + pos.offsetY, o.z + pos.offsetZ);
         }
       }

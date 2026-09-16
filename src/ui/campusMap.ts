@@ -92,11 +92,14 @@ export function buildCampusMap(opts: {
   const fallback = el("div", { class: "campusmap__fallback", style: "display:none" });
   const card = el("div", { class: "campusmap__card" });
   const photos = el("div", { class: "campusmap__photos" });
+  const attrBar = el("p", { class: "campusmap__attr" });
+  attrBar.innerHTML = OSM_ATTR;
   const root = el("div", { class: "campusmap", hidden: "true" }, [
     el("div", { class: "campusmap__toolbar" }, [search, chips, results]),
     el("div", { class: "campusmap__stage" }, [mapBox, north, fallback]),
     card,
     photos,
+    attrBar,
   ]);
 
   let state: CampusMapState = { campusId: "tamsui", place: null, layer: "campus" };

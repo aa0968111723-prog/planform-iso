@@ -649,10 +649,9 @@ export class UI {
   }
 
   /**
-   * 場地 first level is deliberately five things — 場地模板 / 教室尺寸 / 地磚 /
-   * 現場校正 / 固定設施. Engineering parameters (X, Z, tile origin, tile
-   * rotation) are real but rarely touched, so they sit in 進階設定 instead of
-   * being the first thing a phone or tablet user meets.
+   * 場地 first level is the things a volunteer actually needs: 校園與教室 /
+   * 場地模板 / 教室尺寸 / 地磚 / 現場校正 / 固定設施. Engineering parameters
+   * (X, Z, tile origin, tile rotation) sit in 進階設定.
    */
   private siteSections(onPick: () => void): HTMLElement[] {
     return [

@@ -37,12 +37,20 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator(".partnerbar__title")).toContainText("工學大樓");
       await expect(page.locator(".partnerbar__title")).toContainText("E310");
       await expect(page.locator(".layerchip")).toHaveCount(4);
-      await expect(page.locator(".rolechip")).toBeHidden();
+      await expect(page.locator(".freshmanlayers")).toBeVisible();
+      await expect(page.locator(".partnerroles")).toBeHidden();
 
       await expect(page.locator(".campusmap")).toBeVisible();
       await expect(page.locator(".campusmap__search")).toBeVisible();
       await expect(page.locator(".campusmap__card")).toContainText("入口待現場確認");
       await expect(page.locator(".campusmap")).toContainText("OpenStreetMap");
+      await page.locator(".tku-pin__dot, .campusmap__fallback").first().waitFor({ timeout: 8000 }).catch(() => undefined);
+      if (process.env.WALKTHROUGH_DIR) {
+        await page.screenshot({
+          path: `${process.env.WALKTHROUGH_DIR}/freshman_campus_${vp.name}_layout.png`,
+          fullPage: false,
+        });
+      }
 
       await page.locator(".campusmap__search").fill("E305");
       await expect(page.locator(".campusmap__hit").first()).toContainText("E305");
@@ -60,8 +68,17 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator(".partnerbrief")).toContainText("教室怎麼擺");
       await expect(page.locator(".partnerbrief")).toContainText("下一步去哪裡");
       await expect(page.getByRole("button", { name: "看校園位置" })).toBeVisible();
+      if (process.env.WALKTHROUGH_DIR) {
+        await page.screenshot({
+          path: `${process.env.WALKTHROUGH_DIR}/freshman_indoor_${vp.name}_layout.png`,
+          fullPage: false,
+        });
+      }
 
-      const text = await page.locator(".partnertop, .partnerdock").innerText();
+      const text = await page.evaluate(() =>
+        [".partnertop", ".partnerdock"]
+          .map((sel) => (document.querySelector(sel) as HTMLElement | null)?.innerText ?? "")
+          .join("\n"));
       expect(text).not.toMatch(ENGINEERING);
       await noHorizontalOverflow(page);
     });
@@ -110,4 +127,10 @@ test("campus map falls back without a white screen when tiles fail", async ({ pa
   await expect(page.locator(".campusmap")).toContainText("OpenStreetMap");
   await expect(page.locator(".campusmap__card")).toBeVisible();
   await noHorizontalOverflow(page);
+  if (process.env.WALKTHROUGH_DIR) {
+    await page.screenshot({
+      path: `${process.env.WALKTHROUGH_DIR}/freshman_map_offline_fallback.png`,
+      fullPage: false,
+    });
+  }
 });
