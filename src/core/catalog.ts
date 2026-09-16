@@ -420,6 +420,139 @@ export const BUILTIN_CATALOG: AssetCatalogEntry[] = [
   },
 ];
 
+function extra(
+  id: string,
+  name: string,
+  kind: ObjectKind,
+  opts: {
+    semanticType?: SemanticAssetType;
+    category?: CatalogCategory;
+    placementType?: PlacementType;
+    width: number;
+    depth: number;
+    height: number;
+    icon: string;
+    color: string;
+    tags: string[];
+    blocksFlow?: boolean;
+    elevation?: number;
+    facing?: number;
+    serviceRole?: ServiceRole;
+  },
+): AssetCatalogEntry {
+  return {
+    id,
+    name,
+    semanticType: opts.semanticType ?? "other",
+    sourceType: "builtin-procedural",
+    category: opts.category ?? "fixture",
+    placementType: opts.placementType ?? "floor",
+    dimensions: { width: opts.width, depth: opts.depth, height: opts.height },
+    defaultFacingDeg: opts.facing ?? 0,
+    clearanceFront: 0,
+    blocksFlow: opts.blocksFlow ?? false,
+    serviceRole: opts.serviceRole ?? "none",
+    kind,
+    icon: opts.icon,
+    color: opts.color,
+    visualRef: `proc:${id.replace("builtin:", "")}`,
+    planSymbolRef: `plan:${kind}`,
+    tags: opts.tags,
+    createdBy: "builtin",
+    version: 1,
+    allowCustomSize: true,
+    defaultElevation: opts.elevation ?? 0,
+    presets: [preset(id.replace(/[^a-z0-9]/g, "").slice(-8) || "std", opts.width, opts.depth, opts.height)],
+  };
+}
+
+BUILTIN_CATALOG.push(
+  extra("builtin:blackboard", "黑板", "screen", {
+    placementType: "wall", width: 2.4, depth: 0.06, height: 1.2, icon: "⬛", color: "#1e2937",
+    tags: ["fixture", "classroom", "blackboard"], elevation: 1.1,
+  }),
+  extra("builtin:window", "窗戶", "screen", {
+    placementType: "wall", width: 1.5, depth: 0.08, height: 1.4, icon: "🪟", color: "#bae6fd",
+    tags: ["fixture", "classroom", "corridor", "window"], elevation: 1.0,
+  }),
+  extra("builtin:ac-unit", "冷氣", "switch", {
+    placementType: "wall", width: 0.9, depth: 0.25, height: 0.32, icon: "❄️", color: "#e2e8f0",
+    tags: ["fixture", "classroom", "ac"], elevation: 2.2,
+  }),
+  extra("builtin:ceiling-light", "燈具", "switch", {
+    placementType: "floor", width: 0.6, depth: 0.2, height: 0.08, icon: "💡", color: "#fef9c3",
+    tags: ["fixture", "classroom", "corridor", "light"], elevation: 2.6,
+  }),
+  extra("builtin:power-outlet", "電源", "switch", {
+    placementType: "wall", width: 0.086, depth: 0.04, height: 0.086, icon: "🔌", color: "#f8fafc",
+    tags: ["fixture", "classroom", "power"], elevation: 0.3,
+  }),
+  extra("builtin:fire-alarm", "消防", "switch", {
+    placementType: "wall", width: 0.12, depth: 0.05, height: 0.12, icon: "🚒", color: "#ef4444",
+    tags: ["fixture", "classroom", "corridor", "fire"], elevation: 1.5,
+  }),
+  extra("builtin:room-plate", "教室門牌", "switch", {
+    placementType: "wall", width: 0.28, depth: 0.04, height: 0.16, icon: "🏷️", color: "#f1f5f9",
+    tags: ["fixture", "corridor", "signage"], elevation: 1.6,
+  }),
+  extra("builtin:column", "柱子", "table", {
+    width: 0.5, depth: 0.5, height: 3, icon: "▂", color: "#cbd5e1",
+    tags: ["fixture", "corridor", "column"], blocksFlow: true,
+  }),
+  extra("builtin:stair", "樓梯", "table", {
+    width: 1.4, depth: 3.0, height: 0.18, icon: "🪜", color: "#94a3b8",
+    tags: ["fixture", "corridor", "stair"], blocksFlow: true,
+  }),
+  extra("builtin:elevator", "電梯", "table", {
+    width: 1.8, depth: 1.8, height: 2.4, icon: "🛗", color: "#64748b",
+    tags: ["fixture", "corridor", "elevator"], blocksFlow: true,
+  }),
+  extra("builtin:notice-board", "公布欄", "screen", {
+    placementType: "wall", width: 1.2, depth: 0.06, height: 0.9, icon: "📋", color: "#fef3c7",
+    tags: ["fixture", "corridor", "board"], elevation: 1.2,
+  }),
+  extra("builtin:trash-bin", "垃圾桶", "table", {
+    width: 0.4, depth: 0.4, height: 0.7, icon: "🗑️", color: "#78716c",
+    tags: ["fixture", "corridor", "trash"],
+  }),
+  extra("builtin:hydrant", "消防栓", "switch", {
+    placementType: "wall", width: 0.5, depth: 0.2, height: 0.7, icon: "🚰", color: "#dc2626",
+    tags: ["fixture", "corridor", "hydrant"], elevation: 0.4, blocksFlow: true,
+  }),
+  extra("builtin:extinguisher", "滅火器", "switch", {
+    placementType: "wall", width: 0.2, depth: 0.16, height: 0.55, icon: "🧯", color: "#ef4444",
+    tags: ["fixture", "corridor", "extinguisher"], elevation: 0.2,
+  }),
+  extra("builtin:bench", "長椅", "chair", {
+    width: 1.5, depth: 0.45, height: 0.45, icon: "🪑", color: "#a8a29e",
+    tags: ["furniture", "corridor", "bench"],
+  }),
+  extra("builtin:cabinet", "櫃子", "table", {
+    width: 0.9, depth: 0.4, height: 1.8, icon: "🗄️", color: "#b45309",
+    tags: ["furniture", "classroom", "cabinet"], blocksFlow: true,
+  }),
+  extra("builtin:fountain", "飲水機", "table", {
+    width: 0.4, depth: 0.4, height: 1.1, icon: "💧", color: "#38bdf8",
+    tags: ["fixture", "corridor", "fountain"],
+  }),
+  extra("builtin:plant", "植栽", "table", {
+    width: 0.4, depth: 0.4, height: 0.9, icon: "🌿", color: "#4ade80",
+    tags: ["furniture", "corridor", "plant"],
+  }),
+  extra("builtin:corridor-light", "走廊燈", "switch", {
+    placementType: "floor", width: 0.3, depth: 0.3, height: 0.08, icon: "💡", color: "#fde68a",
+    tags: ["fixture", "corridor", "light"], elevation: 2.5,
+  }),
+  extra("builtin:tactile-paving", "點字磚", "mat", {
+    width: 0.3, depth: 1.2, height: 0.02, icon: "🟨", color: "#facc15",
+    tags: ["fixture", "corridor", "tactile"],
+  }),
+  extra("builtin:corridor-custom", "自訂走廊物件", "table", {
+    width: 0.6, depth: 0.6, height: 1.0, icon: "◻️", color: "#94a3b8",
+    tags: ["fixture", "corridor", "custom"],
+  }),
+);
+
 const builtinById = new Map(BUILTIN_CATALOG.map((e) => [e.id, e]));
 const builtinByKind = new Map<ObjectKind, AssetCatalogEntry>();
 for (const e of BUILTIN_CATALOG) {

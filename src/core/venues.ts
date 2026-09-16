@@ -107,6 +107,8 @@ export interface VenuePreset {
   tile: TileConfig;
   fixtures: VenueFixture[];
   extraObjects?: VenueExtraObject[];
+  /** Independent corridor geometry. Straight rectangle when absent. */
+  corridorLayout?: Project["corridorLayout"];
   /** Outdoor booth template payload (zones / routes / simulation stations). */
   booth?: VenueBoothSpec;
   /** Validation overrides this venue needs (e.g. no projector outdoors). */
@@ -419,6 +421,8 @@ export function applyVenuePreset(
   project.classroom = { id: "classroom", ...preset.classroom };
   project.corridor = { id: "corridor", ...preset.corridor };
   project.tile = { ...preset.tile };
+  if (preset.corridorLayout) project.corridorLayout = JSON.parse(JSON.stringify(preset.corridorLayout));
+  else delete project.corridorLayout;
   // Keep existing wall-anchored assets glued to the (resized/moved) walls,
   // clamping the along-wall offset so nothing falls off a shorter wall.
   const areas = [project.classroom, project.corridor];
@@ -573,6 +577,14 @@ export function venuePresetFromProject(project: Project, name: string): VenuePre
     .filter((o) =>
       o.assetId === "builtin:stage-platform"
       || o.assetId === "builtin:lectern"
+      || (o.assetId ?? "").startsWith("builtin:") && (
+        (o.assetId ?? "").includes("corridor")
+        || ["builtin:column", "builtin:stair", "builtin:elevator", "builtin:bench",
+          "builtin:cabinet", "builtin:fountain", "builtin:plant", "builtin:trash-bin",
+          "builtin:hydrant", "builtin:extinguisher", "builtin:room-plate",
+          "builtin:notice-board", "builtin:tactile-paving", "builtin:blackboard",
+          "builtin:window", "builtin:ac-unit"].includes(o.assetId ?? "")
+      )
       || !!boothCatalogEntry(o.assetId!))
     .map((o) => ({
       assetId: o.assetId!, x: o.x, z: o.z, rotationDeg: o.rotationDeg,
@@ -589,6 +601,9 @@ export function venuePresetFromProject(project: Project, name: string): VenuePre
     tile: { ...project.tile },
     fixtures,
     extraObjects: extraObjects.length ? extraObjects : undefined,
+    corridorLayout: project.corridorLayout
+      ? JSON.parse(JSON.stringify(project.corridorLayout))
+      : undefined,
     // Carry the booth marker (not the zones or flows — those are 場佈, not 場地)
     // so re-applying this venue re-registers the booth asset entries.
     booth: project.booth

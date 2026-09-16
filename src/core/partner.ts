@@ -21,6 +21,7 @@ import type {
   ZoneType,
 } from "./model";
 import { assetDef } from "./assets";
+import { buildPartnerLayoutCopy } from "./partnerCopy";
 
 export type PartnerRole = "all" | "checkin" | "payment" | "guide" | "life";
 
@@ -157,6 +158,8 @@ export interface RoleBriefing {
   flowSummary?: string;
   /** Shown when the plan has nothing for this role yet. */
   emptyHint: string | null;
+  /** Partner-readable 場刊 sentences. Never includes xyz / IDs / mesh terms. */
+  layoutCopy?: string[];
 }
 
 const STATION_LABEL: Record<StationType, string> = {
@@ -263,6 +266,7 @@ export function buildRoleBriefing(
       steps,
       flowSummary: journey.map((s) => s.name).join(" → "),
       emptyHint: steps.length ? null : "這個場佈還沒有動線與區域，先請主辦加上報到區與入場動線。",
+      layoutCopy: buildPartnerLayoutCopy(project),
     };
   }
 
@@ -300,6 +304,7 @@ export function buildRoleBriefing(
     nextStop: next,
     steps: empty ? [] : steps,
     emptyHint: empty ? `這個場佈還沒有安排${def.label}的位置，可以先看「全部」。` : null,
+    layoutCopy: buildPartnerLayoutCopy(project),
   };
 }
 

@@ -28,3 +28,21 @@ export const ROUTE_PRESETS: RoutePreset[] = [
 export function routePreset(type: RouteType): RoutePreset {
   return ROUTE_PRESETS.find((p) => p.type === type) ?? ROUTE_PRESETS[ROUTE_PRESETS.length - 1];
 }
+
+/** Common visual journey: 入場 → 報到 → 鞋子 → 背包 → 地墊. */
+export const COMMON_ROUTE_CHAIN: RouteType[] = ["entry", "registration", "shoe", "backpack", "seating"];
+
+export function zoneCenterForRoute(project: { zones: { type: string; x: number; z: number }[] }, type: RouteType): { x: number; z: number } | null {
+  const zoneType =
+    type === "entry" ? null
+      : type === "registration" ? "registration"
+        : type === "shoe" ? "shoe"
+          : type === "backpack" ? "backpack"
+            : type === "seating" ? "mats"
+              : type === "staff" ? "staff"
+                : null;
+  if (!zoneType) return null;
+  const zone = project.zones.find((z) => z.type === zoneType)
+    ?? (zoneType === "mats" ? project.zones.find((z) => z.type === "group" || z.type === "meditation") : undefined);
+  return zone ? { x: zone.x, z: zone.z } : null;
+}

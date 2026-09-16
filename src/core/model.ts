@@ -29,6 +29,8 @@ export const PROJECT_VERSION = 8;
 
 export type ServiceRole = "checkin" | "payment" | "guidance" | "storage" | "none";
 
+export type FloorMaterial = "tile" | "wood" | "concrete" | "carpet";
+
 export interface AreaConfig {
   id: "classroom" | "corridor";
   name: string;
@@ -36,6 +38,9 @@ export interface AreaConfig {
   width: number; // +Z, meters
   x: number; // north-west corner, meters
   z: number;
+  /** Ceiling height in meters. Absent on older files → 3.0 in the editor. */
+  height?: number;
+  floorMaterial?: FloorMaterial;
 }
 
 export interface TileConfig {
@@ -145,9 +150,26 @@ export interface SceneObject {
   snapEnabled?: boolean;
   /** Keep tabletop items inside their host by default; opt out for banners etc. */
   allowTabletopOverflow?: boolean;
+  /** Allow the footprint to sit past the classroom / corridor wall. */
+  allowOverflow?: boolean;
   customProperties?: Record<string, string>;
   createdAt?: number;
   updatedAt?: number;
+
+  /** Display colour override; falls back to the catalog colour. */
+  color?: string;
+  /** Display icon override; falls back to the catalog icon. */
+  icon?: string;
+  /** When true, the object is treated as blocking circulation in the workbench. */
+  blocksCirculation?: boolean;
+  visibleInEdit?: boolean;
+  visibleInPartner?: boolean;
+  visibleInExport?: boolean;
+  keepAspect?: boolean;
+  /** Semantic workbench layer. Inferred from kind/asset when absent. */
+  editorLayer?: EditorLayerId;
+  /** Original catalog size, so 「恢復原尺寸」 can restore without a version bump. */
+  originalSize?: { width: number; depth: number; height: number };
 }
 
 export type NumberOrder = "row" | "col";
@@ -215,6 +237,9 @@ export type ZoneType =
   | "meditation"
   | "shoe"
   | "backpack"
+  | "mats"
+  | "staff"
+  | "wait"
   | "custom";
 
 export interface Zone {
@@ -236,6 +261,16 @@ export interface Zone {
    * zones as plain `type: "custom"` areas and still draws them correctly.
    */
   boothRole?: BoothZoneRole;
+  height?: number;
+  rotationDeg?: number;
+  partnerVisible?: boolean;
+  description?: string;
+  staffX?: number;
+  staffZ?: number;
+  inLabel?: string;
+  outLabel?: string;
+  objectIds?: string[];
+  displayOrder?: number;
 }
 
 export interface RoutePoint {
@@ -259,6 +294,11 @@ export interface Route {
   waypointZoneIds?: string[];
   /** Booth: whose flow this is, so visitor and staff lines can be toggled together. */
   boothRole?: "visitor" | "staff";
+  thickness?: number;
+  numbered?: boolean;
+  showArrows?: boolean;
+  partnerVisible?: boolean;
+  stepLabels?: string[];
 }
 
 export type ViewName = "iso" | "top" | "front" | "left" | "right";
@@ -269,6 +309,57 @@ export interface LayerVisibility {
   objects: boolean;
   tiles: boolean;
   routes: boolean;
+}
+
+/** Four partner-facing workbench layers. Optional so older files stay valid. */
+export type EditorLayerId = "fixture" | "furniture" | "event" | "flow";
+
+export interface WorkbenchLayerState {
+  visible: boolean;
+  locked: boolean;
+  order: number;
+}
+
+export type WorkbenchLayers = Record<EditorLayerId, WorkbenchLayerState>;
+
+export const DEFAULT_WORKBENCH_LAYERS: WorkbenchLayers = {
+  fixture: { visible: true, locked: false, order: 0 },
+  furniture: { visible: true, locked: false, order: 1 },
+  event: { visible: true, locked: false, order: 2 },
+  flow: { visible: true, locked: false, order: 3 },
+};
+
+export type CorridorKind = "straight" | "L" | "T" | "multi";
+export type CorridorSegmentKind = "passage" | "entry" | "exit" | "restricted";
+
+/** One editable corridor rectangle. Rotation is yaw about +Y, same as objects. */
+export interface CorridorSegment {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  length: number;
+  width: number;
+  rotationDeg: number;
+  kind: CorridorSegmentKind;
+  passable: boolean;
+}
+
+export interface ClassroomCorridorLink {
+  id: string;
+  doorObjectId?: string;
+  segmentId: string;
+  enterDir: "into-classroom" | "into-corridor";
+  leaveDir: "into-classroom" | "into-corridor";
+  primary: boolean;
+  showLink: boolean;
+  locked: boolean;
+}
+
+export interface CorridorLayout {
+  kind: CorridorKind;
+  segments: CorridorSegment[];
+  links: ClassroomCorridorLink[];
 }
 
 // --- v6 Event Flow -------------------------------------------------------
@@ -857,6 +948,12 @@ export interface Project {
   validationSettings: ValidationSettings;
   view: ViewName;
   layers: LayerVisibility;
+  /** Four-layer object workbench (固定設施 / 教室家具 / 活動場佈 / 動線與標記). */
+  workbenchLayers?: WorkbenchLayers;
+  /** Independent corridor geometry. Absent → a single rectangle from `corridor`. */
+  corridorLayout?: CorridorLayout;
+  /** Editor preference: show X/Z readouts. Partner mode always hides them. */
+  showCoords?: boolean;
   /** Persisted label visibility policy. Individual `showLabel` values win. */
   labelDisplayMode?: LabelDisplayMode;
   /** Asset ids explicitly bookmarked by this project owner. */
@@ -905,6 +1002,9 @@ export const ZONE_DEFAULTS: Record<
   meditation: { label: "講師禪定區", color: "#f472b6", width: 2, depth: 2, icon: "🧘" },
   shoe: { label: "鞋子擺放區", color: "#fbbf24", width: 2, depth: 1, icon: "👟" },
   backpack: { label: "背包放置區", color: "#fb923c", width: 2, depth: 1, icon: "🎒" },
+  mats: { label: "地墊區", color: "#4ade80", width: 4, depth: 3, icon: "🧩" },
+  staff: { label: "工作人員位置", color: "#f43f5e", width: 1.5, depth: 1.5, icon: "🦺" },
+  wait: { label: "新生等候區", color: "#67e8f9", width: 2.5, depth: 1.5, icon: "🌱" },
   custom: { label: "自訂區", color: "#94a3b8", width: 2, depth: 2, icon: "📦" },
 };
 
@@ -918,8 +1018,8 @@ export function createDefaultProject(): Project {
     id: uid("proj"),
     name: "未命名平面圖",
     description: "",
-    classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 },
-    corridor: { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+    classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0, height: 3, floorMaterial: "tile" },
+    corridor: { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8, height: 3, floorMaterial: "tile" },
     tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
     calibration: { referenceLength: null, note: "", confirmed: {} },
     zones: [],
@@ -930,6 +1030,13 @@ export function createDefaultProject(): Project {
     validationSettings: { ...DEFAULT_VALIDATION_SETTINGS },
     view: "top",
     layers: { areas: true, zones: true, objects: true, tiles: true, routes: true },
+    workbenchLayers: {
+      fixture: { visible: true, locked: false, order: 0 },
+      furniture: { visible: true, locked: false, order: 1 },
+      event: { visible: true, locked: false, order: 2 },
+      flow: { visible: true, locked: false, order: 3 },
+    },
+    showCoords: true,
     labelDisplayMode: "essential",
     favoriteAssetIds: [],
     catalogExtras: [],
