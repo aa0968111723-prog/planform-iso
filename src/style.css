@@ -857,7 +857,7 @@ html, body {
   font: inherit; font-size: 11px; cursor: pointer;
 }
 .mappin--current {
-  z-index: 2; background: #0369a1; color: #fff; border-color: #0369a1; font-weight: 700;
+  z-index: 2; background: var(--accent-text); color: #fff; border-color: var(--accent-text); font-weight: 700;
 }
 .mappin--related { z-index: 1; opacity: 0.92; }
 .mappin--dim { opacity: 0.45; }
@@ -870,13 +870,13 @@ html, body {
   background: var(--panel-solid); border: 1px solid var(--border);
   font-size: 11px; font-weight: 700; color: var(--text);
 }
-.leafpin--current .leafpin__label { background: #0369a1; color: #fff; border-color: #0369a1; }
+.leafpin--current .leafpin__label { background: var(--accent-text); color: #fff; border-color: var(--accent-text); }
 .leafpin--dim { opacity: 0.4; }
 .leafpin__dot {
   display: block; width: 10px; height: 10px; border-radius: 999px;
   background: #64748b; border: 2px solid #fff;
 }
-.leafpin--current .leafpin__dot { width: 14px; height: 14px; background: #0369a1; }
+.leafpin--current .leafpin__dot { width: 14px; height: 14px; background: var(--accent-text); }
 .campusmap__list { margin: 12px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
 .campusmap__legend { padding: 8px 12px; font-weight: 700; }
 
@@ -918,9 +918,9 @@ html, body {
   background: var(--panel-solid); font: inherit; font-size: 11px; font-weight: 700;
   cursor: pointer;
 }
-.fplan__label--here { background: #0369a1; color: #fff; border-color: #0369a1; z-index: 3; }
-.fplan__label--next { background: #0f766e; color: #fff; border-color: #0f766e; z-index: 2; }
-.fplan__label--door, .fplan__label--front { background: #0f172a; color: #fff; }
+.fplan__label--here { background: var(--accent-text); color: #fff; border-color: var(--accent-text); z-index: 3; }
+.fplan__label--next { background: var(--ok-text); color: #fff; border-color: var(--ok-text); z-index: 2; }
+.fplan__label--door, .fplan__label--front { background: var(--text); color: #fff; }
 .freshmanplan__legend {
   flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
   padding: 4px 12px;
