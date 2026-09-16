@@ -80,6 +80,8 @@ for (const vp of VIEWPORTS) {
       await page.locator('.layerchip[data-layer="indoor"]').click();
       await settle(page);
       await expect(page.locator(".freshmanplan")).toBeVisible();
+      const plot = await page.locator(".freshmanplan__plot").boundingBox();
+      expect(plot?.height ?? 0).toBeGreaterThan(160);
       await expect(page.locator(".fplan__label--here")).toContainText("你在這裡");
       await expect(page.locator(".freshmanplan__legend")).toContainText("入口");
       await expect(page.locator(".freshmanplan__legend")).toContainText("地墊");

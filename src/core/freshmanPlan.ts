@@ -283,11 +283,25 @@ export function layoutFreshmanPlan(
   }
   if (here) {
     const p = toPlot(project, here.x, here.z);
-    pushLabel("here", p.x, p.y - 8, "你在這裡", "here", 0, 72);
+    pushLabel("here", p.x, Math.min(94, p.y + 11), "你在這裡", "here", 0, 76);
   }
   if (next) {
     const p = toPlot(project, next.x, next.z);
-    pushLabel("next", p.x, p.y + 8, `下一步：${next.title}`, "next", 0, 96);
+    pushLabel("next", p.x, Math.max(8, p.y - 11), `下一步：${next.title}`, "next", 0, 100);
+  }
+  for (const arrow of arrows) {
+    const mx = (arrow.from.x + arrow.to.x) / 2;
+    const my = (arrow.from.y + arrow.to.y) / 2;
+    rawLabels.push({
+      id: `num:${arrow.index}`,
+      x: mx,
+      y: my,
+      text: "",
+      tone: "detail",
+      width: 16,
+      height: 16,
+      priority: 0,
+    });
   }
 
   const visible = pickNonOverlappingMapLabels(rawLabels.map((l) => ({
@@ -299,7 +313,8 @@ export function layoutFreshmanPlan(
     priority: l.priority,
   })));
   for (const label of rawLabels) {
-    if (visible.has(label.id) || label.tone === "here" || label.tone === "next") {
+    if (!label.text) continue;
+    if (visible.has(label.id)) {
       labels.push({ id: label.id, x: label.x, y: label.y, text: label.text, tone: label.tone });
     }
   }

@@ -198,8 +198,9 @@ export class WorkspaceViewport {
     const overlayTop = Math.max(0, ...(c.overlays ?? []).map((node) => {
       if (!visible(node) || node.hidden) return 0;
       const dock = node.dataset.mapDock;
-      if (dock === "left") return 0;
-      if (dock === "cover") return 0;
+      // Map overlays position themselves with --ws-header-h. Counting their
+      // height as header chrome would push them down and crush the indoor plan.
+      if (dock === "left" || dock === "cover" || dock === "top") return 0;
       const r = node.getBoundingClientRect();
       return Math.max(0, r.bottom - canvas.y);
     }));

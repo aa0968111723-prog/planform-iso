@@ -104,5 +104,20 @@ describe("freshman partner reading", () => {
     const detailed = layoutFreshmanPlan(project, buildFreshmanGuide(project, 0), true);
     expect(detailed.detailLine).toMatch(/待現場校正/);
     expect(view.frontCaption).toContain("投影幕");
+    const boxes = view.labels.map((l) => ({
+      id: l.id,
+      x: l.x - 20,
+      y: l.y - 6,
+      width: l.text.length * 7,
+      height: 14,
+    }));
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const overlap = a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+        expect(overlap, `${a.id} overlaps ${b.id}`).toBe(false);
+      }
+    }
   });
 });
