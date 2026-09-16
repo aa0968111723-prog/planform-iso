@@ -65,7 +65,7 @@ describe("Tamkang campus directory", () => {
 
   it("featured Quick Start places stay a short honest list", () => {
     expect(featuredTkuPlaces().map((p) => p.id)).toEqual([
-      "E308", "E310", "SG320", "SG109", "scroll-plaza",
+      "E308", "E305", "E310", "SG320", "SG109", "scroll-plaza",
     ]);
   });
 

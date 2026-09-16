@@ -21,6 +21,8 @@ import { deleteLibraryProp, listLibraryProps, loadLibraryProp } from "../state/p
 import { buildMenuSheet, type MenuGroup, type MenuSheetHandles } from "./menuSheet";
 import { renderContextBar } from "./contextBar";
 import { buildPartnerMode, type PartnerModeHandles } from "./partnerMode";
+import { buildCampusMap, type CampusMapHandles } from "./campusMap";
+import { buildFreshmanPlan, type FreshmanPlanHandles } from "./freshmanPlan";
 import { showNewProjectWizard } from "./quickStart";
 import { buildProjectHome, type ProjectHomeHandles } from "./projectHome";
 import { ProjectRepository } from "../state/projectRepository";
@@ -63,6 +65,8 @@ export class UI {
   private toast = el("div", { class: "toast", style: "display:none" });
   private statusBadge = button("", () => this.openCalibrationSheet(), "status-badge");
   private partner: PartnerModeHandles;
+  private campusMap: CampusMapHandles;
+  private freshmanPlan: FreshmanPlanHandles;
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
@@ -92,10 +96,23 @@ export class UI {
       onExit: () => this.app.exitPartnerMode(),
       onLayoutChange: () => this.viewport.schedule(),
     });
+    this.campusMap = buildCampusMap(app, {
+      onEnterIndoor: () => {
+        if (this.app.session.partner?.audience === "freshman") this.app.setFreshmanLayer("indoor");
+        else {
+          this.app.closeCampusMap();
+          this.app.setView("top");
+        }
+      },
+      onLayoutChange: () => this.viewport.schedule(),
+    });
+    this.freshmanPlan = buildFreshmanPlan(app, {
+      onLayoutChange: () => this.viewport.schedule(),
+    });
     root.append(
       this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
       this.box, this.toast, this.ctxbar, this.menu.root,
-      this.partner.top, this.partner.dock, this.partner.sheet,
+      this.partner.top, this.partner.dock, this.partner.sheet, this.campusMap.root, this.freshmanPlan.root,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
       openMatArranger: () => {
@@ -133,6 +150,7 @@ export class UI {
       right: this.right,
       sheets: [this.partner.sheet],
       bars: [this.ctxbar, this.placebar, this.measurebar, this.agentSheet.root],
+      overlays: [this.campusMap.root, this.freshmanPlan.root],
     });
     this.viewport.start();
     this.viewport.subscribe((state) => {
@@ -367,12 +385,14 @@ export class UI {
     aiQuick.setAttribute("aria-label", "AI 建議");
     aiQuick.title = "AI 建議";
     const team = button("👥 夥伴模式", () => this.app.enterPartnerMode(), "chip chip--primary");
+    const freshman = button("🎒 新生", () => this.app.enterFreshmanPartnerMode(), "chip chip--sm chip--freshman");
+    freshman.setAttribute("aria-label", "新生夥伴視圖");
     const moreBtn = button("⋯", () => this.openMoreMenu(), "chip chip--sm topbar__more");
     moreBtn.setAttribute("aria-label", "更多設定");
     this.topbar.append(
       this.homeButton("← 我的專案"),
       el("div", { class: "topbar__title", text: BRAND.name }),
-      history, flows, views, more, el("div", { class: "topbar__spacer" }), aiQuick, team, moreBtn,
+      history, flows, views, more, el("div", { class: "topbar__spacer" }), aiQuick, team, freshman, moreBtn,
     );
     this.topbar.append(this.statusBadge);
   }
@@ -449,6 +469,8 @@ export class UI {
           { label: "現場校正", onSelect: () => { this.app.setWorkflow("site"); this.app.startCalibration(); this.setSheet("workflow"); } },
           { label: "✦ AI 建議", sub: "先預覽，再決定要不要套用", onSelect: () => { this.agentSheet.open(); return true; } },
           { label: "👥 夥伴模式", sub: "給夥伴看的乾淨視圖", onSelect: () => this.app.enterPartnerMode() },
+          { label: "🎒 新生夥伴", sub: "第一次來淡江：校園位置與教室場佈", onSelect: () => this.app.enterFreshmanPartnerMode() },
+          { label: "🗺️ 淡江校園位置", sub: "淡水／臺北／蘭陽，不用金鑰", onSelect: () => this.app.openCampusMap() },
         ],
       },
       {
@@ -652,6 +674,7 @@ export class UI {
    */
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
+      this.campusLocationSection(),
       this.venuePresetSection(),
       this.roomSizeSection(),
       this.tileSection(),
@@ -659,6 +682,14 @@ export class UI {
       this.fixtureSection(onPick),
       this.siteAdvancedSection(),
     ];
+  }
+
+  private campusLocationSection(): HTMLElement {
+    return section("淡江校園位置", [
+      el("p", { class: "hint", text: "給第一次來的夥伴看：活動在哪個校園、哪一棟樓。用地圖公開圖資，不用金鑰。" }),
+      button("🗺️ 打開校園位置圖", () => this.app.openCampusMap(), "btn btn--big"),
+      button("🎒 新生夥伴視圖", () => this.app.enterFreshmanPartnerMode(), "btn btn--big btn--primary"),
+    ]);
   }
 
   private venuePresetSection(): HTMLElement {
@@ -1269,6 +1300,8 @@ export class UI {
       // 「給夥伴看」是主流程第四步的一半 — 夥伴模式在這裡有一級入口
       // （手機不用再鑽 ⋯ 選單）。
       button("👥 夥伴模式（給志工看的現場畫面）", () => this.app.enterPartnerMode(), "btn btn--big"),
+      button("🎒 新生夥伴（第一次來淡江）", () => this.app.enterFreshmanPartnerMode(), "btn btn--big btn--primary"),
+      button("🗺️ 淡江校園位置", () => this.app.openCampusMap(), "btn btn--big"),
       preExportChecklist,
       planSection,
       el("div", { class: "subhead", text: "活動資訊" }),
@@ -1459,7 +1492,13 @@ export class UI {
    */
   private updatePartnerMode(): void {
     const on = !!this.app.session.partner;
+    const freshman = this.app.session.partner?.audience === "freshman";
     this.root.classList.toggle("partner", on);
+    this.root.classList.toggle("freshman", freshman);
+    if (freshman) this.root.dataset.freshmanLayer = this.app.session.partner?.freshmanLayer ?? "campus";
+    else this.root.removeAttribute("data-freshman-layer");
+    this.syncCampusMap();
+    this.syncFreshmanPlan();
     if (on) {
       this.setSheet("none");
       this.menu.close();
@@ -1469,12 +1508,41 @@ export class UI {
     }
     if (on !== this.partnerWasOn) {
       this.partnerWasOn = on;
-      // Swapping the whole chrome changes the visible canvas rect, so re-frame
-      // once the new strips have actually been laid out and measured.
       requestAnimationFrame(() => requestAnimationFrame(() => {
         this.viewport.measure();
         this.app.recenterView();
       }));
+    }
+  }
+
+  private syncCampusMap(): void {
+    const freshman = this.app.session.partner?.audience === "freshman";
+    const layer = this.app.session.partner?.freshmanLayer;
+    const split = freshman && this.mode !== "phone";
+    const want = this.app.session.campusMapOpen || (freshman && (layer !== "indoor" || split));
+    if (this.mode === "phone") this.campusMap.root.dataset.mapDock = "cover";
+    else if (this.mode === "desktop" && freshman) this.campusMap.root.dataset.mapDock = "left";
+    else this.campusMap.root.dataset.mapDock = "top";
+    if (want) {
+      if (this.campusMap.visible()) this.campusMap.update();
+      else this.campusMap.show();
+    } else {
+      this.campusMap.hide();
+    }
+  }
+
+  private syncFreshmanPlan(): void {
+    const freshman = this.app.session.partner?.audience === "freshman";
+    const layer = this.app.session.partner?.freshmanLayer;
+    const indoor = freshman && layer === "indoor";
+    const split = freshman && this.mode !== "phone";
+    const want = freshman && (indoor || (split && indoor));
+    this.freshmanPlan.root.dataset.mapDock = "cover";
+    if (want) {
+      if (this.freshmanPlan.visible()) this.freshmanPlan.update();
+      else this.freshmanPlan.show();
+    } else {
+      this.freshmanPlan.hide();
     }
   }
 

@@ -42,6 +42,10 @@ export interface TkuCampus {
   fax?: string;
   url?: string;
   hectares?: number;
+  /** Public campus pin — a campus location, never an indoor room. */
+  lat?: number;
+  lng?: number;
+  defaultZoom?: number;
   note: string;
 }
 
@@ -87,6 +91,10 @@ export interface TkuPlace {
   clubUse?: "primary" | "frequent" | "office" | "outdoor" | "fallback";
   mentionCount?: number;
   publishedCapacity?: number;
+  /** Plain-language door hint. Unverified until surveyed on site. */
+  entranceHint?: string;
+  /** False or missing → UI must say 入口待現場確認. */
+  entranceVerified?: boolean;
   note: string;
 }
 
@@ -218,7 +226,7 @@ export function findTkuPlaceInText(query: string): { place: TkuPlace; evidence: 
 }
 
 export function featuredTkuPlaces(): TkuPlace[] {
-  const order = ["E308", "E310", "SG320", "SG109", "scroll-plaza"];
+  const order = ["E308", "E305", "E310", "SG320", "SG109", "scroll-plaza"];
   return order.map(placeById).filter((p): p is TkuPlace => !!p);
 }
 
@@ -259,4 +267,222 @@ export function formatCampusLine(ref: TkuCampusRef): string {
     ref.room ? `室 ${ref.room}` : null,
   ].filter(Boolean);
   return bits.join(" · ");
+}
+
+/** Freshman headline: 淡江大學 · 淡水校園 · 工學大樓 · E310 · 3F */
+export function formatFreshmanHeadline(ref: TkuCampusRef): string {
+  const campus = campusById(ref.campusId);
+  const building = ref.buildingCode ? buildingByCode(ref.buildingCode) : undefined;
+  const room = ref.room
+    ? (ref.buildingCode ? `${ref.buildingCode}${ref.floor ?? ""}${ref.room}` : ref.room)
+    : ref.placeId && /^[A-Z]{1,2}\d/.test(ref.placeId)
+      ? ref.placeId
+      : null;
+  const bits = [
+    "淡江大學",
+    campus?.name,
+    building?.name,
+    room,
+    ref.floor != null ? `${ref.floor}F` : null,
+  ].filter(Boolean);
+  return bits.join(" · ");
+}
+
+export type TkuSearchKind = "campus" | "building" | "place";
+
+export interface TkuSearchHit {
+  kind: TkuSearchKind;
+  id: string;
+  title: string;
+  subtitle: string;
+  campusId: TkuCampusId;
+  buildingCode?: string;
+  placeId?: string;
+  score: number;
+}
+
+function compact(s: string): string {
+  return s.replace(/\s+/g, "").toLowerCase();
+}
+
+/**
+ * Ranked directory search for the campus map. Room codes win over fuzzy
+ * names so 「E305」 never lands on E310 or 臺北 D305.
+ */
+export function searchTkuDirectory(query: string, limit = 12): TkuSearchHit[] {
+  const q = query.trim();
+  if (!q) return [];
+  const hits: TkuSearchHit[] = [];
+  const parsed = parseTkuRoomCode(q);
+  if (parsed) {
+    const exact = TKU_PLACES.find((p) => p.id.toUpperCase() === parsed.code);
+    if (exact) {
+      const building = exact.buildingCode ? buildingByCode(exact.buildingCode) : undefined;
+      hits.push({
+        kind: "place",
+        id: exact.id,
+        title: exact.name,
+        subtitle: formatCampusLine({
+          campusId: exact.campusId,
+          buildingCode: exact.buildingCode,
+          floor: exact.floor,
+          room: exact.room,
+          placeId: exact.id,
+        }),
+        campusId: exact.campusId,
+        buildingCode: exact.buildingCode,
+        placeId: exact.id,
+        score: 100,
+      });
+      if (building) {
+        hits.push({
+          kind: "building",
+          id: building.code,
+          title: `${building.code} ${building.name}`,
+          subtitle: campusById(building.campusId)?.name ?? building.nameEn,
+          campusId: building.campusId,
+          buildingCode: building.code,
+          score: 80,
+        });
+      }
+    } else {
+      const building = buildingByCode(parsed.buildingCode);
+      const place = findTkuPlace(parsed.code);
+      if (place) {
+        hits.push({
+          kind: "place",
+          id: place.id,
+          title: `${parsed.code} → ${place.name}`,
+          subtitle: place.kind === "generic"
+            ? `${formatCampusLine({ campusId: place.campusId, buildingCode: place.buildingCode, floor: parsed.floor, room: parsed.room })}（未建檔教室，套用該棟起點）`
+            : formatCampusLine({ campusId: place.campusId, buildingCode: place.buildingCode, floor: place.floor, room: place.room, placeId: place.id }),
+          campusId: place.campusId,
+          buildingCode: place.buildingCode ?? parsed.buildingCode,
+          placeId: place.id,
+          score: 90,
+        });
+      }
+      if (building) {
+        hits.push({
+          kind: "building",
+          id: building.code,
+          title: `${building.code} ${building.name}`,
+          subtitle: `${parsed.code} 在這棟樓的 ${parsed.floor}F`,
+          campusId: building.campusId,
+          buildingCode: building.code,
+          score: 70,
+        });
+      }
+    }
+  }
+
+  const n = compact(q);
+  for (const campus of TKU_CAMPUSES) {
+    if (campus.id === "cyber") continue;
+    const names = [campus.name, campus.nameEn, campus.officialCode ?? ""];
+    if (names.some((name) => compact(name) && (compact(name) === n || compact(name).includes(n) || n.includes(compact(name))))) {
+      hits.push({
+        kind: "campus",
+        id: campus.id,
+        title: campus.name,
+        subtitle: campus.address ?? campus.note,
+        campusId: campus.id,
+        score: compact(campus.name) === n ? 95 : 60,
+      });
+    }
+  }
+
+  for (const building of TKU_BUILDINGS) {
+    const names = [building.code, building.name, building.nameEn, ...(building.aliases ?? [])];
+    const exactCode = building.code === q.trim().toUpperCase();
+    const matched = names.some((name) => {
+      const nn = compact(name);
+      if (!nn) return false;
+      return nn === n || nn.includes(n) || n.includes(nn);
+    });
+    if (!matched) continue;
+    hits.push({
+      kind: "building",
+      id: building.code,
+      title: `${building.code} ${building.name}`,
+      subtitle: campusById(building.campusId)?.name ?? building.nameEn,
+      campusId: building.campusId,
+      buildingCode: building.code,
+      score: exactCode ? 92 : n.length >= 2 ? 55 : 20,
+    });
+  }
+
+  for (const place of TKU_PLACES) {
+    const names = [place.id, place.name, ...(place.aliases ?? [])];
+    const exactId = place.id.toUpperCase() === q.trim().toUpperCase();
+    const matched = names.some((name) => {
+      const nn = compact(name);
+      if (nn.length < 2) return false;
+      return nn === n || (n.length >= 2 && (nn.includes(n) || n.includes(nn)));
+    });
+    if (!matched) continue;
+    hits.push({
+      kind: "place",
+      id: place.id,
+      title: place.name,
+      subtitle: formatCampusLine({
+        campusId: place.campusId,
+        buildingCode: place.buildingCode,
+        floor: place.floor,
+        room: place.room,
+        placeId: place.id,
+      }),
+      campusId: place.campusId,
+      buildingCode: place.buildingCode,
+      placeId: place.id,
+      score: exactId ? 98 : 50,
+    });
+  }
+
+  const seen = new Set<string>();
+  return hits
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "zh-Hant"))
+    .filter((hit) => {
+      const key = `${hit.kind}:${hit.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+export function placeFromVenuePreset(venuePresetId: string | undefined): TkuPlace | undefined {
+  if (!venuePresetId) return undefined;
+  if (venuePresetId === "venue:tku-e305") return placeById("E305");
+  if (venuePresetId === "venue:tku-e310") return placeById("E310");
+  // Shared templates (淡江教室模板、戶外攤位) belong to many places; do not
+  // guess a room just because the preset id matches.
+  const unique = TKU_PLACES.filter((p) => p.venuePresetId === venuePresetId && p.kind !== "generic");
+  return unique.length === 1 ? unique[0] : undefined;
+}
+
+export function campusRefFromPlace(place: TkuPlace): TkuCampusRef {
+  return {
+    campusId: place.campusId,
+    buildingCode: place.buildingCode,
+    floor: place.floor,
+    room: place.room,
+    placeId: place.id,
+  };
+}
+
+export function googleMapsNavUrl(opts: { lat?: number; lng?: number; query: string }): string {
+  if (opts.lat != null && opts.lng != null) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${opts.lat},${opts.lng}&travelmode=walking`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(opts.query)}`;
+}
+
+export function osmLocationUrl(opts: { lat?: number; lng?: number }): string | null {
+  if (opts.lat == null || opts.lng == null) return null;
+  return `https://www.openstreetmap.org/?mlat=${opts.lat}&mlon=${opts.lng}#map=18/${opts.lat}/${opts.lng}`;
+}
+
+export function physicalCampuses(): TkuCampus[] {
+  return TKU_CAMPUSES.filter((c) => c.id !== "cyber");
 }

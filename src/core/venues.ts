@@ -113,6 +113,8 @@ export interface VenuePreset {
   calibrationNote?: string;
   /** Camera a fresh project from this venue opens in. */
   defaultView?: ViewName;
+  /** Tamkang directory place this template belongs to, when known. */
+  placeId?: string;
 }
 
 /**
@@ -192,6 +194,33 @@ export const BUILTIN_VENUE_PRESETS: VenuePreset[] = [
         note: "講台上的合理起點位置，待現場校正",
       },
     ],
+    placeId: "E310",
+  },
+  {
+    id: "venue:tku-e305",
+    name: "E305 照片參考（待現場校正）",
+    builtin: true,
+    note: "工學大樓 3F E305 照片參考起點。門牌與冷氣標記為 E305，不是 E310。尺寸待現場校正，不可把照片中的房間尺寸當成精確測量。",
+    classroom: { name: "教室", length: 10, width: 8, x: 0, z: 0 },
+    corridor: { name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+    tile: { width: 0.6, depth: 0.6, originX: 0, originZ: 0, rotationDeg: 0, visible: true },
+    fixtures: [
+      { kind: "door", areaId: "classroom", edge: "s", offset: 8.6 },
+      { kind: "screen", areaId: "classroom", edge: "n", offset: 5 },
+    ],
+    extraObjects: [
+      {
+        assetId: "builtin:lectern",
+        x: 4.4,
+        z: 0.7,
+        locked: false,
+        surface: "floor",
+        note: "照片可見木製講桌，位置待現場校正",
+      },
+    ],
+    calibrationNote: "照片參考場地，尺寸待現場校正。門牌為 E305，不可套用到 E310。",
+    defaultView: "top",
+    placeId: "E305",
   },
   {
     id: "venue:tku-booth",
@@ -440,6 +469,7 @@ export function applyVenuePreset(
   }
   if (preset.calibrationNote) project.calibration.note = preset.calibrationNote;
   project.venuePresetId = preset.id;
+  if (preset.placeId) project.placeId = preset.placeId;
 }
 
 /**
@@ -548,6 +578,7 @@ export function venuePresetFromProject(project: Project, name: string): VenuePre
     tile: { ...project.tile },
     fixtures,
     extraObjects: extraObjects.length ? extraObjects : undefined,
+    placeId: project.placeId,
     // Carry the booth marker (not the zones or flows — those are 場佈, not 場地)
     // so re-applying this venue re-registers the booth asset entries.
     booth: project.booth

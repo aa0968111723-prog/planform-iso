@@ -15,7 +15,7 @@
  */
 
 import type { Project } from "../core/model";
-import { buildE310ClubGoldenProject, buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
+import { buildE305PhotoReferenceProject, buildE310ClubGoldenProject, buildE310GoldenProject, buildQuickStartProject, DEFAULT_NEEDS, type QuickStartNeeds } from "../core/quickStart";
 import { BUILTIN_VENUE_PRESETS, createProjectFromVenuePreset, listUserVenuePresets, type VenuePreset } from "../core/venues";
 import { button, el } from "./dom";
 
@@ -124,6 +124,7 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     const rect = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:rect-classroom");
     const blank = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:blank");
     const e310 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e310");
+    const e305 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e305");
 
     if (e310) {
       // The 30-person club class is the setup the club actually photographs
@@ -153,6 +154,26 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
             participants: 60,
           });
         }, "btn btn--big btn--ghost"),
+      );
+    }
+
+    if (e305) {
+      card.append(
+        el("div", { class: "quickstart__recommended" }, [
+          el("span", { class: "quickstart__eyebrow", text: "照片參考場地 · 不是 E310" }),
+          el("strong", { text: "E305 工學大樓教室" }),
+          el("span", { class: "hint", text: "門牌與冷氣標記為 E305。尺寸待現場校正。" }),
+          button("建立 E305 照片參考場佈", () => {
+            finish({
+              name: projectName,
+              project: buildE305PhotoReferenceProject(e305),
+              venue: e305,
+              participants: 30,
+            });
+          }, "btn btn--big"),
+        ]),
+        button(`🏫 ${e305.name}`, () => renderNeedsStep(e305), "btn btn--big"),
+        el("p", { class: "hint", text: e305.note }),
       );
     }
 

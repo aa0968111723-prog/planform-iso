@@ -32,6 +32,8 @@ export interface WorkspaceChrome {
   bars: HTMLElement[];
   /** Extra bottom sheets that behave like `left`/`right` (partner sheet). */
   sheets?: HTMLElement[];
+  /** Full-bleed overlays (campus map) that cover part of the canvas. */
+  overlays?: HTMLElement[];
 }
 
 export interface WorkspaceViewportState {
@@ -99,7 +101,7 @@ export class WorkspaceViewport {
     this.chrome = chrome;
     const nodes = [
       ...headers(chrome), ...navs(chrome), chrome.left, chrome.right,
-      ...(chrome.sheets ?? []), ...chrome.bars,
+      ...(chrome.sheets ?? []), ...chrome.bars, ...(chrome.overlays ?? []),
     ];
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver?.disconnect();
@@ -192,7 +194,20 @@ export class WorkspaceViewport {
     const c = this.chrome;
     if (!c) return { ...EMPTY_CHROME };
     // Team view swaps the editing header for its own bar; take whichever is up.
-    const header = Math.max(0, ...headers(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
+    const headerBars = Math.max(0, ...headers(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
+    const overlayTop = Math.max(0, ...(c.overlays ?? []).map((node) => {
+      if (!visible(node) || node.hidden) return 0;
+      const dock = node.dataset.mapDock;
+      if (dock === "left") return 0;
+      if (dock === "cover") return 0;
+      const r = node.getBoundingClientRect();
+      return Math.max(0, r.bottom - canvas.y);
+    }));
+    const overlayLeft = Math.max(0, ...(c.overlays ?? []).map((node) => {
+      if (!visible(node) || node.hidden) return 0;
+      return node.dataset.mapDock === "left" ? node.getBoundingClientRect().width : 0;
+    }));
+    const header = Math.max(headerBars, overlayTop);
     // Editor bottom nav and partner dock are mutually exclusive; take whichever is up.
     const nav = Math.max(0, ...navs(c).map((n) => (visible(n) ? n.getBoundingClientRect().height : 0)));
     const partnerDock = Math.max(0, ...navs(c)
@@ -202,7 +217,7 @@ export class WorkspaceViewport {
     // canvas; in sheet mode it is a bottom overlay instead.
     const docked = (node: HTMLElement) =>
       visible(node) && getComputedStyle(node).getPropertyValue("--ws-docked").trim() === "1";
-    const left = docked(c.left) ? c.left.getBoundingClientRect().width : 0;
+    const left = Math.max(docked(c.left) ? c.left.getBoundingClientRect().width : 0, overlayLeft);
     const right = docked(c.right) ? c.right.getBoundingClientRect().width : 0;
 
     // A panel counts as a bottom sheet only when it is not docked as a rail.

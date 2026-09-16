@@ -60,6 +60,7 @@ import {
 import { propFaceOptions, propForAssetId } from "../core/propCatalog";
 import type { PlaybackStationResult } from "../core/eventFlow";
 import type { PartnerEmphasis, PartnerMark, PartnerRole } from "../core/partner";
+import type { FreshmanGuide } from "../core/freshman";
 
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
@@ -130,6 +131,7 @@ export interface PartnerPresentation {
   role: PartnerRole;
   emphasis: PartnerEmphasis;
   marks: PartnerMark[];
+  freshman?: FreshmanGuide | null;
 }
 
 /** Same language as the §85 sentences: your post, the visitor, the queue, the way out. */
@@ -648,7 +650,14 @@ export class SceneManager {
    * handful and they change with every validation pass.
    */
   private syncPartner(partner: PartnerPresentation | null): void {
-    const sig = partner ? JSON.stringify(partner.marks) : "";
+    const sig = partner
+      ? JSON.stringify({
+        marks: partner.marks,
+        stop: partner.freshman?.stopIndex,
+        here: partner.freshman?.youAreHere,
+        next: partner.freshman?.nextStop,
+      })
+      : "";
     if (sig === this.lastPartnerSig) { this.partnerGroup.visible = !!partner; return; }
     this.lastPartnerSig = sig;
     for (const label of this.partnerLabels) label.dispose();
@@ -671,17 +680,80 @@ export class SceneManager {
       halo.rotation.x = -Math.PI / 2;
       halo.position.set(mark.x, 0.05, mark.z);
       this.partnerGroup.add(halo);
-      // Only things you must act on get words on the plan. A green mark is a
-      // reassuring dot; its sentence lives in the 要注意的地方 sheet.
       if (mark.tone === "ok") return;
       const label = new TextLabel({ width: 512, height: 128, fontSize: 54 });
       label.set(mark.text, color);
       label.sprite.scale.set(2.6, 0.65, 1);
-      // Stagger heights so two nearby problems do not overprint each other.
       label.sprite.position.set(mark.x, 1.35 + (i % 3) * 0.55, mark.z);
       this.partnerLabels.push(label);
       this.partnerGroup.add(label.sprite);
     });
+    const guide = partner.freshman;
+    if (guide) {
+      const here = guide.stops[guide.stopIndex];
+      const next = guide.stops[guide.stopIndex + 1];
+      if (here) {
+        const you = new Mesh(
+          new BoxGeometry(0.55, 0.12, 0.55),
+          new MeshBasicMaterial({ color: "#0369a1", transparent: true, opacity: 0.95 }),
+        );
+        you.position.set(here.x, 0.08, here.z);
+        this.partnerGroup.add(you);
+        const halo = new Mesh(
+          new PlaneGeometry(1.6, 1.6),
+          new MeshBasicMaterial({ color: "#38bdf8", transparent: true, opacity: 0.35, depthWrite: false }),
+        );
+        halo.rotation.x = -Math.PI / 2;
+        halo.position.set(here.x, 0.04, here.z);
+        this.partnerGroup.add(halo);
+        const youLabel = new TextLabel({ width: 640, height: 140, fontSize: 56 });
+        youLabel.set("你在這裡", "#0369a1");
+        youLabel.sprite.scale.set(3.1, 0.7, 1);
+        youLabel.sprite.position.set(here.x, 1.55, here.z);
+        youLabel.sprite.userData.sceneLabel = { id: "freshman:here", priority: 0 };
+        this.partnerLabels.push(youLabel);
+        this.partnerGroup.add(youLabel.sprite);
+      }
+      if (next) {
+        const nextLabel = new TextLabel({ width: 640, height: 140, fontSize: 52 });
+        nextLabel.set(`下一步：${next.title}`, "#0f766e");
+        nextLabel.sprite.scale.set(3.0, 0.68, 1);
+        nextLabel.sprite.position.set(next.x, 1.35, next.z);
+        nextLabel.sprite.userData.sceneLabel = { id: "freshman:next", priority: 0 };
+        this.partnerLabels.push(nextLabel);
+        this.partnerGroup.add(nextLabel.sprite);
+      }
+      guide.stops.forEach((stop, i) => {
+        const disc = new Mesh(
+          new CylinderGeometry(0.22, 0.22, 0.06, 20),
+          new MeshBasicMaterial({ color: i === guide.stopIndex ? "#0369a1" : "#0f766e" }),
+        );
+        disc.position.set(stop.x, 0.18, stop.z);
+        this.partnerGroup.add(disc);
+        const num = new TextLabel({ width: 256, height: 256, fontSize: 120 });
+        num.set(String(i + 1), "#ffffff");
+        num.sprite.scale.set(0.55, 0.55, 1);
+        num.sprite.position.set(stop.x, 0.7, stop.z);
+        num.sprite.userData.sceneLabel = { id: `freshman:step:${i}`, priority: 1 };
+        this.partnerLabels.push(num);
+        this.partnerGroup.add(num.sprite);
+      });
+      for (let i = 0; i < guide.stops.length - 1; i++) {
+        const a = guide.stops[i];
+        const b = guide.stops[i + 1];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const len = Math.hypot(dx, dz);
+        if (len < 0.3) continue;
+        const shaft = new Mesh(
+          new BoxGeometry(0.16, 0.04, len * 0.72),
+          new MeshBasicMaterial({ color: "#0f766e", transparent: true, opacity: 0.85 }),
+        );
+        shaft.position.set((a.x + b.x) / 2, 0.05, (a.z + b.z) / 2);
+        shaft.rotation.y = Math.atan2(dx, dz);
+        this.partnerGroup.add(shaft);
+      }
+    }
   }
 
   private lastPartnerSig = "";
@@ -1038,7 +1110,7 @@ export class SceneManager {
     for (const g of project.groups) {
       seen.add(g.id);
       const members = groupMembers(g);
-      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
+      const sig = `${g.sourceKind}|${g.name}|${g.numberPrefix}|${g.rows}|${g.cols}|${g.gapX}|${g.gapZ}|${g.itemWidth}|${g.itemDepth}|${g.itemHeight}|${members.length}|${this.partner?.freshman ? "f" : ""}|${JSON.stringify(members.map((m) => [round(m.x), round(m.z), m.rotationDeg]))}`;
       let entry = this.arrayNodes.get(g.id);
       if (!entry || entry.sig !== sig) {
         if (entry) {
@@ -1152,8 +1224,8 @@ export class SceneManager {
     })));
 
     const label = new TextLabel({ width: 720, height: 112, fontSize: 42 });
-    const name = g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`;
-    label.set(`${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, this.theme === "light" ? "#134e4a" : "#d1fae5");
+    const name = this.partner?.freshman ? "地墊區" : (g.name?.trim() || `地墊區 ${g.numberPrefix || "A"}`);
+    label.set(this.partner?.freshman ? name : `${name} · ${g.cols}×${g.rows} · ${g.rows * g.cols} 片`, this.theme === "light" ? "#134e4a" : "#d1fae5");
     label.sprite.scale.set(3.25, 0.52, 1);
     const center = groupCenter(g);
     label.sprite.position.set(center.x, Math.max(0.36, g.itemHeight + 0.4), center.z);
@@ -1170,7 +1242,7 @@ export class SceneManager {
       seen.add(zone.id);
       // Partner labels are drawn at a higher texture resolution, so the mode
       // is part of the signature and the node is rebuilt when it changes.
-      const sig = `${zone.type}|${zone.width}|${zone.depth}|${partner ? "partner" : "editor"}`;
+      const sig = `${zone.type}|${zone.width}|${zone.depth}|${partner ? (partner.freshman ? "fresh" : "partner") : "editor"}`;
       let entry = this.zoneNodes.get(zone.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.zoneGroup.remove(entry.group); entry.label.dispose(); }
@@ -1188,7 +1260,13 @@ export class SceneManager {
       edgeMat.color.set(zone.color);
       const cap = zone.capacity ? ` · ${zone.capacity}人` : "";
       entry.label.sprite.position.y = partner ? 0.8 : 0.5;
-      if (partner) {
+      if (partner?.freshman) {
+        fillMat.opacity = 0.16;
+        edgeMat.opacity = 1;
+        entry.label.sprite.visible = true;
+        const title = `${zone.icon ?? ""} ${zone.name.replace(/擺放|放置/g, "").replace(/禪定/, "")}`.trim();
+        entry.label.set(title, "#0f172a");
+      } else if (partner) {
         // A zone the current role owns reads as a solid, labelled place; the
         // rest stay as faint context so the room still makes sense.
         const muted = partner.emphasis.zones[zone.id] === "muted";

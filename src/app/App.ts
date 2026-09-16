@@ -92,6 +92,7 @@ import {
   type PartnerRole,
   type RoleBriefing,
 } from "../core/partner";
+import { buildFreshmanGuide, type FreshmanAudience, type FreshmanLayer } from "../core/freshman";
 import {
   buildRehearsalTimeline,
   comparePlainMetrics,
@@ -181,6 +182,8 @@ export interface Session {
   // Visual-communication + simulation state
   /** Partner Mode session, or null while the professional editor is active. */
   partner: PartnerSession | null;
+  /** Editor overlay: campus location map without entering partner mode. */
+  campusMapOpen: boolean;
   simplify: boolean;
   focusRouteId: string | null;
   participants: number;
@@ -214,6 +217,10 @@ export interface Session {
 /** Live state of Partner Mode — the visual-first, read-only view of a plan. */
 export interface PartnerSession {
   role: PartnerRole;
+  audience: FreshmanAudience;
+  freshmanLayer: FreshmanLayer;
+  freshmanStop: number;
+  freshmanDetail: boolean;
   /** Rehearsal beats from the last run; empty until 演練 is pressed. */
   timeline: RehearsalEvent[];
   /** Pending AI suggestion, shown as a visual before/after. */
@@ -293,6 +300,7 @@ export class App {
     issues: [],
     agentPreview: null,
     partner: null,
+    campusMapOpen: false,
     simplify: false,
     focusRouteId: null,
     participants: 30,
@@ -462,7 +470,7 @@ export class App {
       labelDisplayMode,
       tabletopHostId: this.session.tabletopHostId,
       focusRouteId: this.session.focusRouteId,
-      simplify: this.session.simplify || !!this.session.partner,
+      simplify: this.session.simplify || (!!this.session.partner && this.session.partner.freshmanDetail !== true),
       partner: this.partnerView(),
       simPositions: this.session.simPositions,
       bottlenecks: this.session.bottlenecks,
@@ -1738,7 +1746,17 @@ export class App {
    */
   enterPartnerMode(role: PartnerRole = "all"): void {
     this.partnerReturnView = this.state.view;
-    this.session.partner = { role, timeline: [], suggestion: null, busy: false, stationObjectId: null };
+    this.session.partner = {
+      role,
+      audience: "staff",
+      freshmanLayer: "indoor",
+      freshmanStop: 0,
+      freshmanDetail: false,
+      timeline: [],
+      suggestion: null,
+      busy: false,
+      stationObjectId: null,
+    };
     this.session.selection = new Set();
     this.cancelPlacement();
     if (this.session.mode === "measure") this.stopMeasure();
@@ -1746,8 +1764,62 @@ export class App {
     this.runValidation();
     this.setView("top");
     this.render();
-    // Framing is left to the UI: the partner chrome has not been laid out yet,
-    // so fitting here would frame the plan against the editor's rect.
+  }
+
+  enterFreshmanPartnerMode(layer: FreshmanLayer = "campus"): void {
+    this.enterPartnerMode("all");
+    if (!this.session.partner) return;
+    this.session.partner.audience = "freshman";
+    this.session.partner.freshmanLayer = layer;
+    this.session.partner.freshmanStop = 0;
+    this.session.partner.freshmanDetail = false;
+    this.session.campusMapOpen = layer !== "indoor";
+    this.setView("top");
+    this.render();
+  }
+
+  setFreshmanLayer(layer: FreshmanLayer): void {
+    if (!this.session.partner || this.session.partner.audience !== "freshman") return;
+    this.session.partner.freshmanLayer = layer;
+    this.session.campusMapOpen = layer !== "indoor";
+    if (layer === "indoor") this.setView("top");
+    this.render();
+  }
+
+  setFreshmanStop(index: number): void {
+    if (!this.session.partner) return;
+    this.session.partner.freshmanStop = Math.max(0, index);
+    this.render();
+  }
+
+  freshmanNextStop(): void {
+    const guide = this.freshmanGuide();
+    if (!this.session.partner) return;
+    const next = Math.min(guide.stopIndex + 1, Math.max(0, guide.stops.length - 1));
+    this.session.partner.freshmanStop = next;
+    this.session.partner.freshmanLayer = "indoor";
+    this.session.campusMapOpen = false;
+    this.render();
+  }
+
+  toggleFreshmanDetail(): void {
+    if (!this.session.partner) return;
+    this.session.partner.freshmanDetail = !this.session.partner.freshmanDetail;
+    this.render();
+  }
+
+  freshmanGuide() {
+    return buildFreshmanGuide(this.state, this.session.partner?.freshmanStop ?? 0);
+  }
+
+  openCampusMap(): void {
+    this.session.campusMapOpen = true;
+    this.notifyUi();
+  }
+
+  closeCampusMap(): void {
+    this.session.campusMapOpen = false;
+    this.notifyUi();
   }
 
   exitPartnerMode(): void {
@@ -1755,6 +1827,7 @@ export class App {
     const restoreView = this.partnerReturnView;
     this.partnerReturnView = null;
     this.session.partner = null;
+    this.session.campusMapOpen = false;
     if (restoreView) this.setView(restoreView);
     this.render();
   }
@@ -1766,13 +1839,14 @@ export class App {
   }
 
   /** Emphasis + marks the scene needs to render the partner view. */
-  private partnerView(): { role: PartnerRole; emphasis: PartnerEmphasis; marks: PartnerMark[] } | null {
+  private partnerView(): { role: PartnerRole; emphasis: PartnerEmphasis; marks: PartnerMark[]; freshman: ReturnType<App["freshmanGuide"]> | null } | null {
     const p = this.session.partner;
     if (!p) return null;
     return {
       role: p.role,
       emphasis: partnerEmphasis(this.viewState, p.role),
-      marks: partnerMarks(this.session.issues),
+      marks: p.audience === "freshman" ? [] : partnerMarks(this.session.issues),
+      freshman: p.audience === "freshman" ? this.freshmanGuide() : null,
     };
   }
 

@@ -832,6 +832,8 @@ export interface Project {
   eventDate?: string;
   /** Built-in venue identity, retained so honest calibration copy survives reload. */
   venuePresetId?: string;
+  /** Tamkang directory place (E305 / E310 / SG320 …). Optional; inferred on load. */
+  placeId?: string;
   /** Short activity description shown in the team/partner view. */
   description: string;
   classroom: AreaConfig;

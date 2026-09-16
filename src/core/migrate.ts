@@ -57,6 +57,7 @@ import {
   uid,
 } from "./model";
 import { buildSimulationSpatial } from "./simSpatial";
+import { placeFromVenuePreset } from "./tkuCampus";
 
 const BOOTH_ZONE_ROLE_SET: ReadonlySet<string> = new Set(Object.keys(BOOTH_ZONE_ROLES));
 const BOOTH_STATION_TYPE_SET: ReadonlySet<string> = new Set(Object.keys(BOOTH_STATION_TYPES));
@@ -1079,6 +1080,11 @@ export function migrateProject(input: Partial<Project>): Project {
   // entries, so every placed prop resolved to a plain grey table — no faces,
   // no anchors, no plan symbol — and nothing would ever have corrected it.
   if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
+
+  const inferredPlace = placeFromVenuePreset(p.venuePresetId);
+  if (typeof input.placeId === "string" && input.placeId.length > 0) p.placeId = input.placeId;
+  else if (inferredPlace) p.placeId = inferredPlace.id;
+  else delete p.placeId;
 
   return p;
 }

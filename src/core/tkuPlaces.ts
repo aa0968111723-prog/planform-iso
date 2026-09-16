@@ -3,17 +3,19 @@ import type { TkuPlace } from "./tkuCampus";
 
 const CLASSROOM = "venue:tku-classroom";
 const RECT = "venue:rect-classroom";
+const E305 = "venue:tku-e305";
 const E310 = "venue:tku-e310";
 const BOOTH = "venue:tku-booth";
 
 export const TKU_PLACES: TkuPlace[] = [
-  { id: "E308", campusId: "tamsui", buildingCode: "E", floor: 3, room: "08", name: "E308 工學大樓教室", kind: "classroom", venuePresetId: CLASSROOM, aliases: ["E308"], clubUse: "primary", mentionCount: 101, note: "禪學社文件提及最多的教室。套用淡江教室起點，長寬待現場校正。" },
-  { id: "E310", campusId: "tamsui", buildingCode: "E", floor: 3, room: "10", name: "E310 工學大樓教室", kind: "classroom", venuePresetId: E310, aliases: ["E310"], clubUse: "frequent", mentionCount: 54, note: "Golden Venue。長寬仍未實測。" },
+  { id: "E308", campusId: "tamsui", buildingCode: "E", floor: 3, room: "08", name: "E308 工學大樓教室", kind: "classroom", venuePresetId: CLASSROOM, aliases: ["E308"], clubUse: "primary", mentionCount: 101, entranceHint: "請從教室後側入口進入", entranceVerified: false, note: "禪學社文件提及最多的教室。套用淡江教室起點，長寬待現場校正。" },
+  { id: "E305", campusId: "tamsui", buildingCode: "E", floor: 3, room: "05", name: "E305 工學大樓教室", kind: "classroom", venuePresetId: E305, aliases: ["E305"], clubUse: "fallback", entranceHint: "請從教室後側入口進入", entranceVerified: false, note: "照片參考場地。門牌與冷氣標記為 E305，不是 E310。長寬待現場校正，不可把照片中的房間尺寸當成精確測量。" },
+  { id: "E310", campusId: "tamsui", buildingCode: "E", floor: 3, room: "10", name: "E310 工學大樓教室", kind: "classroom", venuePresetId: E310, aliases: ["E310"], clubUse: "frequent", mentionCount: 54, entranceHint: "請從教室後側入口進入", entranceVerified: false, note: "Golden Venue。既有場地模板維持原資料。長寬仍未實測。不是 E305。" },
   { id: "E301", campusId: "tamsui", buildingCode: "E", floor: 3, room: "01", name: "E301 工學大樓教室", kind: "classroom", venuePresetId: CLASSROOM, clubUse: "fallback", mentionCount: 4, note: "偶用。" },
   { id: "E311", campusId: "tamsui", buildingCode: "E", floor: 3, room: "11", name: "E311 工學大樓教室", kind: "classroom", venuePresetId: CLASSROOM, clubUse: "fallback", mentionCount: 4, note: "偶用。" },
   { id: "E680", campusId: "tamsui", buildingCode: "E", floor: 6, room: "80", name: "E680 會議室", kind: "hall", venuePresetId: RECT, aliases: ["E680"], clubUse: "fallback", publishedCapacity: 44, note: "114 外借表 44 人。" },
   { id: "SG109", campusId: "tamsui", buildingCode: "SG", floor: 1, room: "09", name: "SG109 社辦", kind: "office", venuePresetId: CLASSROOM, aliases: ["社辦", "SG109"], clubUse: "office", mentionCount: 100, note: "集合／搬巧拼起點。套用淡江教室起點，不是實測社辦平面。" },
-  { id: "SG320", campusId: "tamsui", buildingCode: "SG", floor: 3, room: "20", name: "SG320 體育館教室", kind: "classroom", venuePresetId: CLASSROOM, aliases: ["SG320"], clubUse: "frequent", mentionCount: 27, note: "體育館教室。套用淡江教室起點。" },
+  { id: "SG320", campusId: "tamsui", buildingCode: "SG", floor: 3, room: "20", name: "SG320 體育館教室", kind: "classroom", venuePresetId: CLASSROOM, aliases: ["SG320"], clubUse: "frequent", mentionCount: 27, entranceHint: "請從教室後側入口進入", entranceVerified: false, note: "體育館教室。套用淡江教室起點。" },
   { id: "SG319", campusId: "tamsui", buildingCode: "SG", floor: 3, room: "19", name: "SG319 體育館教室", kind: "classroom", venuePresetId: CLASSROOM, clubUse: "fallback", mentionCount: 4, note: "偶用。" },
   { id: "SG321", campusId: "tamsui", buildingCode: "SG", floor: 3, room: "21", name: "SG321 體育館教室", kind: "classroom", venuePresetId: CLASSROOM, clubUse: "fallback", mentionCount: 4, note: "偶用。" },
   { id: "SG402", campusId: "tamsui", buildingCode: "SG", floor: 4, room: "02", name: "SG402 體育館教室", kind: "classroom", venuePresetId: CLASSROOM, clubUse: "fallback", mentionCount: 13, note: "偶用。" },

@@ -12,6 +12,7 @@
 
 import type { App } from "../app/App";
 import { PARTNER_ROLES, type PartnerRole } from "../core/partner";
+import { FRESHMAN_LAYERS } from "../core/freshman";
 import { formatDuration, type RehearsalEvent } from "../core/rehearsal";
 import { renderConstructionPlan } from "../export/constructionPlan";
 import { pngFilename, sharePng } from "../export/exporters";
@@ -46,6 +47,7 @@ export function buildPartnerMode(
   const light = el("button", { type: "button", class: "partnerbar__light" }) as HTMLButtonElement;
   light.addEventListener("click", () => openSheet(sheetKind === "marks" ? "none" : "marks"));
   const roles = el("div", { class: "partnerroles" });
+  const layers = el("div", { class: "freshmanlayers" });
   const top = el("header", { class: "partnertop" }, [
     el("div", { class: "partnerbar" }, [
       title,
@@ -53,6 +55,7 @@ export function buildPartnerMode(
       button("離開", () => opts.onExit(), "chip chip--sm partnerbar__exit"),
     ]),
     roles,
+    layers,
   ]);
 
   const brief = el("button", { type: "button", class: "partnerbrief" }) as HTMLButtonElement;
@@ -74,7 +77,18 @@ export function buildPartnerMode(
       });
     }, "btn partneraction"),
   ]);
-  const dock = el("div", { class: "partnerdock" }, [brief, actions]);
+  const freshmanActions = el("div", { class: "partneractions freshmanactions" }, [
+    button("① 下一步", () => app.freshmanNextStop(), "btn freshmanaction freshmanaction--accent"),
+    button("看尺寸", () => app.toggleFreshmanDetail(), "btn freshmanaction"),
+    button("🖼 存成圖", () => {
+      const state = app.store.getState();
+      const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false, inventory: false });
+      void sharePng(dataUrl, pngFilename(state.name, "新生場佈圖")).then((how) => {
+        if (how !== "cancelled") app.notifyToast?.(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
+      });
+    }, "btn freshmanaction"),
+  ]);
+  const dock = el("div", { class: "partnerdock" }, [brief, actions, freshmanActions]);
 
   const sheetTitle = el("div", { class: "partnersheet__title" });
   const sheetBody = el("div", { class: "partnersheet__body" });
@@ -126,7 +140,62 @@ export function buildPartnerMode(
     roles.append(chip);
   }
 
+  for (const layer of FRESHMAN_LAYERS) {
+    const chip = el("button", { type: "button", class: "layerchip", "data-layer": layer.id }, [
+      el("span", { class: "rolechip__icon", text: layer.icon }),
+      el("span", { class: "rolechip__label", text: layer.label }),
+    ]) as HTMLButtonElement;
+    chip.addEventListener("click", () => {
+      app.setFreshmanLayer(layer.id);
+      openSheet("none");
+    });
+    layers.append(chip);
+  }
+
   // --- rendering ----------------------------------------------------------
+
+  function renderFreshmanBrief(): void {
+    const g = app.freshmanGuide();
+    const layer = app.session.partner?.freshmanLayer ?? "campus";
+    brief.innerHTML = "";
+    const lines: { icon: string; text: string }[] = [
+      { icon: "📍", text: g.whereWeAre },
+      { icon: "🏢", text: g.howToClassroom },
+      { icon: "🧩", text: g.howClassroomLooks },
+      { icon: "🧍", text: g.youAreHere },
+      { icon: "➡️", text: g.nextStop ?? "就位後依現場指示坐下" },
+    ];
+    if (layer === "campus") {
+      brief.append(el("span", { class: "partnerbrief__line", text: `我們在哪裡：${g.whereWeAre}` }));
+    } else if (layer === "building") {
+      brief.append(el("span", { class: "partnerbrief__line", text: g.howToClassroom }));
+    } else if (layer === "classroom") {
+      brief.append(el("span", { class: "partnerbrief__line", text: g.entranceText }));
+    } else {
+      for (const line of lines.slice(2)) {
+        brief.append(el("span", { class: "partnerbrief__line" }, [
+          el("span", { class: "partnerbrief__icon", text: line.icon }),
+          el("span", { text: line.text }),
+        ]));
+      }
+    }
+    brief.append(el("span", { class: "partnerbrief__more", text: sheetKind === "steps" ? "收起 ▾" : "看步驟 ▸" }));
+  }
+
+  function renderFreshmanSteps(): void {
+    const g = app.freshmanGuide();
+    sheetTitle.textContent = "進教室之後怎麼走";
+    sheetBody.innerHTML = "";
+    const list = el("ol", { class: "partnersteps" });
+    for (const step of g.steps) {
+      list.append(el("li", { class: "partnerstep" }, [
+        el("span", { class: "partnerstep__no", text: String(step.index) }),
+        el("span", { text: step.text }),
+      ]));
+    }
+    sheetBody.append(list);
+    sheetBody.append(el("p", { class: "partnerempty", text: g.entranceText }));
+  }
 
   function renderBrief(): void {
     const b = app.partnerBriefing();
@@ -300,41 +369,56 @@ export function buildPartnerMode(
 
   function render(): void {
     const state = app.store.getState();
+    const freshman = app.session.partner?.audience === "freshman";
     const role = app.session.partner?.role ?? "all";
-    title.textContent = state.name || "活動場佈";
+    const g = freshman ? app.freshmanGuide() : null;
+    title.textContent = freshman && g ? g.headline : (state.name || "活動場佈");
+    top.classList.toggle("partnertop--freshman", freshman);
+    roles.hidden = freshman;
+    layers.hidden = !freshman;
+    light.hidden = freshman;
+    actions.hidden = freshman;
+    freshmanActions.hidden = !freshman;
 
-    const status = app.partnerStatus();
-    const tone = TONE_LIGHT[status.tone] ?? TONE_LIGHT.ok;
-    light.className = `partnerbar__light ${tone.cls}`;
-    light.textContent = `${tone.dot} ${status.text}`;
+    if (!freshman) {
+      const status = app.partnerStatus();
+      const tone = TONE_LIGHT[status.tone] ?? TONE_LIGHT.ok;
+      light.className = `partnerbar__light ${tone.cls}`;
+      light.textContent = `${tone.dot} ${status.text}`;
+    }
 
     roles.querySelectorAll<HTMLButtonElement>(".rolechip").forEach((chip) =>
       chip.setAttribute("aria-pressed", String(chip.dataset.role === role)));
+    layers.querySelectorAll<HTMLButtonElement>(".layerchip").forEach((chip) =>
+      chip.setAttribute("aria-pressed", String(chip.dataset.layer === (app.session.partner?.freshmanLayer ?? "campus"))));
 
-    renderBrief();
+    if (freshman) renderFreshmanBrief();
+    else renderBrief();
 
-    // §85: App records the tapped station; the sheet follows it. Opening is
-    // driven from state rather than from a click handler here, because the tap
-    // happens on the 3D canvas, not on any element this module owns.
     const tapped = app.session.partner?.stationObjectId ?? null;
     const tick = app.session.partner?.stationTap ?? 0;
-    if (tapped && tick !== shownTap) sheetKind = "station";
+    if (!freshman && tapped && tick !== shownTap) sheetKind = "station";
     else if (!tapped && sheetKind === "station") sheetKind = "none";
     shownTap = tick;
 
     sheet.style.display = sheetKind === "none" ? "none" : "flex";
     sheetFoot.style.display = "none";
-    if (sheetKind === "steps") renderSteps();
+    if (sheetKind === "steps") {
+      if (freshman) renderFreshmanSteps();
+      else renderSteps();
+    }
     else if (sheetKind === "marks") renderMarks();
     else if (sheetKind === "timeline") renderTimeline();
     else if (sheetKind === "suggest") renderSuggest();
     else if (sheetKind === "station") renderStation();
 
-    // Keep the action labels short enough to stay on one row on a phone; the
-    // rehearsal figure belongs in the timeline, not on the button.
     const hint = actions.querySelector(".partneraction");
     if (hint instanceof HTMLElement) {
       hint.textContent = app.session.simResult ? "▶ 再彩排一次" : "▶ 開始彩排";
+    }
+    const detailBtn = freshmanActions.querySelectorAll(".freshmanaction")[1];
+    if (detailBtn instanceof HTMLElement) {
+      detailBtn.textContent = app.session.partner?.freshmanDetail ? "收起尺寸" : "看尺寸";
     }
   }
 

@@ -362,6 +362,25 @@ export function buildQuickStartProject(config: QuickStartConfig): Project {
   return project;
 }
 
+/** Photo-reference classroom. Separate from E310; dimensions stay unverified. */
+export function buildE305PhotoReferenceProject(venue: VenuePreset): Project {
+  const project = buildQuickStartProject({
+    venue,
+    eventName: "E305 照片參考（待現場校正）",
+    participants: 30,
+    needs: {
+      mats: true, checkin: true, payment: false, life: true,
+      shoe: true, backpack: true, teacher: true, groups: false, staffRoute: false,
+    },
+    centralAisle: true,
+  });
+  project.placeId = "E305";
+  project.venuePresetId = "venue:tku-e305";
+  project.view = "top";
+  project.description = "照片參考場地。門牌與冷氣標記為 E305，不是 E310。尺寸待現場校正，不可把照片中的房間尺寸當成精確測量。";
+  return project;
+}
+
 /**
  * Photo-grounded 30-person Zen club setup used as the visual release baseline.
  *
