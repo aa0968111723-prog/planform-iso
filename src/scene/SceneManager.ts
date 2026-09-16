@@ -65,6 +65,15 @@ import type { FreshmanGuide } from "../core/freshman";
 const D2R = Math.PI / 180;
 const SELECT = "#38bdf8";
 
+function isSoftwareWebGL(): boolean {
+  const probe = document.createElement("canvas");
+  const gl = probe.getContext("webgl") ?? probe.getContext("experimental-webgl");
+  if (!gl || !(gl instanceof WebGLRenderingContext)) return false;
+  const info = gl.getExtension("WEBGL_debug_renderer_info");
+  const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+  return /swiftshader|llvmpipe|softpipe|microsoft basic render/i.test(name);
+}
+
 export interface GhostState {
   kind: ObjectKind;
   assetId?: string;
@@ -224,10 +233,15 @@ export class SceneManager {
   private currentProjectIsBooth = false;
 
   constructor(private canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    const softwareGL = isSoftwareWebGL();
+    this.renderer = new WebGLRenderer({
+      canvas,
+      antialias: !softwareGL,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     applyRendererLook(this.renderer);
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = !softwareGL;
     this.renderer.shadowMap.type = PCFShadowMap;
 
     this.scene = new Scene();
@@ -341,10 +355,6 @@ export class SceneManager {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
-    // 512-map contact shadows stay on phone/tablet. A 1440px software-GL
-    // desktop buffer with them on becomes a GPU benchmark, not a plan.
-    const pixels = (this.canvas.width || w) * (this.canvas.height || h);
-    this.renderer.shadowMap.enabled = pixels < 1_200_000;
     this.applyProjection();
   }
 
