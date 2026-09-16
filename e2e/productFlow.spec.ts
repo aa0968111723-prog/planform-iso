@@ -222,6 +222,7 @@ for (const vp of VIEWPORTS) {
       if (await editPlaced.count()) {
         await editPlaced.click();
       } else {
+        await gotoWorkflow(page, "site");
         await gotoWorkflow(page, "layout");
         const row = page.locator(".left .list__row", { hasText: "合照背景牆" });
         await row.scrollIntoViewIfNeeded();

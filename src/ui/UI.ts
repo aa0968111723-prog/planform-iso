@@ -70,6 +70,7 @@ export class UI {
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
+  private lastPropSig = "";
   private navSig: string | null = null;
   private lastMode: App["session"]["mode"] | null = null;
   private snapSel: HTMLSelectElement | null = null;
@@ -1489,8 +1490,13 @@ export class UI {
    * keyboard and the caret mid-number.
    */
   private shouldRebuildLeft(wf: Workflow): boolean {
+    const propSig = this.app.propDefinitions().map((d) => `${d.id}:${d.name}:${d.version}`).join("|");
+    const propsChanged = propSig !== this.lastPropSig;
+    this.lastPropSig = propSig;
     if (this.lastWorkflow !== wf) return true;
-    if (wf === "layout") return false;
+    // Layout otherwise keeps its DOM so number fields keep the caret — but a
+    // newly saved Studio prop must appear in the list without leaving 場佈.
+    if (wf === "layout") return propsChanged;
     const active = document.activeElement;
     if (active instanceof HTMLElement && this.left.contains(active)) {
       const tag = active.tagName;
