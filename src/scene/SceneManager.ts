@@ -341,6 +341,10 @@ export class SceneManager {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
+    // 512-map contact shadows stay on phone/tablet. A 1440px software-GL
+    // desktop buffer with them on becomes a GPU benchmark, not a plan.
+    const pixels = (this.canvas.width || w) * (this.canvas.height || h);
+    this.renderer.shadowMap.enabled = pixels < 1_200_000;
     this.applyProjection();
   }
 
