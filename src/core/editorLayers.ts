@@ -98,6 +98,34 @@ export function objectsByEditorLayer(project: Project): Record<EditorLayerId, Sc
   return grouped;
 }
 
+export type LayerPanelItem =
+  | { kind: "object"; object: SceneObject }
+  | { kind: "group"; groupId: string; name: string; members: SceneObject[] };
+
+/** One row per ungrouped object, or per array group (巧拼 / 課桌椅), not per tile. */
+export function layerPanelItems(project: Project, layer: EditorLayerId): LayerPanelItem[] {
+  const rows = objectsByEditorLayer(project)[layer];
+  const items: LayerPanelItem[] = [];
+  const seen = new Set<string>();
+  for (const object of rows) {
+    if (object.groupId) {
+      if (seen.has(object.groupId)) continue;
+      seen.add(object.groupId);
+      const group = project.groups.find((g) => g.id === object.groupId);
+      const members = rows.filter((o) => o.groupId === object.groupId);
+      items.push({
+        kind: "group",
+        groupId: object.groupId,
+        name: group?.name || members[0]?.label || members[0]?.name || "群組",
+        members,
+      });
+      continue;
+    }
+    items.push({ kind: "object", object });
+  }
+  return items;
+}
+
 export function zoneEditorLayer(zone: Zone): EditorLayerId {
   return zone.type === "staff" || zone.type === "wait" ? "flow" : "flow";
 }

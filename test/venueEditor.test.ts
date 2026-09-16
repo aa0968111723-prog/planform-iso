@@ -25,6 +25,7 @@ import { applySnap } from "../src/core/units";
 import {
   cloneWorkbenchLayers,
   inferEditorLayer,
+  layerPanelItems,
   objectLayerLocked,
   objectLayerVisible,
   objectsByEditorLayer,
@@ -359,6 +360,25 @@ describe("professional venue editor", () => {
     expect(s.space).toBe("classroom");
     expect(s.snap).toBe(true);
     expect(s.locked).toBe(false);
+  });
+
+  it("layer panel folds array groups instead of listing every mat", () => {
+    const p = createDefaultProject();
+    p.groups.push({
+      id: "grp-mats", name: "地墊區", sourceKind: "mat",
+      rows: 4, cols: 6, itemWidth: 0.6, itemDepth: 0.6, itemHeight: 0.02,
+      gapX: 0, gapZ: 0, rotationDeg: 0, anchorX: 1, anchorZ: 1,
+      locked: false, hidden: false, numberPrefix: "A", numberOrder: "row", numberStart: "nw",
+    });
+    for (let i = 0; i < 24; i++) {
+      p.objects.push(obj({ kind: "mat", id: `m${i}`, groupId: "grp-mats", x: 1 + (i % 6) * 0.6, z: 1 + Math.floor(i / 6) * 0.6 }));
+    }
+    p.objects.push(obj({ kind: "table", id: "solo", x: 8, z: 2 }));
+    const eventItems = layerPanelItems(p, "event");
+    expect(eventItems.filter((i) => i.kind === "group")).toHaveLength(1);
+    expect(eventItems.find((i) => i.kind === "group")?.members.length).toBe(24);
+    const furniture = layerPanelItems(p, "furniture");
+    expect(furniture.some((i) => i.kind === "object" && i.object.id === "solo")).toBe(true);
   });
 
   it("applying a venue preset records the new identity without merging E310 extras into E305 geometry", () => {

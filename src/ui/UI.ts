@@ -78,6 +78,7 @@ export class UI {
   private lastPropSig = "";
   private navSig: string | null = null;
   private lastMode: App["session"]["mode"] | null = null;
+  private lastInspectorSig = "";
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false, labels: true };
@@ -1539,12 +1540,35 @@ export class UI {
     // Inspector: docked rail on desktop, opt-in sheet everywhere else.
     const hasSel = sess.selection.size > 0;
     if (!hasSel && this.sheet === "inspector") this.setSheet("none");
-    this.right.innerHTML = "";
-    if (this.compact && this.sheet === "inspector") this.right.append(this.sheetHandle("屬性"));
-    this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
     const inPartner = !!sess.partner;
     const dockedInspector = !this.compact && hasSel && !inPartner && dockingPolicy(this.mode).autoOpenInspector;
+    const sheetInspector = this.compact && this.sheet === "inspector";
+    const inspectorOn = !inPartner && (dockedInspector || sheetInspector);
     this.root.classList.toggle("show-inspector", dockedInspector);
+    const st = this.app.store.getState();
+    const inspectorSig = inspectorOn
+      ? [
+          [...sess.selection].sort().join(","),
+          sess.mode,
+          this.sheet,
+          this.advanced,
+          st.objects.length,
+          st.groups.length,
+          JSON.stringify(st.workbenchLayers),
+          [...sess.selection].map((id) => {
+            const o = st.objects.find((x) => x.id === id);
+            return o ? `${id}:${o.label}:${o.locked}:${o.hidden}:${o.width}:${o.depth}:${o.height}:${o.rotationDeg}:${o.color}` : id;
+          }).join(";"),
+        ].join("|")
+      : "";
+    if (inspectorOn && inspectorSig !== this.lastInspectorSig) {
+      this.lastInspectorSig = inspectorSig;
+      this.right.innerHTML = "";
+      if (this.compact) this.right.append(this.sheetHandle("屬性"));
+      this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
+    } else if (!inspectorOn) {
+      this.lastInspectorSig = "";
+    }
 
     // Compact selection never auto-opens the inspector; it gets a context bar.
     // While placing or measuring, the mode's own bar owns that slot instead.

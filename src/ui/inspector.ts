@@ -4,7 +4,7 @@ import { metersToCm } from "../core/units";
 import { buildSummaryLines } from "../core/summary";
 import { memberLabel } from "../core/arrays";
 import type { NumberOrder, NumberStart } from "../core/model";
-import { EDITOR_LAYER_DEFS, objectsByEditorLayer, zoneEditorLayer } from "../core/editorLayers";
+import { EDITOR_LAYER_DEFS, layerPanelItems, zoneEditorLayer } from "../core/editorLayers";
 import { facingLabel, formatSize, objectWorkbenchSummary, SIZE_PRESETS_M } from "../core/objectWorkbench";
 import { button, el, num, section, selectField, textField } from "./dom";
 
@@ -331,7 +331,6 @@ function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["
  * undoable, and never become a UI-only shadow copy. */
 function buildObjectLayerPanel(app: App): HTMLElement {
   const state = app.store.getState();
-  const grouped = objectsByEditorLayer(state);
   const panel = el("div", { class: "list" });
   panel.append(el("div", { class: "subhead", text: "物件與圖層" }));
   const layers = state.workbenchLayers;
@@ -346,8 +345,28 @@ function buildObjectLayerPanel(app: App): HTMLElement {
       button("↓", () => app.reorderWorkbenchLayer(def.id, 1), "chip chip--sm"),
     ]));
     panel.append(el("p", { class: "hint", text: def.hint }));
-    const rows = grouped[def.id];
-    for (const object of rows) {
+    const items = layerPanelItems(state, def.id);
+    const shown = items.slice(0, 16);
+    for (const item of shown) {
+      if (item.kind === "group") {
+        const hidden = item.members.every((m) => m.hidden);
+        const locked = item.members.every((m) => m.locked);
+        panel.append(el("div", { class: "list__row" }, [
+          button(`${item.name}（${item.members.length}）`, () => {
+            app.setSelection(item.members.map((m) => m.id));
+          }, "list__grow chip chip--sm"),
+          button(hidden ? "顯" : "隱", () => {
+            app.setSelection(item.members.map((m) => m.id));
+            app.toggleHideSelection();
+          }, "chip chip--sm"),
+          button(locked ? "解鎖" : "鎖", () => {
+            app.setSelection(item.members.map((m) => m.id));
+            app.toggleLockSelection();
+          }, "chip chip--sm"),
+        ]));
+        continue;
+      }
+      const object = item.object;
       const name = object.label ?? object.name ?? assetDef(object.kind).displayName;
       panel.append(el("div", { class: "list__row" }, [
         button(name, () => { app.setSelection([object.id]); app.focusObject(object.id); }, "list__grow chip chip--sm"),
@@ -356,6 +375,9 @@ function buildObjectLayerPanel(app: App): HTMLElement {
         button("↑", () => app.setObjectLayer(object.id, 1), "chip chip--sm"),
         button("↓", () => app.setObjectLayer(object.id, -1), "chip chip--sm"),
       ]));
+    }
+    if (items.length > shown.length) {
+      panel.append(el("p", { class: "hint", text: `還有 ${items.length - shown.length} 項收在群組裡，點畫布或框選即可編輯。` }));
     }
     if (def.id === "flow") {
       for (const z of state.zones) {
