@@ -153,7 +153,7 @@ export async function gotoWorkflow(
  * Tap the visible plan at a fraction of the focus rect.
  *
  * Playwright `mouse.click` and even `locator.click({ force })` can land on a
- * parked sheet, the placebar, a native &lt;select&gt;, or a stuck hover
+ * parked sheet, the placebar, a native select, or a stuck hover
  * pointer. App.bindPointer listens for pointerdown on `#scene`, so dispatch
  * that event directly.
  */
