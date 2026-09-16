@@ -657,7 +657,6 @@ export class UI {
   private siteSections(onPick: () => void): HTMLElement[] {
     return [
       this.venuePresetSection(),
-      this.campusMapSection(),
       this.roomSizeSection(),
       this.tileSection(),
       this.calibrationSection(),
@@ -668,6 +667,12 @@ export class UI {
 
   private venuePresetSection(): HTMLElement {
     const body: HTMLElement[] = [];
+    body.push(el("p", { class: "hint", text: "給第一次來的夥伴看：哪個校園、哪一棟、幾樓、哪一間教室。" }));
+    body.push(button("🗺️ 看淡江校園地圖", () => this.app.enterFreshmanPartnerMode(), "btn btn--big"));
+    body.push(button("新生場佈圖", () => {
+      this.app.enterFreshmanPartnerMode();
+      this.app.setFreshmanStage("layout");
+    }, "btn btn--ghost"));
     const apply = (id: string) => {
       if (window.confirm("套用場地模板會改變教室尺寸與地磚（物件會保留、可復原）。繼續？")) {
         this.app.applyVenuePresetById(id);
@@ -701,17 +706,6 @@ export class UI {
       }, "btn btn--ghost"),
     ]));
     return section("場地模板", body);
-  }
-
-  private campusMapSection(): HTMLElement {
-    return section("淡江校園位置", [
-      el("p", { class: "hint", text: "給第一次來的夥伴看：哪個校園、哪一棟、幾樓、哪一間教室。" }),
-      button("🗺️ 看淡江校園地圖", () => this.app.enterFreshmanPartnerMode(), "btn btn--big"),
-      button("新生場佈圖", () => {
-        this.app.enterFreshmanPartnerMode();
-        this.app.setFreshmanStage("layout");
-      }, "btn btn--ghost"),
-    ]);
   }
 
   private roomSizeSection(): HTMLElement {
