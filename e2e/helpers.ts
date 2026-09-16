@@ -230,3 +230,28 @@ export async function enterPartnerMode(page: Page): Promise<void> {
   await expect(page.locator("#app")).toHaveClass(/partner/);
   await settle(page);
 }
+
+export async function enterFreshmanMode(page: Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as {
+    planform: { app: { enterPartnerMode(role?: string, audience?: string): void } };
+  }).planform.app.enterPartnerMode("all", "freshman"));
+  await expect(page.locator("#app")).toHaveClass(/freshman/);
+  await settle(page);
+}
+
+export async function applyVenue(page: Page, id: string): Promise<void> {
+  await page.evaluate((venueId) => (window as unknown as {
+    planform: { app: { applyVenuePresetById(id: string): void } };
+  }).planform.app.applyVenuePresetById(venueId), id);
+  await page.waitForTimeout(200);
+}
+
+export async function pageOverflowsX(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const root = document.documentElement;
+    const app = document.getElementById("app");
+    const rootOverflow = root.scrollWidth > root.clientWidth + 1;
+    const appOverflow = !!app && app.scrollWidth > app.clientWidth + 1;
+    return rootOverflow || appOverflow;
+  });
+}
