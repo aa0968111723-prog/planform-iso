@@ -154,9 +154,10 @@ export async function gotoWorkflow(
  * or the iso void can swallow. Move first so the placement ghost follows.
  */
 export async function clickSafeCanvas(page: Page): Promise<{ x: number; y: number }> {
-  const safe = (await probe(page)).safeRect;
-  const x = Math.round(safe.x + safe.width / 2);
-  const y = Math.round(safe.y + safe.height / 2);
+  const state = await probe(page);
+  const rect = state.focusRect.width > 0 ? state.focusRect : state.safeRect;
+  const x = Math.round(rect.x + rect.width * 0.5);
+  const y = Math.round(rect.y + rect.height * 0.42);
   await page.mouse.move(x, y);
   await page.waitForTimeout(80);
   await page.mouse.click(x, y);

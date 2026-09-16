@@ -547,9 +547,17 @@ export class UI {
     if (this.sheet === kind) { this.applySheetState(); return; }
     this.sheet = kind;
     if (kind !== "none") this.sheetDetent = "half";
+    else this.blurPanelFocus();
     this.applySheetState();
     this.syncSheetHistory();
     this.viewport.schedule();
+  }
+
+  /** A focused <select> inside a parked sheet can keep a native picker over the canvas. */
+  private blurPanelFocus(): void {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement)) return;
+    if (this.left.contains(active) || this.right.contains(active)) active.blur();
   }
 
   private applySheetState(): void {
@@ -1390,8 +1398,6 @@ export class UI {
     if (viewBtn) viewBtn.textContent = viewLabel;
 
     this.syncNav();
-    this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
-      b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow && this.sheet === "workflow")));
 
     // Picking an asset drops straight into placement — keep the sheet away for
     // every subsequent UI tick, not only the first, so a late history/popstate
@@ -1399,6 +1405,9 @@ export class UI {
     if (this.compact && (sess.mode === "place" || sess.mode === "route") && this.sheet !== "none") {
       this.setSheet("none");
     }
+
+    this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
+      b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow && this.sheet === "workflow")));
 
     if (this.shouldRebuildLeft(sess.workflow)) {
       this.lastWorkflow = sess.workflow;
