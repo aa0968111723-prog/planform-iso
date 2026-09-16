@@ -31,6 +31,7 @@ import { currentPlaceOf, campusRefsEqual } from "../core/campusNav";
 import type { TkuCampusRef } from "../core/tkuCampus";
 import { LAYOUT_STARTERS } from "../core/layoutStarters";
 import { ensureCorridorLayout } from "../core/corridorGeometry";
+import { photosForVenue, photoBindingLabel } from "../core/venuePhotos";
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
 import { button, el, num, section, selectField, textField } from "./dom";

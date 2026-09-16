@@ -85,7 +85,7 @@ import {
   areaBounds,
   clampPointToAreas,
 } from "../core/placement";
-import { probePlacement, applyEditorSnap, pointInsideVenue } from "../core/placementFeedback";
+import { probePlacement, applyEditorSnap } from "../core/placementFeedback";
 import {
   alignPoses,
   distributePoses,
@@ -3212,9 +3212,6 @@ export class App {
   // --- helpers -----------------------------------------------------------
 
   private centerOfClassroom(): { x: number; z: number } { const a = this.state.classroom; return { x: a.x + a.length / 2, z: a.z + a.width / 2 }; }
-  private insideAny(x: number, z: number): boolean {
-    return pointInsideVenue(x, z, this.state);
-  }
   private isLocked(id: string): boolean {
     const obj = this.state.objects.find((o) => o.id === id);
     if (obj && objectLayerLocked(this.state, obj)) return true;

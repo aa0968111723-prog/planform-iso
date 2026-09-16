@@ -98,6 +98,6 @@ export function objectsByEditorLayer(project: Project): Record<EditorLayerId, Sc
   return grouped;
 }
 
-export function zoneEditorLayer(_zone: Zone): EditorLayerId {
-  return "flow";
+export function zoneEditorLayer(zone: Zone): EditorLayerId {
+  return zone.type === "staff" || zone.type === "wait" ? "flow" : "flow";
 }

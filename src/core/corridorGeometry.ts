@@ -98,7 +98,7 @@ export function buildStraightCorridor(classroom: AreaConfig, corridorWidth = 2):
 }
 
 /** South strip + SE corner square + east arm. Classroom objects are not referenced. */
-export function buildLCorridor(classroom: AreaConfig, corridorWidth = 2, _armLength = 4): CorridorSegment[] {
+export function buildLCorridor(classroom: AreaConfig, corridorWidth = 2): CorridorSegment[] {
   const south = buildStraightCorridor(classroom, corridorWidth)[0];
   const corner: CorridorSegment = {
     id: uid("seg"),

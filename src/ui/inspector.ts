@@ -20,6 +20,7 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
   const group = app.getSelectedGroup();
   const route = app.getSelectedRoute();
   const count = app.session.selection.size;
+  void setAdvanced;
 
   if (count === 0) {
     root.append(el("div", { class: "subhead", text: "場地摘要" }));
@@ -59,7 +60,7 @@ export function buildInspector(app: App, advanced: boolean, setAdvanced: (v: boo
     return root;
   }
 
-  if (obj) buildObjectInspector(root, app, obj, advanced, setAdvanced);
+  if (obj) buildObjectInspector(root, app, obj);
   else if (group) buildGroupInspector(root, app, group, advanced);
   else if (zone) buildZoneInspector(root, app, zone);
   else if (route) buildRouteInspector(root, app, route);
@@ -147,7 +148,7 @@ function rotationPanel(app: App, cur: number): HTMLElement {
   ]);
 }
 
-function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["getSelectedObject"]> & object, _advanced: boolean, _setAdvanced: (v: boolean) => void): void {
+function buildObjectInspector(root: HTMLElement, app: App, obj: ReturnType<App["getSelectedObject"]> & object): void {
   const def = assetDef(obj.kind);
   const prop = app.propForObject(obj.id);
   const project = app.store.getState();

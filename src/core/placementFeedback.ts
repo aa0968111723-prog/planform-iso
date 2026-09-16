@@ -115,7 +115,8 @@ export function probePlacement(opts: {
   skipObjectId?: string;
 }): PlacementProbe {
   const { project, width, depth, surface, snap } = opts;
-  let { x, z, rotationDeg } = opts;
+  let { x, z } = opts;
+  const rotationDeg = opts.rotationDeg;
   if (surface === "floor") {
     const s = applySnap(x, z, project.tile, snap);
     x = s.x; z = s.z;
