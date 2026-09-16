@@ -16,8 +16,8 @@ export const PARTNER_COPY_EXAMPLES = [
   "完成後前往中央青綠色地墊區",
 ] as const;
 
-function doorSide(project: Project, door: SceneObject | undefined): "後側" | "前側" | "左側" | "右側" | "入口" {
-  if (!door) return "入口";
+function doorSide(project: Project, door: SceneObject | undefined): "後側" | "前側" | "左側" | "右側" {
+  if (!door) return "後側";
   const c = project.classroom;
   const nx = (door.x - c.x) / Math.max(0.01, c.length);
   const nz = (door.z - c.z) / Math.max(0.01, c.width);
