@@ -746,7 +746,7 @@ html, body {
 #app[data-ws-mode="tablet"].partner.freshman:not([data-freshman-stage="layout"]) .tkumap,
 #app[data-ws-mode="desktop"].partner.freshman:not([data-freshman-stage="layout"]) .tkumap {
   bottom: auto;
-  height: min(46vh, 520px);
+  height: min(40vh, 460px);
   border-bottom: 1px solid var(--border);
 }
 .tkumap__bar {
@@ -779,7 +779,7 @@ html, body {
 }
 .tkumap__fallback--on { display: block; }
 .tkumap__north {
-  position: absolute; top: 10px; right: 12px; z-index: 2;
+  position: absolute; top: 10px; right: 12px; z-index: 500;
   width: 32px; height: 32px; border-radius: 999px;
   background: rgba(255,255,255,.92); color: #0f172a;
   border: 1px solid rgba(15, 23, 42, 0.18);
@@ -788,7 +788,7 @@ html, body {
 .tkumap__attrib {
   position: absolute; left: 8px; bottom: 8px;
   font-size: 11px; color: #334155; background: rgba(255,255,255,.86);
-  padding: 2px 6px; border-radius: 4px; z-index: 2;
+  padding: 2px 6px; border-radius: 4px; z-index: 500;
 }
 .tkumap__fallback-title { margin: 0 0 8px; font-weight: 700; }
 .tkumap__dir { display: flex; flex-direction: column; gap: 6px; }
@@ -796,20 +796,24 @@ html, body {
 .tkumap__dir-btn.is-active { border-color: var(--accent); }
 .tkumap__sheet {
   flex: 0 0 auto;
-  max-height: 34%;
+  max-height: 38%;
   overflow: auto;
   padding: 10px 12px 12px;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
   background: var(--panel-solid);
   border-top: 1px solid var(--border);
 }
+#app[data-ws-mode="tablet"] .tkumap__sheet,
+#app[data-ws-mode="desktop"] .tkumap__sheet {
+  max-height: 160px;
+}
 .tkumap__sheet-title { font-weight: 760; font-size: 16px; }
 .tkumap__sheet-line { margin: 4px 0 8px; color: var(--text-dim); font-size: 13px; }
 .tkumap__sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .tkumap__enter { width: 100%; position: sticky; top: 0; z-index: 1; }
 .tkumap__photos { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
-.tkumap__photo { margin: 0; width: 148px; flex: 0 0 auto; }
-.tkumap__photo img { width: 148px; height: 92px; object-fit: cover; border-radius: 10px; display: block; }
+.tkumap__photo { margin: 0; width: 120px; flex: 0 0 auto; }
+.tkumap__photo img { width: 120px; height: 68px; object-fit: cover; border-radius: 10px; display: block; }
 .tkumap__photo figcaption { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 .tkumap__photo-tag { display: block; font-size: 11px; color: var(--warn-text); }
 .tkumap__rooms { display: flex; flex-wrap: wrap; gap: 6px; }

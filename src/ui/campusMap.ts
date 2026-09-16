@@ -315,6 +315,20 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
     if (building && !hasCoords(building)) {
       sheet.append(el("p", { class: "hint", text: "這棟樓還沒有公開座標，只顯示目錄資料。" }));
     }
+    if (place) {
+      const photos = photosForPlace(place.id);
+      if (photos.length) {
+        const row = el("div", { class: "tkumap__photos" });
+        for (const photo of photos.slice(0, 2)) {
+          row.append(el("figure", { class: "tkumap__photo" }, [
+            el("img", { src: photoThumbnailDataUri(photo), alt: photo.title }),
+            el("figcaption", { text: `${photo.title} · ${photo.shootingDirection}` }),
+            el("span", { class: "tkumap__photo-tag", text: photoBindingLabel(photo) }),
+          ]));
+        }
+        sheet.append(row);
+      }
+    }
     if (opts.freshman || place) {
       sheet.append(button("進入室內場佈", () => {
         if (place && opts.onPickPlace && !opts.freshman) opts.onPickPlace(place);
@@ -331,20 +345,6 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
         linkBtn("Google Maps 導航", googleMapsUrl(loc.lat, loc.lng, loc.label)),
         linkBtn("OpenStreetMap 位置", osmUrl(loc.lat, loc.lng)),
       ]));
-    }
-    if (place) {
-      const photos = photosForPlace(place.id);
-      if (photos.length) {
-        const row = el("div", { class: "tkumap__photos" });
-        for (const photo of photos) {
-          row.append(el("figure", { class: "tkumap__photo" }, [
-            el("img", { src: photoThumbnailDataUri(photo), alt: photo.title }),
-            el("figcaption", { text: `${photo.title} · ${photo.shootingDirection}` }),
-            el("span", { class: "tkumap__photo-tag", text: photoBindingLabel(photo) }),
-          ]));
-        }
-        sheet.append(row);
-      }
     }
     if (!place && building) {
       const rooms = placesInBuilding(building.code).filter((p) => p.kind === "classroom" || p.kind === "office" || p.kind === "hall");

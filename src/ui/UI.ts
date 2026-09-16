@@ -1478,6 +1478,7 @@ export class UI {
       delete this.root.dataset.freshmanStage;
     }
     if (on) {
+      this.toast.style.display = "none";
       this.setSheet("none");
       this.menu.close();
       this.partner.update();
