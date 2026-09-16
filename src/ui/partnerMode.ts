@@ -175,13 +175,7 @@ export function buildPartnerMode(
       return;
     }
     const lines: { icon: string; text: string }[] = [];
-    // You-are-here stays a single dock line: live station name, else the
-    // partner 場刊 sentence. Never stack both — an extra dock line drops
-    // 360×800 canvas coverage under 0.6.
-    const here = b.youAre
-      ? `你在「${b.youAre}」`
-      : (role === "all" ? b.layoutCopy?.[0] : undefined);
-    if (here) lines.push({ icon: "📍", text: here });
+    if (b.youAre) lines.push({ icon: "📍", text: `你在「${b.youAre}」` });
     if (role === "all" && b.flowSummary) {
       lines.push({ icon: "➡️", text: `整體流程：${b.flowSummary}` });
     } else {
@@ -201,7 +195,7 @@ export function buildPartnerMode(
     brief.append(el("span", {
       class: "partnerbrief__journey",
       text: role === "all"
-        ? `整體流程：${b.flowSummary ?? "依現場動線前進"}`
+        ? (b.layoutCopy?.[0] ?? "你現在在教室入口")
         : `上一站：${b.peopleComeFrom ?? "入口"} → 你：${b.youAre ?? "目前沒有指定站點"} → 下一站：${b.nextStop ?? "座區結束"}`,
     }));
   }
