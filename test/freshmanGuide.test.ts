@@ -5,6 +5,7 @@ import {
   FRESHMAN_ENGINEERING,
   FRESHMAN_STAGES,
   formatFreshmanHeadline,
+  freshmanStageCopy,
   freshmanBriefing,
   freshmanJourney,
   freshmanLayoutView,
@@ -45,7 +46,8 @@ describe("freshman partner copy", () => {
     expect(b.steps.map((s) => s.text).join("\n")).toMatch(/報到區/);
     expect(b.steps.map((s) => s.text).join("\n")).toMatch(/鞋子區/);
     expect(b.steps.map((s) => s.text).join("\n")).toMatch(/中央青綠色地墊區/);
-    expect(b.entrance).toMatch(/入口待現場確認/);
+    expect(freshmanStageCopy("classroom", project)).toMatch(/教室後側入口|入口待現場確認/);
+    expect(freshmanStageCopy("layout", project)).toMatch(/投影幕|地墊/);
     expect(FRESHMAN_ENGINEERING.test([
       b.headline, b.where, b.howToRoom, b.howLaidOut, b.youAre, b.next, b.entrance,
       ...b.steps.map((s) => s.text),

@@ -753,6 +753,8 @@ html, body {
   padding: 8px 12px 6px;
   background: var(--panel-solid);
   flex: 0 0 auto;
+  position: relative;
+  z-index: 4;
 }
 .tkumap__search { width: 100%; min-height: 40px; }
 .tkumap__campuses { display: flex; gap: 6px; }
@@ -760,7 +762,11 @@ html, body {
 .tkumap__campus[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); }
 .tkumap__results {
   display: none; flex-direction: column; gap: 4px;
-  padding: 0 12px 8px; background: var(--panel-solid); max-height: 28vh; overflow: auto;
+  position: absolute; left: 12px; right: 12px; top: calc(100% - 4px);
+  z-index: 6;
+  padding: 8px; background: var(--panel-solid); max-height: min(36vh, 240px); overflow: auto;
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .16);
 }
 .tkumap__hit { text-align: left; width: 100%; }
 .tkumap__stage { position: relative; flex: 1 1 auto; min-height: 160px; min-width: 0; }
@@ -799,7 +805,7 @@ html, body {
 .tkumap__sheet-title { font-weight: 760; font-size: 16px; }
 .tkumap__sheet-line { margin: 4px 0 8px; color: var(--text-dim); font-size: 13px; }
 .tkumap__sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
-.tkumap__enter { width: 100%; }
+.tkumap__enter { width: 100%; position: sticky; top: 0; z-index: 1; }
 .tkumap__photos { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
 .tkumap__photo { margin: 0; width: 148px; flex: 0 0 auto; }
 .tkumap__photo img { width: 148px; height: 92px; object-fit: cover; border-radius: 10px; display: block; }

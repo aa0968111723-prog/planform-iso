@@ -158,8 +158,10 @@ export function buildPartnerMode(
       const lines: { icon: string; text: string }[] = [];
       if (stage === "campus") lines.push({ icon: "🗺️", text: b.where });
       else if (stage === "building") lines.push({ icon: "🏫", text: b.howToRoom });
-      else if (stage === "classroom") lines.push({ icon: "🚪", text: b.entrance });
-      else {
+      else if (stage === "classroom") {
+        lines.push({ icon: "🚪", text: b.entrance });
+        lines.push({ icon: "🧩", text: b.howLaidOut });
+      } else {
         lines.push({ icon: "📍", text: b.youAre });
         lines.push({ icon: "➡️", text: b.next });
       }

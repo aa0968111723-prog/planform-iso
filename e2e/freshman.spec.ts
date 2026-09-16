@@ -55,8 +55,9 @@ for (const vp of VIEWPORTS) {
       await settle(page);
       await expect(page.locator(".tkumap__hit").first()).toContainText("E310");
       await expect(page.locator(".tkumap__hit").first()).not.toContainText("E305");
-
-      await page.getByRole("button", { name: "進入室內場佈" }).click();
+      await page.locator('[data-testid="tku-map-search"]').fill("");
+      await settle(page);
+      await page.locator(".tkumap__enter").click();
       await settle(page);
       await expect(page.locator("#app")).toHaveAttribute("data-freshman-stage", "layout");
       await expect(page.locator('[data-testid="tku-map"]')).toBeHidden();

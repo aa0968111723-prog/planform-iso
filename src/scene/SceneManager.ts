@@ -502,6 +502,7 @@ export class SceneManager {
     };
     const selected = session.selection;
     const rehearsing = !!(session.simPositions?.length || session.simStations?.length);
+    const freshman = !!this.partner?.freshman;
 
     // Start from a closed annotation layer. Only the candidates below earn a
     // place back on the scene; this makes the density budget comprehensive.
@@ -529,28 +530,28 @@ export class SceneManager {
       return;
     }
 
-    // The selected thing gets first claim on the screen. Its neighbours are
-    // then allowed to yield rather than forcing the user to decipher a stack.
-    for (const o of project.objects) {
-      if (!selected.has(o.id)) continue;
-      const label = this.objectNodes.get(o.id)?.label;
-      if (label && !o.hidden && session.showLabels) add(`object:${o.id}`, label, 0);
-    }
-    for (const zone of project.zones) {
-      if (!selected.has(zone.id)) continue;
-      const label = this.zoneNodes.get(zone.id)?.label;
-      if (label && !zone.hidden && session.showLabels) add(`zone:${zone.id}`, label, 0);
-    }
-    for (const route of project.routes) {
-      if (route.id !== session.focusRouteId) continue;
-      const label = this.routeNodes.get(route.id)?.label;
-      if (label && route.visible && session.showLabels) add(`route:${route.id}`, label, 0);
+    // Freshman first layer: entrance, zone names, path, 你在這裡, next.
+    // Engineering labels (cm, field counts, measurements) stay off-screen.
+    if (!freshman) {
+      for (const o of project.objects) {
+        if (!selected.has(o.id)) continue;
+        const label = this.objectNodes.get(o.id)?.label;
+        if (label && !o.hidden && session.showLabels) add(`object:${o.id}`, label, 0);
+      }
+      for (const zone of project.zones) {
+        if (!selected.has(zone.id)) continue;
+        const label = this.zoneNodes.get(zone.id)?.label;
+        if (label && !zone.hidden && session.showLabels) add(`zone:${zone.id}`, label, 0);
+      }
+      for (const route of project.routes) {
+        if (route.id !== session.focusRouteId) continue;
+        const label = this.routeNodes.get(route.id)?.label;
+        if (label && route.visible && session.showLabels) add(`route:${route.id}`, label, 0);
+      }
     }
 
     if (session.showLabels) {
-      // Room / corridor and the one field label orient a first-time viewer.
-      // They are kept out of rehearsal mode, where the queue is the task.
-      if (!rehearsing) {
+      if (!rehearsing && !freshman) {
         for (const root of [this.floorGroup, this.arrayGroupRoot]) {
           root.traverse((node) => {
             if (!(node instanceof Sprite)) return;
@@ -584,28 +585,38 @@ export class SceneManager {
         }
       }
 
-      // In rehearsal these labels are the actionable information. They remain
-      // P0 even on phone, above room names and decorative context.
-      for (const station of session.simStations ?? []) {
-        const label = this.stationLabels.get(station.id);
-        if (label) add(`station:${station.id}`, label, 0);
+      if (freshman) {
+        for (const o of project.objects) {
+          if (o.hidden) continue;
+          if (o.kind !== "door" && o.kind !== "screen") continue;
+          const label = this.objectNodes.get(o.id)?.label;
+          if (label) add(`object:${o.id}`, label, 1);
+        }
+      } else {
+        for (const station of session.simStations ?? []) {
+          const label = this.stationLabels.get(station.id);
+          if (label) add(`station:${station.id}`, label, 0);
+        }
+        for (const bn of session.bottlenecks ?? []) {
+          const key = `${bn.kind ?? "route"}|${bn.x.toFixed(2)}|${bn.z.toFixed(2)}`;
+          const label = this.bottleneckLabels.get(key);
+          if (label) add(`bottleneck:${key}`, label, 0);
+        }
+        for (const anchor of session.propAnchors ?? []) {
+          const label = this.anchorLabels.get(`anchor:${anchor.role}`);
+          if (label) add(`anchor:${anchor.role}`, label, 1);
+        }
+        for (const measurement of project.measurements) {
+          if (!measurement.visible) continue;
+          const label = this.measureNodes.get(measurement.id)?.label;
+          if (label) add(`measure:${measurement.id}`, label, 1);
+        }
+        if (this.liveLabel && (session.measure || session.calibrate)) add("live-measure", this.liveLabel, 0);
       }
-      for (const bn of session.bottlenecks ?? []) {
-        const key = `${bn.kind ?? "route"}|${bn.x.toFixed(2)}|${bn.z.toFixed(2)}`;
-        const label = this.bottleneckLabels.get(key);
-        if (label) add(`bottleneck:${key}`, label, 0);
-      }
-      for (const anchor of session.propAnchors ?? []) {
-        const label = this.anchorLabels.get(`anchor:${anchor.role}`);
-        if (label) add(`anchor:${anchor.role}`, label, 1);
-      }
-      for (const measurement of project.measurements) {
-        if (!measurement.visible) continue;
-        const label = this.measureNodes.get(measurement.id)?.label;
-        if (label) add(`measure:${measurement.id}`, label, 1);
-      }
-      if (this.liveLabel && (session.measure || session.calibrate)) add("live-measure", this.liveLabel, 0);
-      this.partnerLabels.forEach((label, i) => add(`partner:${i}`, label, 0));
+      this.partnerLabels.forEach((label, i) => {
+        const data = label.sprite.userData.sceneLabel as { id?: string; priority?: LabelPriority } | undefined;
+        add(data?.id ?? `partner:${i}`, label, data?.priority ?? 0);
+      });
     }
 
     this.scene.updateMatrixWorld(true);
@@ -616,7 +627,9 @@ export class SceneManager {
       if (rect) screenCandidates.push({ id: candidate.id, priority: candidate.priority, rect });
     }
     const width = this.canvasSize().w;
-    const maxVisible = width <= 600 ? 6 : width < 1200 ? 9 : 12;
+    const maxVisible = freshman
+      ? (width <= 600 ? 12 : 16)
+      : (width <= 600 ? 6 : width < 1200 ? 9 : 12);
     const visible = session.showLabels ? declutterScreenLabels(screenCandidates, maxVisible) : new Set<string>();
 
     // Set every candidate explicitly. A hidden label from the prior frame must
@@ -728,7 +741,11 @@ export class SceneManager {
       ribbon.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
       this.partnerGroup.add(ribbon);
     }
+    const near = (a: { x: number; z: number }, b: { x: number; z: number }) =>
+      Math.hypot(a.x - b.x, a.z - b.z) < 0.45;
     for (const node of view.path) {
+      if (near(node, view.pins.youAreHere)) continue;
+      if (view.pins.nextStop && near(node, view.pins.nextStop)) continue;
       const badge = new TextLabel({ width: 256, height: 256, fontSize: 120 });
       const circled = "①②③④⑤⑥⑦⑧⑨⑩"[node.index - 1] ?? String(node.index);
       badge.set(circled, "#0284c7");
@@ -763,8 +780,16 @@ export class SceneManager {
     };
     const pins = view.pins;
     add(pins.youAreHere, "#ef4444", 1.95, [2.8, 0.68], 0);
-    if (pins.nextStop) add(pins.nextStop, "#f59e0b", 1.55, [2.6, 0.62], 0);
-    if (pins.entrance) add(pins.entrance, "#0ea5e9", 1.15, [2.2, 0.55], 1);
+    if (pins.nextStop && !near(pins.nextStop, pins.youAreHere)) {
+      add(pins.nextStop, "#f59e0b", 1.55, [2.6, 0.62], 0);
+    }
+    if (
+      pins.entrance
+      && !near(pins.entrance, pins.youAreHere)
+      && !(pins.nextStop && near(pins.entrance, pins.nextStop))
+    ) {
+      add(pins.entrance, "#0ea5e9", 1.15, [2.2, 0.55], 1);
+    }
   }
 
   private lastPartnerSig = "";

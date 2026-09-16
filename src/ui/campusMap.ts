@@ -88,8 +88,7 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
   stageBox.append(mapHost, fallback, north, attrib);
 
   const root = el("div", { class: "tkumap", hidden: "true", "data-testid": "tku-map" }, [
-    el("div", { class: "tkumap__bar" }, [search, campusRow]),
-    results,
+    el("div", { class: "tkumap__bar" }, [search, campusRow, results]),
     stageBox,
     sheet,
   ]);
@@ -316,6 +315,12 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
     if (building && !hasCoords(building)) {
       sheet.append(el("p", { class: "hint", text: "這棟樓還沒有公開座標，只顯示目錄資料。" }));
     }
+    if (opts.freshman || place) {
+      sheet.append(button("進入室內場佈", () => {
+        if (place && opts.onPickPlace && !opts.freshman) opts.onPickPlace(place);
+        opts.onEnterLayout();
+      }, "btn btn--primary tkumap__enter"));
+    }
     const loc = building && hasCoords(building)
       ? { lat: building.lat!, lng: building.lng!, label: building.name }
       : campusCenter(s.campusId)
@@ -340,16 +345,6 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
         }
         sheet.append(row);
       }
-    }
-    if (opts.freshman) {
-      sheet.append(button("進入室內場佈", () => opts.onEnterLayout(), "btn btn--primary tkumap__enter"));
-    } else if (place) {
-      sheet.append(el("div", { class: "tkumap__sheet-actions" }, [
-        button("進入室內場佈", () => {
-          opts.onPickPlace?.(place);
-          opts.onEnterLayout();
-        }, "btn btn--primary tkumap__enter"),
-      ]));
     }
     if (!place && building) {
       const rooms = placesInBuilding(building.code).filter((p) => p.kind === "classroom" || p.kind === "office" || p.kind === "hall");
