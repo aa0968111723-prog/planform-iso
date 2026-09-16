@@ -152,6 +152,11 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
   return {
     root,
     show() {
+      if (shown) {
+        render();
+        opts.onLayoutChange();
+        return;
+      }
       shown = true;
       root.hidden = false;
       root.removeAttribute("inert");
@@ -159,6 +164,7 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
       opts.onLayoutChange();
     },
     hide() {
+      if (!shown) return;
       shown = false;
       root.hidden = true;
       root.setAttribute("inert", "");
