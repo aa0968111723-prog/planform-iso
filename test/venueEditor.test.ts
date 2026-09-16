@@ -20,7 +20,7 @@ import {
   gridArrangePoses,
   scalePosesAroundCentroid,
 } from "../src/core/alignTools";
-import { probePlacement, PLACEMENT_REASON_TEXT } from "../src/core/placementFeedback";
+import { findOpenFloorPoint, probePlacement, PLACEMENT_REASON_TEXT } from "../src/core/placementFeedback";
 import { applySnap } from "../src/core/units";
 import {
   cloneWorkbenchLayers,
@@ -325,6 +325,12 @@ describe("professional venue editor", () => {
       rotationDeg: 0, surface: "tabletop", snap: "off",
     });
     expect(desk.text).toBe("需要放在桌面上");
+    const filled = createDefaultProject();
+    filled.objects.push(obj({ kind: "table", id: "blocker", x: 5, z: 4, width: 1.2, depth: 0.6 }));
+    const open = findOpenFloorPoint(filled, 1.2, 0.6, 0.74, 0, "off");
+    expect(open.validity === "ok" || open.validity === "warn").toBe(true);
+    expect(open.x).toBeGreaterThan(filled.classroom.x);
+    expect(open.x).toBeLessThan(filled.classroom.x + filled.classroom.length);
   });
 
   it("28 common visual route chain is entry → check-in → shoes → backpack → mats/seating", () => {

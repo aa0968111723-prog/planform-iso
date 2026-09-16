@@ -169,6 +169,56 @@ export function probePlacement(opts: {
   return { x, z, rotationDeg, validity: "ok", reason: "ok", text: PLACEMENT_REASON_TEXT.ok, surface };
 }
 
+/**
+ * A confirm tap that raycasts into the void (landscape tablet, sheet-trimmed
+ * phone) must still land in the classroom — never dump on pick, but never
+ * silently no-op on confirm either. Prefer a green cell; accept yellow overlap.
+ */
+export function findOpenFloorPoint(
+  project: Project,
+  width: number,
+  depth: number,
+  height: number,
+  rotationDeg: number,
+  snap: SnapMode,
+): PlacementProbe {
+  const c = project.classroom;
+  const candidates: { x: number; z: number }[] = [
+    { x: c.x + c.length / 2, z: c.z + c.width * 0.4 },
+    { x: c.x + c.length / 2, z: c.z + c.width / 2 },
+    { x: c.x + c.length * 0.35, z: c.z + c.width * 0.4 },
+    { x: c.x + c.length * 0.65, z: c.z + c.width * 0.4 },
+    { x: c.x + c.length * 0.35, z: c.z + c.width * 0.55 },
+    { x: c.x + c.length * 0.65, z: c.z + c.width * 0.55 },
+  ];
+  const step = Math.max(0.6, project.tile?.width ?? 0.6);
+  const insetX = width / 2 + 0.25;
+  const insetZ = depth / 2 + 0.25;
+  for (let x = c.x + insetX; x <= c.x + c.length - insetX + 1e-6; x += step) {
+    for (let z = c.z + insetZ; z <= c.z + c.width - insetZ + 1e-6; z += step) {
+      candidates.push({ x, z });
+    }
+  }
+  let best: PlacementProbe | null = null;
+  for (const { x, z } of candidates) {
+    const probe = probePlacement({
+      project, x, z, width, depth, height, rotationDeg, surface: "floor", snap,
+    });
+    if (probe.validity === "ok") return probe;
+    if (!best || rankValidity(probe.validity) > rankValidity(best.validity)) best = probe;
+  }
+  return best ?? probePlacement({
+    project,
+    x: c.x + c.length / 2,
+    z: c.z + c.width / 2,
+    width, depth, height, rotationDeg, surface: "floor", snap,
+  });
+}
+
+function rankValidity(v: PlacementValidity): number {
+  return v === "ok" ? 2 : v === "warn" ? 1 : 0;
+}
+
 export function applyEditorSnap(
   px: number,
   pz: number,

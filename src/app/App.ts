@@ -85,7 +85,7 @@ import {
   areaBounds,
   clampPointToAreas,
 } from "../core/placement";
-import { probePlacement, applyEditorSnap } from "../core/placementFeedback";
+import { probePlacement, applyEditorSnap, findOpenFloorPoint } from "../core/placementFeedback";
 import {
   alignPoses,
   distributePoses,
@@ -730,16 +730,30 @@ export class App {
   private confirmPlacement(): void {
     const kind = this.session.placingKind;
     const entry = this.placingEntry();
-    if (!this.session.ghost || !kind || !entry) return;
-    // A tap that looks like it hit the canvas can still raycast into the void
-    // around the building (landscape tablet, chrome-trimmed iso view). Snap
-    // floor furniture into the venue instead of silently no-op'ing.
+    if (!kind || !entry) return;
+    const dims = this.currentDims(kind, this.session.placingPreset);
+    // Pick starts with a null ghost (do not dump at room centre). A confirm
+    // tap that missed the floor, or landed outside the classroom, still has
+    // to place — search the room for a green/yellow cell instead of no-op'ing.
+    if (!this.session.ghost && entry.placementType === "floor") {
+      const open = findOpenFloorPoint(
+        this.state, dims.width, dims.depth, dims.height, this.session.ghostRotation, this.session.snap,
+      );
+      this.updateGhostAt(open.x, open.z);
+    }
+    if (!this.session.ghost) return;
     if (entry.placementType === "floor" && this.session.ghost.validity === "bad") {
       const snapped = clampPointToAreas(
         this.session.ghost.x, this.session.ghost.z,
         [this.state.classroom, this.state.corridor],
       );
       this.updateGhostAt(snapped.x, snapped.z);
+    }
+    if (entry.placementType === "floor" && this.session.ghost?.validity === "bad") {
+      const open = findOpenFloorPoint(
+        this.state, dims.width, dims.depth, dims.height, this.session.ghostRotation, this.session.snap,
+      );
+      this.updateGhostAt(open.x, open.z);
     }
     const g = this.session.ghost;
     if (!g) return;
@@ -3324,8 +3338,8 @@ export class App {
       // the visible canvas so a finger on the sheet-trimmed view still lands
       // on the plan, not under the header or behind the bottom nav.
       const pt = this.scene.clampClientToVisible(e.clientX, e.clientY);
-      const ground = this.scene.groundPoint(pt.x, pt.y);
-      if (ground) this.updateGhostAt(ground.x, ground.z);
+      const hit = this.scene.groundPoint(pt.x, pt.y);
+      if (hit) this.updateGhostAt(hit.x, hit.z);
       this.confirmPlacement();
       return;
     }
