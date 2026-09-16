@@ -9,7 +9,7 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
-import { clickSafeCanvas, gotoWorkflow, openProjectHome, probe, settle } from "./helpers";
+import { clickCanvasClient, clickSafeCanvas, gotoWorkflow, openProjectHome, settle } from "./helpers";
 
 const RED_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==",
@@ -243,11 +243,7 @@ for (const vp of VIEWPORTS) {
       await page.locator(".left .chip", { hasText: "入場" }).first().click();
       await settle(page);
       await clickSafeCanvas(page);
-      const safe = (await probe(page)).safeRect;
-      await page.mouse.click(
-        Math.round(safe.x + safe.width * 0.6),
-        Math.round(safe.y + safe.height * 0.55),
-      );
+      await clickCanvasClient(page, 0.6, 0.55);
       await settle(page);
       const finishRoute = page.locator(".placebar-wrap button", { hasText: "完成繪製" });
       if (await finishRoute.isVisible()) await finishRoute.click();

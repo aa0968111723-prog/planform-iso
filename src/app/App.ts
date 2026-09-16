@@ -3038,8 +3038,10 @@ export class App {
         this.scene.setControlsEnabled(false);
         return;
       }
-      if (ground) {
-        const snapped = applySnap(ground.x, ground.z, this.state.tile, this.session.snap);
+      const pt = this.scene.clampClientToVisible(e.clientX, e.clientY);
+      const routeGround = this.scene.groundPoint(pt.x, pt.y) ?? ground;
+      if (routeGround) {
+        const snapped = applySnap(routeGround.x, routeGround.z, this.state.tile, this.session.snap);
         this.store.mutate((p) => { const r = p.routes.find((x) => x.id === this.session.activeRouteId); if (r) r.points.push(snapped); });
       }
       return;

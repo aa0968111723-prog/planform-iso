@@ -150,24 +150,44 @@ export async function gotoWorkflow(
 }
 
 /**
- * Click the centre of the visible canvas (safeRect), not a corner that chrome
- * or the iso void can swallow. Move first so the placement ghost follows.
+ * Click the WebGL canvas at a fraction of the visible plan, even when a parked
+ * sheet, placebar, or native picker is painted on top. Overlay `mouse.click`
+ * hits chrome; `#scene.click({ force })` delivers pointerdown to App.
  */
-export async function clickSafeCanvas(page: Page): Promise<{ x: number; y: number }> {
+export async function clickCanvasClient(
+  page: Page,
+  nx = 0.5,
+  ny = 0.5,
+): Promise<{ x: number; y: number }> {
   const compact = (await page.locator("#app").getAttribute("data-ws-mode")) !== "desktop";
   if (compact) {
     await expect.poll(() => page.locator("#app").getAttribute("data-sheet"), { timeout: 3_000 })
       .toBe("none")
       .catch(() => undefined);
+    await page.evaluate(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    });
   }
   const state = await probe(page);
   const rect = state.focusRect.width > 0 ? state.focusRect : state.safeRect;
-  const x = Math.round(rect.x + rect.width * 0.5);
-  const y = Math.round(rect.y + rect.height * 0.5);
-  await page.mouse.move(x, y);
+  const box = await page.locator("#scene").boundingBox();
+  if (!box) throw new Error("#scene has no bounding box");
+  const clientX = rect.x + rect.width * nx;
+  const clientY = rect.y + rect.height * ny;
+  const position = {
+    x: Math.max(1, Math.round(clientX - box.x)),
+    y: Math.max(1, Math.round(clientY - box.y)),
+  };
+  await page.locator("#scene").hover({ position, force: true });
   await page.waitForTimeout(80);
-  await page.mouse.click(x, y);
-  return { x, y };
+  await page.locator("#scene").click({ position, force: true });
+  return { x: clientX, y: clientY };
+}
+
+/** Centre of the visible plan (focusRect, else safeRect). */
+export async function clickSafeCanvas(page: Page): Promise<{ x: number; y: number }> {
+  return clickCanvasClient(page, 0.5, 0.5);
 }
 
 /** Visible on screen (not translated off the fold, not display:none). */
