@@ -677,9 +677,9 @@ export class UI {
     const photos = s.venuePresetId ? photosForVenue(s.venuePresetId) : [];
     const body: HTMLElement[] = [
       el("p", { class: "campusmap__headline", text: guideHeadline }),
-      el("p", { class: "hint", text: "給第一次到淡江的新生看：哪個校園、哪一棟樓、幾樓、哪一間教室。" }),
+      el("p", { class: "hint", text: "哪個校園、哪一棟樓、幾樓、哪一間教室。" }),
       button("🗺️ 看淡江校園地圖", () => this.openCampusMapOverlay(), "btn btn--primary"),
-      button("🌱 新生夥伴視圖", () => this.app.enterPartnerMode("all", "freshman"), "btn btn--big"),
+      button("🌱 新生夥伴視圖", () => this.app.enterPartnerMode("all", "freshman"), "btn"),
     ];
     if (photos.length) {
       const row = el("div", { class: "campusmap__photos" });
@@ -1519,6 +1519,11 @@ export class UI {
         this.app.recenterView();
         this.freshmanMap?.invalidateSize();
       }));
+    } else if (on && freshman) {
+      requestAnimationFrame(() => {
+        this.viewport.measure();
+        this.freshmanMap?.invalidateSize();
+      });
     }
   }
 
@@ -1533,17 +1538,23 @@ export class UI {
     }
     host.style.display = "block";
     if (!this.freshmanMap) {
-      this.freshmanMap = buildCampusMap({
+      const handles = buildCampusMap({
         initial: this.app.store.getState().campusRef ?? defaultCampusRef(),
         mode: "embedded",
-        onRefChange: (ref) => this.app.setCampusRef(ref),
+        onRefChange: (ref) => {
+          // Assignment happens after buildCampusMap returns. Ignore the
+          // constructor's initial setRef so it cannot re-enter UI.update.
+          if (!this.freshmanMap) return;
+          this.app.setCampusRef(ref);
+        },
         onEnterLayout: (ref) => {
           this.applyCampusPlaceIfNeeded(ref);
           this.app.setFreshmanLayer("layout");
           this.app.setFreshmanQuestion("how-room-laid");
         },
       });
-      host.append(this.freshmanMap.root);
+      this.freshmanMap = handles;
+      host.append(handles.root);
     } else {
       const ref = this.app.store.getState().campusRef ?? defaultCampusRef();
       if (!campusRefsEqual(this.freshmanMap.currentRef(), ref)) {

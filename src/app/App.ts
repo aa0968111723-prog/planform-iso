@@ -119,6 +119,7 @@ import {
   venuePresetFromProject,
 } from "../core/venues";
 import { placeById, type TkuCampusRef } from "../core/tkuCampus";
+import { campusRefsEqual } from "../core/campusNav";
 import {
   buildFreshmanGuide,
   layerForQuestion,
@@ -1859,6 +1860,8 @@ export class App {
   }
 
   setCampusRef(ref: TkuCampusRef): void {
+    const current = this.store.getState().campusRef;
+    if (campusRefsEqual(current, ref)) return;
     this.store.mutate((p) => {
       p.campusRef = ref;
     }, { history: false });

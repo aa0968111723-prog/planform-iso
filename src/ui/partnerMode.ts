@@ -85,16 +85,16 @@ export function buildPartnerMode(
       });
     }, "btn partneraction"),
   ]);
-  const paneToggle = el("div", { class: "partneractions freshman-panes", style: "display:none" }, [
-    button("🗺️ 地圖", () => app.setFreshmanPane("map"), "btn partneraction"),
-    button("教室場佈", () => app.setFreshmanPane("layout"), "btn partneraction"),
+  const paneToggle = el("div", { class: "freshman-panes", style: "display:none" }, [
+    button("🗺️ 地圖", () => app.setFreshmanPane("map"), "btn freshmanaction"),
+    button("教室場佈", () => app.setFreshmanPane("layout"), "btn freshmanaction"),
     button("🖼 存成圖", () => {
       const state = app.store.getState();
       const dataUrl = renderConstructionPlan(state, { preset: "partner", simplify: true, dims: false, inventory: false });
       void sharePng(dataUrl, pngFilename(state.name, "新生場佈圖")).then((how) => {
         if (how !== "cancelled") app.notifyToast?.(how === "shared" ? "已開啟分享（可直接傳 LINE）" : "圖片已下載");
       });
-    }, "btn partneraction"),
+    }, "btn freshmanaction"),
   ]);
   paneToggle.querySelectorAll("button")[0]?.setAttribute("data-pane", "map");
   paneToggle.querySelectorAll("button")[1]?.setAttribute("data-pane", "layout");
@@ -135,15 +135,15 @@ export function buildPartnerMode(
 
   for (const q of FRESHMAN_QUESTIONS) {
     const chip = el("button", { type: "button", class: "freshmanchip freshmanq", "data-q": q.id }, [
-      el("span", { class: "rolechip__icon", text: q.icon }),
-      el("span", { class: "rolechip__label", text: q.label }),
+      el("span", { class: "freshmanchip__icon", text: q.icon }),
+      el("span", { class: "freshmanchip__label", text: q.label }),
     ]) as HTMLButtonElement;
     chip.addEventListener("click", () => app.setFreshmanQuestion(q.id));
     questions.append(chip);
   }
   for (const layer of FRESHMAN_LAYERS) {
     const chip = el("button", { type: "button", class: "freshmanchip freshmanlayer", "data-layer": layer.id }, [
-      el("span", { class: "rolechip__label", text: layer.label }),
+      el("span", { class: "freshmanchip__label", text: layer.label }),
     ]) as HTMLButtonElement;
     chip.addEventListener("click", () => app.setFreshmanLayer(layer.id));
     layers.append(chip);

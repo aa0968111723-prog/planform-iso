@@ -61,6 +61,7 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
   let tileErrors = 0;
   let leafletMap: L.Map | null = null;
   const markerLayer = L.layerGroup();
+  let ready = false;
 
   const searchInput = el("input", {
     type: "search",
@@ -148,6 +149,9 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
         maxZoom: 19,
         minZoom: 12,
       });
+      // Leaflet refuses latLngToContainerPoint until a view exists.
+      const center = campusCenter(ref.campusId) ?? { lat: 25.1758, lng: 121.4501 };
+      leafletMap.setView([center.lat, center.lng], 16, { animate: false });
       const tiles = L.tileLayer(OSM_TILE_URL, {
         attribution: OSM_ATTRIBUTION,
         maxZoom: 19,
@@ -168,9 +172,19 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
     }
   }
 
+  function mapHasView(): boolean {
+    if (!leafletMap) return false;
+    try {
+      leafletMap.getCenter();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function renderMarkers(): void {
     markerLayer.clearLayers();
-    if (!leafletMap) return;
+    if (!leafletMap || !mapHasView()) return;
     const markers = buildingMarkersForCampus(ref.campusId, ref.buildingCode);
     const labels: { id: string; x: number; y: number; width: number; height: number; priority: 0 | 1 | 2 }[] = [];
     for (const m of markers) {
@@ -361,7 +375,7 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
       if (place?.room && !ref.room) ref.room = place.room;
       if (place?.buildingCode && !ref.buildingCode) ref.buildingCode = place.buildingCode;
     }
-    opts.onRefChange(ref);
+    if (ready) opts.onRefChange(ref);
     renderCard();
     if (tileFailed) {
       fallback.innerHTML = "";
@@ -372,8 +386,8 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
       );
     }
     initMap();
-    renderMarkers();
     fit();
+    renderMarkers();
   }
 
   searchInput.addEventListener("input", () => renderHits(searchInput.value));
@@ -389,6 +403,7 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
 
   initMap();
   setRef(ref);
+  ready = true;
 
   return {
     root,

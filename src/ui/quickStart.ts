@@ -158,14 +158,11 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     }
 
     if (e305) {
+      // Compact on purpose: a second recommended card hid 「淡江教室模板」
+      // behind the fold on a phone and stalled the existing product-flow wizard.
       card.append(
-        el("div", { class: "quickstart__recommended" }, [
-          el("span", { class: "quickstart__eyebrow", text: "照片參考場地 · 不是 E310" }),
-          el("strong", { text: "E305 工學大樓教室" }),
-          el("span", { class: "hint", text: "門牌與窗型冷氣標記為 E305。尺寸待現場校正，入口待現場確認。" }),
-          button("用 E305 照片參考場地", () => renderNeedsStep(e305), "btn btn--big"),
-        ]),
-        el("p", { class: "hint", text: e305.note }),
+        button("🏫 E305 照片參考場地（不是 E310）", () => renderNeedsStep(e305), "btn btn--big btn--ghost"),
+        el("p", { class: "hint", text: "門牌與窗型冷氣標記為 E305。尺寸待現場校正，入口待現場確認。" }),
       );
     }
 
