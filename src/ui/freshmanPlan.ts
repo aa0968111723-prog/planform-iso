@@ -76,8 +76,8 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
         "marker-end": "url(#fplan-head)",
       });
       svg.appendChild(line);
-      const mx = (arrow.from.x + arrow.to.x) / 2;
-      const my = (arrow.from.y + arrow.to.y) / 2;
+      const mx = arrow.from.x * 0.62 + arrow.to.x * 0.38;
+      const my = arrow.from.y * 0.62 + arrow.to.y * 0.38;
       const badge = svgEl("circle", {
         class: "fplan__num-bg",
         cx: String(mx),
@@ -109,7 +109,7 @@ export function buildFreshmanPlan(app: App, opts: { onLayoutChange: () => void }
     plot.append(svg);
 
     for (const box of view.boxes) {
-      if (!["zone", "mat", "staff", "door"].includes(box.kind) || !box.label) continue;
+      if (!["zone", "mat", "door"].includes(box.kind) || !box.label) continue;
       if (box.kind !== "door" && box.w < 4 && box.h < 4) continue;
       const node = el("span", {
         class: `fplan__inlabel fplan__inlabel--${box.kind}`,

@@ -858,7 +858,7 @@ html, body {
   font-size: 11px; color: var(--text-dim);
 }
 .campusmap__sheet {
-  flex: 0 0 auto; max-height: 38%; overflow-y: auto;
+  flex: 0 0 auto; max-height: 42%; overflow-y: auto;
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   background: var(--panel-solid);
@@ -872,12 +872,12 @@ html, body {
   display: flex; gap: 8px; overflow-x: auto; padding: 8px 0;
 }
 .photocard {
-  flex: 0 0 160px; display: flex; flex-direction: column; gap: 4px;
-  padding: 8px; border: 1px solid var(--border); border-radius: 12px;
-  background: var(--surface-1); font-size: 12px;
+  flex: 0 0 140px; display: flex; flex-direction: column; gap: 2px;
+  padding: 6px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-1); font-size: 11px;
 }
 .photocard__thumb {
-  height: 64px; border-radius: 8px; background: #dbe7f1;
+  height: 40px; border-radius: 8px; background: #dbe7f1;
   display: grid; place-items: center; color: var(--text-dim);
 }
 .photocard__tag {

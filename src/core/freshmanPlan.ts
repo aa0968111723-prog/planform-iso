@@ -271,8 +271,8 @@ export function layoutFreshmanPlan(
     pushLabel("next", p.x, Math.max(8, p.y - 12), `下一步：${next.title}`, "next", 0, 100);
   }
   for (const arrow of arrows) {
-    const mx = (arrow.from.x + arrow.to.x) / 2;
-    const my = (arrow.from.y + arrow.to.y) / 2;
+    const mx = arrow.from.x * 0.62 + arrow.to.x * 0.38;
+    const my = arrow.from.y * 0.62 + arrow.to.y * 0.38;
     rawLabels.push({
       id: `num:${arrow.index}`,
       x: mx,

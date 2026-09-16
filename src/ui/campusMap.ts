@@ -254,6 +254,15 @@ export function buildCampusMap(app: App, opts: {
       const floor = place.floor != null ? `${place.floor}F` : null;
       sheet.append(el("p", { class: "campusmap__room", text: [place.name, floor].filter(Boolean).join(" · ") }));
       sheet.append(el("p", { class: "campusmap__entrance", text: entranceStatusText(place) }));
+    }
+
+    if (live) {
+      const enter = button("進入室內場佈", () => opts.onEnterIndoor(), "btn btn--primary btn--big");
+      enter.dataset.action = "enter-indoor";
+      sheet.append(enter);
+    }
+
+    if (place) {
       const photos = [
         ...venuePhotosForPlace(place.id),
         ...(place.id === "E305" ? unboundVenuePhotos() : []),
@@ -271,12 +280,6 @@ export function buildCampusMap(app: App, opts: {
         }
         sheet.append(strip);
       }
-    }
-
-    if (live) {
-      const enter = button("進入室內場佈", () => opts.onEnterIndoor(), "btn btn--primary btn--big");
-      enter.dataset.action = "enter-indoor";
-      sheet.append(enter);
     }
   }
 
