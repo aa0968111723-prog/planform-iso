@@ -218,7 +218,7 @@ export function findTkuPlaceInText(query: string): { place: TkuPlace; evidence: 
 }
 
 export function featuredTkuPlaces(): TkuPlace[] {
-  const order = ["E308", "E310", "SG320", "SG109", "scroll-plaza"];
+  const order = ["E308", "E310", "E305", "SG320", "SG109", "scroll-plaza"];
   return order.map(placeById).filter((p): p is TkuPlace => !!p);
 }
 

@@ -150,17 +150,63 @@ export async function gotoWorkflow(
 }
 
 /**
- * Click the centre of the visible canvas (safeRect), not a corner that chrome
- * or the iso void can swallow. Move first so the placement ghost follows.
+ * Tap the visible plan at a fraction of the focus rect.
+ *
+ * Playwright `mouse.click` and even `locator.click({ force })` can land on a
+ * parked sheet, the placebar, a native select, or a stuck hover
+ * pointer. App.bindPointer listens for pointerdown on `#scene`, so dispatch
+ * that event directly.
  */
+export async function clickCanvasClient(
+  page: Page,
+  nx = 0.5,
+  ny = 0.5,
+): Promise<{ x: number; y: number }> {
+  const compact = (await page.locator("#app").getAttribute("data-ws-mode")) !== "desktop";
+  if (compact) {
+    await expect.poll(() => page.locator("#app").getAttribute("data-sheet"), { timeout: 3_000 })
+      .toBe("none")
+      .catch(() => undefined);
+    await page.evaluate(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    });
+  }
+  const state = await probe(page);
+  const rect = state.focusRect.width > 0 ? state.focusRect : state.safeRect;
+  const clientX = rect.x + rect.width * nx;
+  const clientY = rect.y + rect.height * ny;
+  const ok = await page.evaluate(({ x, y }) => {
+    const canvas = document.getElementById("scene");
+    if (!(canvas instanceof HTMLCanvasElement)) return false;
+    const fire = (type: "pointerdown" | "pointerup") => {
+      canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        screenX: x,
+        screenY: y,
+        button: 0,
+        buttons: type === "pointerdown" ? 1 : 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      }));
+    };
+    fire("pointerdown");
+    fire("pointerup");
+    return true;
+  }, { x: clientX, y: clientY });
+  if (!ok) throw new Error("#scene is missing");
+  return { x: clientX, y: clientY };
+}
+
+/** Centre of the visible plan (focusRect, else safeRect). */
 export async function clickSafeCanvas(page: Page): Promise<{ x: number; y: number }> {
-  const safe = (await probe(page)).safeRect;
-  const x = Math.round(safe.x + safe.width / 2);
-  const y = Math.round(safe.y + safe.height / 2);
-  await page.mouse.move(x, y);
-  await page.waitForTimeout(80);
-  await page.mouse.click(x, y);
-  return { x, y };
+  return clickCanvasClient(page, 0.5, 0.5);
 }
 
 /** Visible on screen (not translated off the fold, not display:none). */
@@ -229,4 +275,29 @@ export async function enterPartnerMode(page: Page): Promise<void> {
   }).planform.app.enterPartnerMode());
   await expect(page.locator("#app")).toHaveClass(/partner/);
   await settle(page);
+}
+
+export async function enterFreshmanMode(page: Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as {
+    planform: { app: { enterPartnerMode(role?: string, audience?: string): void } };
+  }).planform.app.enterPartnerMode("all", "freshman"));
+  await expect(page.locator("#app")).toHaveClass(/freshman/);
+  await settle(page);
+}
+
+export async function applyVenue(page: Page, id: string): Promise<void> {
+  await page.evaluate((venueId) => (window as unknown as {
+    planform: { app: { applyVenuePresetById(id: string): void } };
+  }).planform.app.applyVenuePresetById(venueId), id);
+  await page.waitForTimeout(200);
+}
+
+export async function pageOverflowsX(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const root = document.documentElement;
+    const app = document.getElementById("app");
+    const rootOverflow = root.scrollWidth > root.clientWidth + 1;
+    const appOverflow = !!app && app.scrollWidth > app.clientWidth + 1;
+    return rootOverflow || appOverflow;
+  });
 }

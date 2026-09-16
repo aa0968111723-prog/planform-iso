@@ -101,6 +101,8 @@ html, body {
   position: fixed;
   inset: 0;
   height: 100dvh;
+  overflow: hidden;
+  overflow-x: hidden;
   /* Panels opt into "docked" so the viewport only subtracts real rail width. */
   --ws-docked: 0;
 }
@@ -433,6 +435,14 @@ html, body {
 #app[data-sheet="inspector"] .right { transform: translateY(0); }
 #app[data-ws-mode="tablet"][data-sheet="workflow"] .left { transform: translate(-50%, 0); }
 #app[data-ws-mode="tablet"][data-sheet="inspector"] .right { transform: translate(-50%, 0); }
+/* Closed sheets must not intercept canvas taps even if a transform is mid-flight. */
+#app[data-ws-mode="phone"][data-sheet="none"] .left,
+#app[data-ws-mode="phone"][data-sheet="none"] .right,
+#app[data-ws-mode="tablet"][data-sheet="none"] .left,
+#app[data-ws-mode="tablet"][data-sheet="none"] .right {
+  visibility: hidden;
+  pointer-events: none;
+}
 
 /* Detents only mean anything for a sheet; a docked desktop rail is full height. */
 #app[data-ws-mode="phone"] .sheet--collapsed,
@@ -534,13 +544,50 @@ html, body {
 #app.partner .agent-sheet { display: none !important; }
 
 #app.partner .partnertop {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+  position: relative; top: auto; left: auto; right: auto;
   display: flex; flex-direction: column; gap: 6px;
   padding: 8px 12px 8px;
   padding-top: calc(8px + env(safe-area-inset-top));
   background: linear-gradient(to bottom, var(--bar-a), var(--bar-b));
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(6px);
+}
+.freshman-chrome {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+  display: none; flex-direction: column; max-width: 100%;
+  pointer-events: none;
+}
+#app.partner .freshman-chrome { display: flex; pointer-events: auto; }
+#app:not(.partner) .freshman-chrome { display: none !important; }
+.campusmap-host { display: none; min-height: 0; max-width: 100%; }
+#app.freshman[data-freshman-pane="map"] .campusmap-host,
+#app.freshman[data-freshman-pane="split"] .campusmap-host { display: block; }
+#app[data-ws-mode="phone"].freshman[data-freshman-pane="map"] .campusmap-host {
+  height: min(58dvh, calc(100dvh - var(--ws-nav-h, 96px) - 148px));
+}
+#app[data-ws-mode="tablet"].freshman[data-freshman-pane="split"] .campusmap-host,
+#app[data-ws-mode="desktop"].freshman[data-freshman-pane="split"] .campusmap-host {
+  height: min(38dvh, 340px);
+}
+#app.freshman .partnerbar__title {
+  white-space: normal; line-height: 1.35; font-size: 14px;
+}
+.freshmanqs, .freshmanlayers {
+  display: flex; gap: 6px; overflow-x: auto; padding: 0 8px 2px 0;
+  scrollbar-width: none; max-width: 100%;
+}
+.freshmanqs::-webkit-scrollbar, .freshmanlayers::-webkit-scrollbar { display: none; }
+.freshmanchip {
+  appearance: none; cursor: pointer; flex: 0 0 auto;
+  display: flex; align-items: center; gap: 6px;
+  min-height: var(--tap); padding: 6px 12px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px;
+}
+.freshmanchip__icon { font-size: 17px; }
+.freshmanchip[aria-pressed="true"] {
+  border-color: var(--accent); background: rgba(56, 189, 248, 0.22);
+  color: var(--accent-text); font-weight: 700;
 }
 .partnerbar { display: flex; align-items: center; gap: 10px; min-height: 36px; }
 .partnerbar__title {
@@ -599,6 +646,9 @@ html, body {
 .partnerbrief__icon { font-size: 15px; }
 .partnerbrief__more { margin-left: auto; font-size: 12px; color: var(--accent); }
 .partneractions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.freshman-panes { display: none; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.freshmanaction { min-height: var(--tap); font-size: 13px; padding: 8px 6px; line-height: 1.3; }
+#app[data-ws-mode="phone"].freshman .freshmanaction { font-size: 12px; padding: 8px 2px; }
 .partneraction { min-height: var(--tap); font-size: 13px; padding: 8px 6px; line-height: 1.3; }
 .partneraction--accent { border-color: var(--accent); color: var(--accent-text); }
 
@@ -1055,3 +1105,167 @@ html, body {
 .agent-scheme--pick .agent-scheme__score { color: var(--accent); font-weight: 600; }
 .agent-scheme__stats { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
 .agent-scheme__warn { font-size: 12px; color: var(--warn-text); line-height: 1.5; }
+
+/* --- Tamkang campus map (OSM + Leaflet, no API key) -------------------- */
+.campusmap-overlay {
+  position: fixed; inset: 0; z-index: 85;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  max-width: 100%;
+  overflow: hidden;
+}
+.campusmap {
+  display: flex; flex-direction: column; gap: 8px;
+  flex: 1 1 auto; min-height: 0; min-width: 0;
+  max-width: 100%; overflow: hidden;
+  padding: 8px 10px 10px;
+}
+.campusmap--overlay { height: 100%; }
+.campusmap--embedded {
+  height: 100%;
+  padding: 6px 8px 8px;
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--border);
+}
+.campusmap__head {
+  display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+}
+.campusmap__title { font-size: 15px; font-weight: 800; min-width: 0; }
+.campusmap__campuses {
+  display: flex; gap: 6px; flex: 0 0 auto; overflow-x: auto;
+  scrollbar-width: none; max-width: 100%;
+}
+.campusmap__campuses::-webkit-scrollbar { display: none; }
+.campusmap__searchwrap { position: relative; flex: 0 0 auto; }
+.campusmap__search {
+  width: 100%; min-height: var(--tap); padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel-solid); color: var(--text); font: inherit;
+}
+.campusmap__hits {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 4;
+  display: flex; flex-direction: column;
+  max-height: 40dvh; overflow-y: auto; overflow-x: hidden;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--panel-solid); box-shadow: 0 12px 32px var(--shadow);
+}
+.campusmap__hit {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; text-align: left; padding: 10px 12px;
+  border: 0; border-bottom: 1px solid var(--border);
+  background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.campusmap__hit-sub { font-size: 11px; color: var(--text-dim); }
+.campusmap__stage {
+  position: relative; flex: 1 1 auto; min-height: 160px; min-width: 0;
+  border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  background: #d7e3ee;
+}
+.campusmap__leaflet {
+  position: absolute; inset: 0;
+  background: #d7e3ee;
+}
+.campusmap__leaflet--failed { opacity: 0; pointer-events: none; }
+.campusmap__fallback {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px; overflow: auto;
+  background: var(--panel-solid);
+}
+.campusmap__fallback-title { margin: 0; font-size: 16px; font-weight: 800; }
+.campusmap__dir { display: flex; flex-direction: column; gap: 6px; }
+.campusmap__dir-title { font-size: 13px; font-weight: 700; }
+.campusmap__dir-row {
+  appearance: none; cursor: pointer; text-align: left; font: inherit;
+  padding: 10px 12px; min-height: var(--tap);
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-2); color: var(--text);
+}
+.campusmap__dir-row--current { border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
+.campusmap__north {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  width: 36px; height: 36px; border-radius: 999px;
+  display: grid; place-items: center;
+  background: var(--panel-solid); border: 1px solid var(--border);
+  font-size: 12px; font-weight: 800;
+}
+.campusmap__attrib {
+  position: absolute; right: 8px; bottom: 8px; z-index: 2;
+  font-size: 10px; background: rgba(255,255,255,.88); padding: 2px 6px; border-radius: 6px;
+}
+.campusmap__attrib a { color: #334155; }
+.campusmap__card {
+  flex: 0 1 auto; min-width: 0; max-width: 100%;
+  max-height: min(42dvh, 360px); overflow-x: hidden; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 14px;
+  background: var(--panel-solid);
+}
+.campusmap__headline { font-size: 15px; font-weight: 800; line-height: 1.4; }
+.campusmap__facts {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
+}
+.campusmap__fact {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 8px; border-radius: 10px; background: var(--surface-1);
+}
+.campusmap__fact-k { font-size: 10px; color: var(--text-dim); }
+.campusmap__fact-v { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.campusmap__pin-kind, .campusmap__entrance { margin: 0; font-size: 12px; color: var(--text-dim); }
+.campusmap__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.campusmap__actions .btn, .campusmap__link { width: auto; flex: 1 1 140px; min-height: var(--tap); text-align: center; text-decoration: none; }
+.campusmap__rooms, .campusmap__photos {
+  display: flex; gap: 8px; overflow-x: auto; max-width: 100%;
+  padding-bottom: 4px;
+}
+.campusmap__photo {
+  flex: 0 0 140px; min-width: 140px;
+  padding: 8px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-1);
+}
+.campusmap__photo-thumb {
+  height: 56px; display: grid; place-items: center;
+  border-radius: 8px; background: #e2e8f0; font-size: 22px; margin-bottom: 6px;
+}
+.campusmap__photo-title { font-size: 12px; font-weight: 700; }
+.campusmap__photo-meta { font-size: 11px; color: var(--text-dim); }
+
+.campin { background: none !important; border: 0 !important; }
+.campin__dot {
+  display: block; width: 12px; height: 12px; border-radius: 999px;
+  background: #94a3b8; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(15,23,42,.35);
+}
+.campin--muted { opacity: 0.55; }
+.campin--current { opacity: 1; z-index: 3; }
+.campin--current .campin__dot {
+  width: 16px; height: 16px; background: #2563eb;
+  box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.28);
+}
+.campin__label {
+  position: absolute; left: 50%; top: -22px; transform: translateX(-50%);
+  white-space: nowrap; font-size: 11px; font-weight: 800;
+  padding: 1px 6px; border-radius: 999px;
+  background: rgba(255,255,255,.94); color: #0f172a;
+  border: 1px solid rgba(15,23,42,.12);
+  pointer-events: none;
+}
+.campin--current .campin__label {
+  background: #1d4ed8; color: #fff; border-color: #1d4ed8;
+}
+
+#app[data-ws-mode="phone"].freshman[data-freshman-pane="map"] .freshman-chrome {
+  bottom: var(--ws-nav-h);
+}
+#app[data-ws-mode="phone"].freshman[data-freshman-pane="map"] .campusmap-host {
+  flex: 1 1 auto; height: auto; min-height: 0;
+}
+#app[data-ws-mode="phone"] .campusmap__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#app[data-ws-mode="phone"] .campusmap__card { max-height: 38dvh; }
+#app.freshman .partnerroles { display: none !important; }
+#app.freshman .freshman-chrome { overflow-x: hidden; }
+.campusmap--embedded .campusmap__photos { display: none; }
+
+.leaflet-container { font: inherit; background: #d7e3ee; }
+.leaflet-control-zoom { border: 0 !important; }
+.leaflet-control-zoom a { width: 36px !important; height: 36px !important; line-height: 36px !important; }

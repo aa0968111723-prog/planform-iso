@@ -8,7 +8,8 @@ const BOOTH = "venue:tku-booth";
 
 export const TKU_PLACES: TkuPlace[] = [
   { id: "E308", campusId: "tamsui", buildingCode: "E", floor: 3, room: "08", name: "E308 工學大樓教室", kind: "classroom", venuePresetId: CLASSROOM, aliases: ["E308"], clubUse: "primary", mentionCount: 101, note: "禪學社文件提及最多的教室。套用淡江教室起點，長寬待現場校正。" },
-  { id: "E310", campusId: "tamsui", buildingCode: "E", floor: 3, room: "10", name: "E310 工學大樓教室", kind: "classroom", venuePresetId: E310, aliases: ["E310"], clubUse: "frequent", mentionCount: 54, note: "Golden Venue。長寬仍未實測。" },
+  { id: "E310", campusId: "tamsui", buildingCode: "E", floor: 3, room: "10", name: "E310 工學大樓教室", kind: "classroom", venuePresetId: E310, aliases: ["E310"], clubUse: "frequent", mentionCount: 54, note: "Golden Venue。長寬仍未實測。不是 E305。" },
+  { id: "E305", campusId: "tamsui", buildingCode: "E", floor: 3, room: "05", name: "E305 工學大樓教室", kind: "classroom", venuePresetId: "venue:tku-e305", aliases: ["E305"], clubUse: "frequent", mentionCount: 0, note: "照片參考場地。現場門牌與窗型冷氣標記為 E305。長寬待現場校正。禁止把照片套到 E310。" },
   { id: "E301", campusId: "tamsui", buildingCode: "E", floor: 3, room: "01", name: "E301 工學大樓教室", kind: "classroom", venuePresetId: CLASSROOM, clubUse: "fallback", mentionCount: 4, note: "偶用。" },
   { id: "E311", campusId: "tamsui", buildingCode: "E", floor: 3, room: "11", name: "E311 工學大樓教室", kind: "classroom", venuePresetId: CLASSROOM, clubUse: "fallback", mentionCount: 4, note: "偶用。" },
   { id: "E680", campusId: "tamsui", buildingCode: "E", floor: 6, room: "80", name: "E680 會議室", kind: "hall", venuePresetId: RECT, aliases: ["E680"], clubUse: "fallback", publishedCapacity: 44, note: "114 外借表 44 人。" },

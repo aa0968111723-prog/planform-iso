@@ -17,6 +17,8 @@ import { AssetCatalog, BUILTIN_PREFIX, type AssetCatalogEntry } from "./catalog"
 import { BOOTH_STATION_TYPES, BOOTH_ZONE_ROLES, defaultBoothParams } from "./boothCatalog";
 import { templateFromBooth } from "./interactionCompile";
 import { syncPropEntries } from "./propCatalog";
+import { campusRefForVenuePreset } from "./campusNav";
+import type { TkuCampusRef } from "./tkuCampus";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
@@ -1080,7 +1082,25 @@ export function migrateProject(input: Partial<Project>): Project {
   // no anchors, no plan symbol — and nothing would ever have corrected it.
   if (p.props?.length) p.catalogExtras = syncPropEntries(p.catalogExtras, p.props);
 
+  p.campusRef = migrateCampusRef(input.campusRef) ?? campusRefForVenuePreset(p.venuePresetId);
+  if (!p.campusRef) delete p.campusRef;
+
   return p;
+}
+
+function migrateCampusRef(raw: unknown): TkuCampusRef | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const campusId = r.campusId;
+  if (campusId !== "tamsui" && campusId !== "taipei" && campusId !== "lanyang" && campusId !== "cyber") {
+    return undefined;
+  }
+  const ref: TkuCampusRef = { campusId };
+  if (typeof r.buildingCode === "string" && r.buildingCode.trim()) ref.buildingCode = r.buildingCode.trim().toUpperCase();
+  if (typeof r.floor === "number" && Number.isFinite(r.floor)) ref.floor = r.floor;
+  if (typeof r.room === "string" && r.room.trim()) ref.room = r.room.trim();
+  if (typeof r.placeId === "string" && r.placeId.trim()) ref.placeId = r.placeId.trim();
+  return ref;
 }
 
 export function catalogFromProject(project: Project): AssetCatalog {

@@ -124,6 +124,7 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
     const rect = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:rect-classroom");
     const blank = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:blank");
     const e310 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e310");
+    const e305 = BUILTIN_VENUE_PRESETS.find((p) => p.id === "venue:tku-e305");
 
     if (e310) {
       // The 30-person club class is the setup the club actually photographs
@@ -153,6 +154,15 @@ export function showNewProjectWizard(opts: NewProjectWizardOptions): HTMLElement
             participants: 60,
           });
         }, "btn btn--big btn--ghost"),
+      );
+    }
+
+    if (e305) {
+      // Compact on purpose: a second recommended card hid 「淡江教室模板」
+      // behind the fold on a phone and stalled the existing product-flow wizard.
+      card.append(
+        button("🏫 E305 照片參考場地（不是 E310）", () => renderNeedsStep(e305), "btn btn--big btn--ghost"),
+        el("p", { class: "hint", text: "門牌與窗型冷氣標記為 E305。尺寸待現場校正，入口待現場確認。" }),
       );
     }
 

@@ -32,6 +32,7 @@ describe("venue presets", () => {
       "一般矩形教室",
       "空白自訂場地",
       "E310＋走廊（待現場校正）",
+      "E305 照片參考場地（待現場校正）",
       "戶外攤位（3×3 帳篷）",
     ]);
     for (const p of BUILTIN_VENUE_PRESETS) {
@@ -52,6 +53,21 @@ describe("venue presets", () => {
     expect(screen?.wallAnchor?.edge).toBe("n");
     const issues = validateProject(p);
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("E305 is a separate photo venue and does not copy E310", () => {
+    const e305 = venuePresetById("venue:tku-e305")!;
+    const e310 = venuePresetById("venue:tku-e310")!;
+    const p305 = createProjectFromVenuePreset(e305, "E305");
+    const p310 = createProjectFromVenuePreset(e310, "E310");
+    expect(e305.id).not.toBe(e310.id);
+    expect(p305.classroom).not.toEqual(p310.classroom);
+    expect(p305.objects.some((o) => o.assetId === "builtin:stage-platform")).toBe(false);
+    expect(p310.objects.some((o) => o.assetId === "builtin:stage-platform")).toBe(true);
+    expect(p305.campusRef?.placeId).toBe("E305");
+    expect(p310.campusRef?.placeId).toBe("E310");
+    expect(e305.note).toMatch(/不是 E310/);
+    expect(e305.calibrationNote).toMatch(/待現場校正/);
   });
 
   it("E310 has rear corridor door, front locked platform and lectern", () => {

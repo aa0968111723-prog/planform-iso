@@ -18,7 +18,12 @@
  * assets are `custom:*` catalogExtras whose `kind` stays inside the original
  * eight. An older build reading a booth file ignores the extra fields and
  * still draws the tent, tables, zones and routes.
+ *
+ * Tamkang campus pins (`campusRef`) are also version-less: an older build
+ * ignores the field; a newer build infers it from `venuePresetId` when absent.
  */
+
+import type { TkuCampusRef } from "./tkuCampus";
 
 export const PROJECT_VERSION = 8;
 
@@ -832,6 +837,12 @@ export interface Project {
   eventDate?: string;
   /** Built-in venue identity, retained so honest calibration copy survives reload. */
   venuePresetId?: string;
+  /**
+   * Which Tamkang campus / building / room this plan is for.
+   * Building GPS lives in the campus directory (樓館位置). This field never
+   * stores invented indoor room coordinates.
+   */
+  campusRef?: TkuCampusRef;
   /** Short activity description shown in the team/partner view. */
   description: string;
   classroom: AreaConfig;
@@ -1023,7 +1034,7 @@ function validationEqual(a: ValidationSettings, b: ValidationSettings): boolean 
  * well, because projects saved before templates carried notes have none.
  */
 export function venueNeedsCalibration(project: Project): boolean {
-  if (project.venuePresetId === "venue:tku-e310") return true;
+  if (project.venuePresetId === "venue:tku-e310" || project.venuePresetId === "venue:tku-e305") return true;
   return (project.calibration.note ?? "").trim() !== "";
 }
 
