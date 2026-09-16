@@ -71,7 +71,6 @@ export class UI {
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
   private navSig: string | null = null;
-  private lastMode: Mode | null = null;
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false, labels: true };
@@ -1394,9 +1393,12 @@ export class UI {
     this.nav.querySelectorAll<HTMLButtonElement>(".navbtn").forEach((b) =>
       b.setAttribute("aria-pressed", String(b.dataset.nav === sess.workflow && this.sheet === "workflow")));
 
-    // Picking an asset drops straight into placement — get the sheet out of the way.
-    if (this.compact && sess.mode === "place" && this.lastMode !== "place") this.setSheet("none");
-    this.lastMode = sess.mode;
+    // Picking an asset drops straight into placement — keep the sheet away for
+    // every subsequent UI tick, not only the first, so a late history/popstate
+    // cannot cover the canvas while the ghost is still armed.
+    if (this.compact && (sess.mode === "place" || sess.mode === "route") && this.sheet !== "none") {
+      this.setSheet("none");
+    }
 
     if (this.shouldRebuildLeft(sess.workflow)) {
       this.lastWorkflow = sess.workflow;
@@ -1678,8 +1680,6 @@ export class UI {
     });
   }
 }
-
-type Mode = App["session"]["mode"];
 
 function setPressed(root: HTMLElement, group: string, pred: (i: number) => boolean): void {
   const c = root.querySelector(`[data-group="${group}"]`);

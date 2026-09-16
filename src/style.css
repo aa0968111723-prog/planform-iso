@@ -435,6 +435,14 @@ html, body {
 #app[data-sheet="inspector"] .right { transform: translateY(0); }
 #app[data-ws-mode="tablet"][data-sheet="workflow"] .left { transform: translate(-50%, 0); }
 #app[data-ws-mode="tablet"][data-sheet="inspector"] .right { transform: translate(-50%, 0); }
+/* Closed sheets must not intercept canvas taps even if a transform is mid-flight. */
+#app[data-ws-mode="phone"][data-sheet="none"] .left,
+#app[data-ws-mode="phone"][data-sheet="none"] .right,
+#app[data-ws-mode="tablet"][data-sheet="none"] .left,
+#app[data-ws-mode="tablet"][data-sheet="none"] .right {
+  visibility: hidden;
+  pointer-events: none;
+}
 
 /* Detents only mean anything for a sheet; a docked desktop rail is full height. */
 #app[data-ws-mode="phone"] .sheet--collapsed,
@@ -547,8 +555,10 @@ html, body {
 .freshman-chrome {
   position: absolute; top: 0; left: 0; right: 0; z-index: 30;
   display: none; flex-direction: column; max-width: 100%;
+  pointer-events: none;
 }
-#app.partner .freshman-chrome { display: flex; }
+#app.partner .freshman-chrome { display: flex; pointer-events: auto; }
+#app:not(.partner) .freshman-chrome { display: none !important; }
 .campusmap-host { display: none; min-height: 0; max-width: 100%; }
 #app.freshman[data-freshman-pane="map"] .campusmap-host,
 #app.freshman[data-freshman-pane="split"] .campusmap-host { display: block; }
