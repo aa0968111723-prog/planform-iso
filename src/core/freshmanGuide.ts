@@ -371,6 +371,9 @@ function iconForZone(type: ZoneType): string {
     case "life": return "🧺";
     case "group": return "👥";
     case "payment": return "💰";
+    case "mats": return "🧩";
+    case "staff": return "🦺";
+    case "wait": return "🌱";
     default: return "📦";
   }
 }

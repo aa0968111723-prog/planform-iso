@@ -456,7 +456,8 @@ function relationLabel(r: SpatialRelation | undefined): string {
 function zoneLabel(z: ZoneType): string {
   const map: Record<ZoneType, string> = {
     registration: "報到區", payment: "收費區", life: "生活區", group: "小組區",
-    meditation: "禪坐區", shoe: "鞋子區", backpack: "背包區", custom: "自訂區",
+    meditation: "禪坐區", shoe: "鞋子區", backpack: "背包區", mats: "地墊區",
+    staff: "工作人員", wait: "新生等候區", custom: "自訂區",
   };
   return map[z] ?? "指定區域";
 }

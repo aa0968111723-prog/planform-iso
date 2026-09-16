@@ -29,6 +29,8 @@ import { buildCampusMap, defaultCampusRef, type CampusMapHandles } from "./campu
 import { BUILTIN_VENUE_PRESETS, deleteUserVenuePreset, listUserVenuePresets } from "../core/venues";
 import { currentPlaceOf, campusRefsEqual } from "../core/campusNav";
 import type { TkuCampusRef } from "../core/tkuCampus";
+import { LAYOUT_STARTERS } from "../core/layoutStarters";
+import { ensureCorridorLayout } from "../core/corridorGeometry";
 import { photosForVenue, photoBindingLabel } from "../core/venuePhotos";
 import { Store } from "../state/store";
 import { WorkspaceViewport, type WorkspaceViewportState } from "./workspaceViewport";
@@ -44,6 +46,8 @@ const VIEWS: { id: ViewName; label: string }[] = [
 const SNAPS: { id: SnapMode; label: string }[] = [
   { id: "off", label: "自由" }, { id: "intersection", label: "交點" }, { id: "edge", label: "邊線" },
   { id: "center", label: "中心" }, { id: "half", label: "半格" },
+  { id: "wall", label: "牆面" }, { id: "object", label: "物件" }, { id: "entrance", label: "入口" },
+  { id: "centerline", label: "中線" },
 ];
 const SEV_LABEL: Record<Severity, string> = { error: "錯誤", warning: "警告", info: "建議" };
 const SEV_ICON: Record<Severity, string> = { error: "⛔", warning: "⚠", info: "ℹ" };
@@ -68,11 +72,13 @@ export class UI {
   private statusBadge = button("", () => this.openCalibrationSheet(), "status-badge");
   private partner: PartnerModeHandles;
   private ctxbar = el("div", { class: "ctxbar", style: "display:none" });
+  private ctxmenu = el("div", { class: "ctxmenu", style: "display:none" });
   private advanced = false;
   private lastWorkflow: Workflow | null = null;
   private lastPropSig = "";
   private navSig: string | null = null;
   private lastMode: App["session"]["mode"] | null = null;
+  private lastInspectorSig = "";
   private snapSel: HTMLSelectElement | null = null;
   private toastTimer: number | null = null;
   private planOpts = { preset: "full" as PlanPreset, page: "a4" as PageSize, orientation: "landscape" as PageOrientation, dims: false, inventory: true, simplify: false, labels: true };
@@ -101,7 +107,7 @@ export class UI {
     });
     root.append(
       this.topbar, this.left, this.right, this.nav, this.placebar, this.measurebar,
-      this.box, this.toast, this.ctxbar, this.menu.root,
+      this.box, this.toast, this.ctxbar, this.ctxmenu, this.menu.root,
       this.partner.chrome, this.partner.dock, this.partner.sheet,
     );
     this.agentSheet = buildQuickAgentSheet(app, {
@@ -167,6 +173,13 @@ export class UI {
     this.app.onBox = (rect) => this.renderBox(rect);
     this.app.onToast = (msg, undo) => this.showToast(msg, undo);
     this.app.notifyToast = (msg, undo) => this.showToast(msg, undo);
+    this.app.onGhostHint = () => {
+      if (this.app.session.mode !== "place") return;
+      this.placebar.innerHTML = "";
+      this.placebar.append(buildPlacementToolbar(this.app));
+      this.placebar.style.display = "flex";
+      this.placebarKind = "place";
+    };
     this.app.onPickCandidates = (items) => this.openPickCandidates(items);
     this.app.openPropStudioHook = (defId) => {
       const def = this.app.propDefinitionForEdit(defId);
@@ -553,6 +566,14 @@ export class UI {
     this.applySheetState();
     this.syncSheetHistory();
     this.viewport.schedule();
+    if (kind === "inspector") {
+      const obj = this.app.getSelectedObject();
+      if (obj) this.app.scene.focusOn(obj.x, obj.z);
+      else {
+        const zone = this.app.getSelectedZone();
+        if (zone) this.app.scene.focusOn(zone.x, zone.z);
+      }
+    }
   }
 
   /** A focused <select> inside a parked sheet can keep a native picker over the canvas. */
@@ -673,6 +694,8 @@ export class UI {
       this.campusLocationSection(),
       this.venuePresetSection(),
       this.roomSizeSection(),
+      this.layoutStarterSection(),
+      this.corridorSection(),
       this.tileSection(),
       this.calibrationSection(),
       this.fixtureSection(onPick),
@@ -742,15 +765,94 @@ export class UI {
 
   private roomSizeSection(): HTMLElement {
     const s = this.app.store.getState();
-    const body: HTMLElement[] = [];
-    for (const id of ["classroom", "corridor"] as const) {
-      const a = s[id];
-      body.push(el("div", { class: "subhead", text: a.name }), el("div", { class: "grid2" }, [
-        num("長 (m)", a.length, 0.1, (v) => this.app.updateArea(id, { length: v }), 0.5),
-        num("寬 (m)", a.width, 0.1, (v) => this.app.updateArea(id, { width: v }), 0.5),
+    const a = s.classroom;
+    const body: HTMLElement[] = [
+      el("div", { class: "subhead", text: a.name }),
+      el("div", { class: "grid2" }, [
+        num("長 (m)", a.length, 0.1, (v) => this.app.updateArea("classroom", { length: v }), 0.5),
+        num("寬 (m)", a.width, 0.1, (v) => this.app.updateArea("classroom", { width: v }), 0.5),
+        num("高 (m)", a.height ?? 3, 0.1, (v) => this.app.updateArea("classroom", { height: v }), 2),
+      ]),
+      selectField("地面材質", [
+        { value: "tile", label: "地磚" }, { value: "wood", label: "木地板" },
+        { value: "concrete", label: "水泥" }, { value: "carpet", label: "地毯" },
+      ], a.floorMaterial ?? "tile", (v) => this.app.updateArea("classroom", { floorMaterial: v as "tile" | "wood" | "concrete" | "carpet" })),
+    ];
+    return section("教室尺寸", body);
+  }
+
+  private layoutStarterSection(): HTMLElement {
+    return section("教室起始場佈", [
+      el("p", { class: "hint", text: "可再改的起點，不是鎖死模板。不會把 E305 改成 E310。" }),
+      el("div", { class: "row wrap" }, LAYOUT_STARTERS.map((st) =>
+        button(st.label, () => this.app.applyLayoutStarter(st.id), "chip chip--sm"))),
+    ]);
+  }
+
+  private corridorSection(): HTMLElement {
+    const s = this.app.store.getState();
+    const layout = ensureCorridorLayout(s);
+    const nameInput = el("input", { type: "text", class: "field__input", placeholder: "我的走廊名稱" }) as HTMLInputElement;
+    const body: HTMLElement[] = [
+      el("p", { class: "hint", text: "走廊獨立編輯。改走廊不會移動教室裡的物件。" }),
+      el("div", { class: "row wrap" }, [
+        button("直線", () => this.app.applyCorridorKind("straight"), layout.kind === "straight" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button("L 型", () => this.app.applyCorridorKind("L"), layout.kind === "L" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button("T 型", () => this.app.applyCorridorKind("T"), layout.kind === "T" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+        button("多段", () => this.app.applyCorridorKind("multi"), layout.kind === "multi" ? "chip chip--sm chip--primary" : "chip chip--sm"),
+      ]),
+      el("div", { class: "grid2" }, [
+        num("走廊寬 (m)", s.corridor.width, 0.1, (v) => this.app.updateArea("corridor", { width: v }), 0.8),
+      ]),
+      el("div", { class: "row wrap" }, [
+        button("加一段", () => this.app.addCorridorSegment(), "chip chip--sm"),
+        button("連接教室門", () => this.app.connectClassroomToCorridor(), "chip chip--sm"),
+        ...(layout.segments.length >= 2
+          ? [button("連接最後兩段", () => this.app.connectCorridorSegments(
+            layout.segments[layout.segments.length - 2].id,
+            layout.segments[layout.segments.length - 1].id,
+          ), "chip chip--sm")]
+          : []),
+      ]),
+    ];
+    const fixtures = this.app.getCatalog().list({ tag: "corridor" });
+    if (fixtures.length) {
+      body.push(el("div", { class: "subhead", text: "走廊設施" }));
+      body.push(el("div", { class: "row wrap" }, fixtures.map((e) =>
+        button(`${e.icon} ${e.name}`, () => {
+          this.app.beginPlacementByAssetId(e.id);
+          if (this.compact) this.setSheet("none");
+        }, "chip chip--sm"))));
+    }
+    for (const seg of layout.segments) {
+      body.push(el("div", { class: "list__row" }, [
+        el("span", { text: `${seg.name} ${seg.length.toFixed(1)}×${seg.width.toFixed(1)}` }),
+        button(seg.passable === false ? "禁行" : "可通行", () => this.app.updateCorridorSegment(seg.id, {
+          passable: seg.passable === false,
+          kind: seg.passable === false ? "passage" : "restricted",
+        }), "chip chip--sm"),
+        button("複製", () => this.app.copyCorridorSegment(seg.id), "chip chip--sm"),
+        button("刪", () => this.app.deleteCorridorSegment(seg.id), "chip chip--sm"),
+      ]));
+      body.push(el("div", { class: "grid2" }, [
+        num("長", seg.length, 0.1, (v) => this.app.updateCorridorSegment(seg.id, { length: v }), 0.5),
+        num("寬", seg.width, 0.1, (v) => this.app.updateCorridorSegment(seg.id, { width: v }), 0.5),
+        num("X", seg.x, 0.1, (v) => this.app.updateCorridorSegment(seg.id, { x: v })),
+        num("Z", seg.z, 0.1, (v) => this.app.updateCorridorSegment(seg.id, { z: v })),
       ]));
     }
-    return section("教室尺寸", body);
+    const mine = this.app.listMyCorridorTemplates();
+    if (mine.length) {
+      body.push(el("div", { class: "subhead", text: "我的走廊" }));
+      for (const t of mine) {
+        body.push(button(t.name, () => this.app.applyCorridorTemplate(t.id), "chip chip--sm"));
+      }
+    }
+    body.push(el("div", { class: "row" }, [
+      nameInput,
+      button("存成我的走廊", () => { this.app.saveMyCorridorTemplate(nameInput.value); this.update(); }, "btn btn--ghost"),
+    ]));
+    return section("走廊", body);
   }
 
   private tileSection(): HTMLElement {
@@ -768,7 +870,7 @@ export class UI {
 
   private fixtureSection(onPick: () => void): HTMLElement {
     return section("固定設施", [
-      el("p", { class: "hint", text: "門 / 開關 / 投影幕會自動吸附牆面；門可設定開向與開門弧。" }),
+      el("p", { class: "hint", text: "門 / 開關 / 投影幕 / 黑板 / 窗 / 冷氣會吸附牆面。" }),
       buildLibrary(this.app, { categories: ["fixture"], onPick }),
     ]);
   }
@@ -1119,12 +1221,20 @@ export class UI {
 
     const presetRow = el("div", { class: "row wrap" }, ROUTE_PRESETS.map((p) =>
       button(`${p.icon} ${p.label.replace("動線", "")}`, () => { this.app.newRoutePreset(p.type as RouteType); if (this.compact) this.setSheet("none"); }, "chip chip--sm")));
+    const commonRow = el("div", { class: "row wrap" }, [
+      button("常用流程", () => { this.app.addCommonRoute("entry-flow"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+      button("工作人員動線", () => { this.app.addCommonRoute("staff"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+      button("講師動線", () => { this.app.addCommonRoute("lecturer"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+      button("自訂動線", () => { this.app.addCommonRoute("custom"); if (this.compact) this.setSheet("none"); }, "chip chip--sm"),
+    ]);
 
     refreshFlowPanel(this.simPanelRoot, this.app);
 
     return section("動線／互動", [
-      el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。彩排數字在「彩排」。" }),
+      el("p", { class: "hint", text: "選類型 → 在畫布點地面加入節點（起點綠、終點紅、含步驟編號）；可拖曳節點。彩排數字在「彩排」。本階段只畫動線，不做人流模擬。" }),
       presetRow,
+      el("p", { class: "hint", text: "常用流程：入場 → 報到 → 鞋子 → 背包 → 地墊。" }),
+      commonRow,
       el("div", { class: "row" }, [button("完成繪製", () => this.app.finishRoute(), "btn btn--ghost")]),
       list,
       el("div", { class: "subhead", text: "模擬活動流程" }),
@@ -1252,7 +1362,7 @@ export class UI {
         ...(this.app.hasFlow()
           ? [planChoice("互動流程圖", "flow", "互動流程", { orientation: "portrait" })]
           : []),
-        planChoice("夥伴觀看圖", "partner", "夥伴觀看圖", { simplify: true, dims: false }),
+        planChoice("夥伴觀看圖", "partner", "夥伴觀看圖", { simplify: true, dims: false, extraNotes: undefined }),
       ]),
       el("div", { class: "subhead", text: "各組任務圖（只顯示該組需要的）" }),
       el("div", { class: "row wrap" }, [
@@ -1430,12 +1540,35 @@ export class UI {
     // Inspector: docked rail on desktop, opt-in sheet everywhere else.
     const hasSel = sess.selection.size > 0;
     if (!hasSel && this.sheet === "inspector") this.setSheet("none");
-    this.right.innerHTML = "";
-    if (this.compact && this.sheet === "inspector") this.right.append(this.sheetHandle("屬性"));
-    this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
     const inPartner = !!sess.partner;
     const dockedInspector = !this.compact && hasSel && !inPartner && dockingPolicy(this.mode).autoOpenInspector;
+    const sheetInspector = this.compact && this.sheet === "inspector";
+    const inspectorOn = !inPartner && (dockedInspector || sheetInspector);
     this.root.classList.toggle("show-inspector", dockedInspector);
+    const st = this.app.store.getState();
+    const inspectorSig = inspectorOn
+      ? [
+          [...sess.selection].sort().join(","),
+          sess.mode,
+          this.sheet,
+          this.advanced,
+          st.objects.length,
+          st.groups.length,
+          JSON.stringify(st.workbenchLayers),
+          [...sess.selection].map((id) => {
+            const o = st.objects.find((x) => x.id === id);
+            return o ? `${id}:${o.label}:${o.locked}:${o.hidden}:${o.width}:${o.depth}:${o.height}:${o.rotationDeg}:${o.color}` : id;
+          }).join(";"),
+        ].join("|")
+      : "";
+    if (inspectorOn && inspectorSig !== this.lastInspectorSig) {
+      this.lastInspectorSig = inspectorSig;
+      this.right.innerHTML = "";
+      if (this.compact) this.right.append(this.sheetHandle("屬性"));
+      this.right.append(buildInspector(this.app, this.advanced, (v) => { this.advanced = v; this.update(); }));
+    } else if (!inspectorOn) {
+      this.lastInspectorSig = "";
+    }
 
     // Compact selection never auto-opens the inspector; it gets a context bar.
     // While placing or measuring, the mode's own bar owns that slot instead.
@@ -1481,7 +1614,33 @@ export class UI {
       this.placebarKind = null;
     }
     this.updateMeasureBar();
+    this.renderContextMenu();
     this.viewport.schedule();
+  }
+
+  private renderContextMenu(): void {
+    const menu = this.app.session.contextMenu;
+    this.ctxmenu.innerHTML = "";
+    if (!menu || this.app.session.partner) {
+      this.ctxmenu.style.display = "none";
+      return;
+    }
+    this.ctxmenu.style.display = "flex";
+    this.ctxmenu.style.left = `${Math.min(menu.clientX, window.innerWidth - 180)}px`;
+    this.ctxmenu.style.top = `${Math.min(menu.clientY, window.innerHeight - 280)}px`;
+    const act = (label: string, run: () => void) => button(label, () => {
+      run();
+      this.app.closeContextMenu();
+    }, "chip chip--sm");
+    this.ctxmenu.append(
+      act("旋轉", () => this.app.rotateSelection(15)),
+      act("複製", () => this.app.duplicateSelection()),
+      act("刪除", () => this.app.deleteSelection()),
+      act("鎖定", () => this.app.toggleLockSelection()),
+      act("隱藏", () => this.app.toggleHideSelection()),
+      act("屬性", () => this.setSheet("inspector")),
+      act("取消選取", () => { this.app.setSelection([]); }),
+    );
   }
 
   /**

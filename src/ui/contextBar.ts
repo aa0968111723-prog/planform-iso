@@ -1,34 +1,44 @@
 /**
  * Selection Context Bar — the compact answer to "I tapped a thing".
  *
- * On phone/tablet a selection must NOT throw the full inspector over the
- * canvas. It shows name + size inline plus the three actions people actually
- * repeat while laying out a room (rotate / duplicate / open properties);
- * everything else waits behind 屬性.
+ * Phone/tablet must NOT throw the full inspector over the canvas. The bar now
+ * shows name, type, W/D/H, facing, zone and lock/snap/circulation at a glance;
+ * the three repeat actions stay 旋轉 / 複製 / 屬性 so the compact contract holds.
  */
 
 import type { App } from "../app/App";
 import { assetDef } from "../core/assets";
 import { button, el } from "./dom";
+import { facingLabel, formatSize, objectWorkbenchSummary } from "../core/objectWorkbench";
 
 export interface ContextBarModel {
   name: string;
   size: string;
+  meta?: string;
+  flags?: string;
 }
 
 /** Human-readable name + footprint for whatever is selected, or null. */
 export function contextBarModel(app: App): ContextBarModel | null {
   const count = app.session.selection.size;
   if (count === 0) return null;
-  if (count > 1) return { name: `已選 ${count} 個`, size: "多選" };
+  if (count > 1) return { name: `已選 ${count} 個`, size: "多選", meta: "對齊 / 分佈 / 群組在屬性" };
 
   const obj = app.getSelectedObject();
   if (obj) {
     const tabletop = app.tabletopHost;
-    const objectName = assetDef(obj.kind).displayName;
+    const summary = objectWorkbenchSummary(obj, app.store.getState());
+    const objectName = summary.name;
     return {
       name: tabletop ? `場景 > ${tabletop.name ?? assetDef(tabletop.kind).displayName} > 桌面 · ${objectName}` : objectName,
-      size: `${Math.round(obj.width * 100)}×${Math.round(obj.depth * 100)} cm`,
+      size: formatSize(obj, "cm"),
+      meta: `${summary.type} · ${facingLabel(obj.rotationDeg)} · ${summary.zoneName ?? "未分區"}`,
+      flags: [
+        obj.locked ? "鎖" : null,
+        obj.hidden ? "隱" : null,
+        obj.snapEnabled === false ? "自由" : "吸附",
+        summary.blocksCirculation ? "擋路" : null,
+      ].filter(Boolean).join(" · "),
     };
   }
   const group = app.getSelectedGroup();
@@ -41,7 +51,7 @@ export function contextBarModel(app: App): ContextBarModel | null {
   }
   const zone = app.getSelectedZone();
   if (zone) {
-    return { name: zone.name, size: `${zone.width.toFixed(1)}×${zone.depth.toFixed(1)} m` };
+    return { name: zone.name, size: `${zone.width.toFixed(1)}×${zone.depth.toFixed(1)} m`, meta: zone.type };
   }
   const route = app.getSelectedRoute();
   if (route) return { name: route.name, size: `${route.points.length} 節點` };
@@ -68,9 +78,9 @@ export function renderContextBar(host: HTMLElement, app: App, opts: ContextBarOp
       el("span", { class: "ctxbar__info" }, [
         el("span", { class: "ctxbar__name", text: model.name }),
         el("span", { class: "ctxbar__size", text: model.size }),
+        ...(model.meta ? [el("span", { class: "ctxbar__meta", text: model.meta })] : []),
+        ...(model.flags ? [el("span", { class: "ctxbar__flags", text: model.flags })] : []),
       ]),
-      // Keep the established three repeat actions stable; tabletop is a
-      // contextual mode switch, not a fourth generic edit action.
       ...(tabletopAction.length ? [el("span", { class: "ctxbar__tabletop" }, tabletopAction)] : []),
       el("span", { class: "ctxbar__actions" }, [
         button("旋轉", () => app.rotateSelection(15), "chip chip--sm"),

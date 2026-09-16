@@ -142,7 +142,7 @@ describe("role briefing", () => {
     const engineering = /\d+\s*(cm|mm|公分|公尺|m\b)|[XZ]\s*[:：]|snap|吸附/i;
     for (const role of PARTNER_ROLES.map((r) => r.id as PartnerRole)) {
       const b = buildRoleBriefing(plan(), role);
-      const text = [b.title, b.youAre, b.peopleComeFrom, b.nextStop, b.emptyHint, ...b.steps.map((s) => s.text)]
+      const text = [b.title, b.youAre, b.peopleComeFrom, b.nextStop, b.emptyHint, ...(b.layoutCopy ?? []), ...b.steps.map((s) => s.text)]
         .filter(Boolean)
         .join(" ");
       expect(text, `${role}: ${text}`).not.toMatch(engineering);

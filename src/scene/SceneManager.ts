@@ -37,6 +37,8 @@ import { calibrationComplete, venueNeedsCalibration } from "../core/model";
 import type { LabelDisplayMode, ObjectKind, Project, SceneObject, ViewName, Zone } from "../core/model";
 import { groupCenter, groupMembers } from "../core/arrays";
 import { doorSweep } from "../core/placement";
+import { ensureCorridorLayout } from "../core/corridorGeometry";
+import { objectLayerVisible } from "../core/editorLayers";
 import { buildMergedGeometry, assetInstanceMaterial } from "./assets";
 import { applyRendererLook, installStudioLighting } from "./lighting";
 import { SimCrowd } from "./crowd";
@@ -75,6 +77,7 @@ export interface GhostState {
   rotationDeg: number;
   elevation: number;
   validity: "ok" | "warn" | "bad";
+  reason?: string;
   door?: { hinge?: "left" | "right"; openInward?: boolean; openDeg?: number };
 }
 
@@ -846,7 +849,7 @@ export class SceneManager {
     const { tile } = project;
     this.floorGroup.visible = this.layersState.areas;
     this.tileGroup.visible = this.layersState.tiles && tile.visible && !simplify;
-    const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile, venue: project.venuePresetId, theme: this.theme });
+    const sig = JSON.stringify({ c: project.classroom, k: project.corridor, t: tile, venue: project.venuePresetId, theme: this.theme, cl: project.corridorLayout, mat: project.classroom.floorMaterial });
     if (sig === this.lastAreaSig) return;
     this.lastAreaSig = sig;
     if (!this.hasCentered) { this.recenter(project); this.hasCentered = true; }
@@ -856,7 +859,17 @@ export class SceneManager {
     // An outdoor pitch is grass and paving, and it has no walls — a raised
     // wall rail around it would read as a room the stall is standing inside.
     const outdoor = isBoothProject(project);
-    for (const area of [project.classroom, project.corridor]) {
+    const corridorAreas = project.corridorLayout?.segments?.length
+      ? ensureCorridorLayout(project).segments.map((seg) => ({
+        id: "corridor" as const,
+        name: seg.name,
+        x: seg.x,
+        z: seg.z,
+        length: seg.length,
+        width: seg.width,
+      }))
+      : [project.corridor];
+    for (const area of [project.classroom, ...corridorAreas]) {
       const areaGroup = new Group();
       const floor = new Mesh(
         new BoxGeometry(area.length, 0.055, area.width),
@@ -1077,7 +1090,9 @@ export class SceneManager {
       // their materials are shared from a cache, so fading them would tint every
       // other object of the same kind too.
       const roleMuted = !!this.partner && this.partner.emphasis.objects[o.id] === "muted";
-      entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind)) && !roleMuted;
+      const partnerHidden = !!this.partner && o.visibleInPartner === false;
+      const layerHidden = !objectLayerVisible(project, o) && !this.partner;
+      entry.group.visible = !o.hidden && !(simplify && SIMPLIFY_HIDE.has(o.kind)) && !roleMuted && !partnerHidden && !layerHidden;
       if (entry.label) {
         entry.label.sprite.visible = showLabels && labelMode !== "none" && !o.hidden;
         if (showLabels) {
@@ -1302,7 +1317,7 @@ export class SceneManager {
         this.zoneNodes.set(zone.id, entry);
       }
       entry.group.position.set(zone.x, 0.02, zone.z);
-      entry.group.visible = !zone.hidden;
+      entry.group.visible = !zone.hidden && !(partner && zone.partnerVisible === false);
       const fill = entry.group.getObjectByName("fill") as Mesh;
       const edges = entry.group.getObjectByName("edges") as LineSegments;
       const fillMat = fill.material as MeshStandardMaterial;
@@ -1412,7 +1427,9 @@ export class SceneManager {
       const partner = this.partner;
       const muted = !!partner && partner.emphasis.routes[route.id] === "muted";
       const dim = muted || (focusRouteId !== null && focusRouteId !== route.id);
-      const sig = JSON.stringify(route.points) + route.color + (dim ? "|dim" : "") + (partner ? "|partner" : "");
+      const sig = JSON.stringify(route.points) + route.color
+        + (dim ? "|dim" : "") + (partner ? "|partner" : "")
+        + `|t${route.thickness ?? 0.12}|n${route.numbered !== false}|a${route.showArrows !== false}`;
       let entry = this.routeNodes.get(route.id);
       if (!entry || entry.sig !== sig) {
         if (entry) { this.routeGroup.remove(entry.group); disposeObject(entry.group); entry.label.dispose(); }
@@ -1420,7 +1437,7 @@ export class SceneManager {
         this.routeGroup.add(entry.group);
         this.routeNodes.set(route.id, entry);
       }
-      entry.group.visible = route.visible;
+      entry.group.visible = route.visible && !(partner && route.partnerVisible === false);
       // In the 全部 overview the arrows, colours and ①②③ badges carry the flow;
       // adding four route names on top is what made a phone-sized plan
       // unreadable. Names come back as soon as a role narrows the picture.
@@ -1441,9 +1458,11 @@ export class SceneManager {
     const opacity = dim ? (partner ? 0.2 : 0.35) : 1;
     // Partner mode draws the flow as a bold arrow a stranger can follow across
     // the room; the editor keeps the thinner, less obtrusive ribbon.
-    const width = dim ? 0.06 : partner ? 0.3 : 0.12;
+    const width = dim ? 0.06 : (route.thickness ?? (partner ? 0.3 : 0.12));
     const arrowLen = partner ? 0.8 : 0.34;
     const arrowWidth = partner ? 0.52 : 0.22;
+    const showArrows = route.showArrows !== false;
+    const numbered = route.numbered !== false;
     // Thick ribbon: a flat box per segment (WebGL line width is unreliable).
     for (let i = 0; i < route.points.length - 1; i++) {
       const a = route.points[i], b = route.points[i + 1];
@@ -1453,6 +1472,7 @@ export class SceneManager {
       ribbon.position.set((a.x + b.x) / 2, y, (a.z + b.z) / 2);
       ribbon.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
       group.add(ribbon);
+      if (!showArrows) continue;
       // Direction arrow at segment midpoint.
       const arrow = new Mesh(new BoxGeometry(arrowLen, 0.02, arrowWidth), new MeshBasicMaterial({ color, transparent: true, opacity }));
       arrow.position.set((a.x + b.x) / 2, y + 0.01, (a.z + b.z) / 2);
@@ -1481,7 +1501,7 @@ export class SceneManager {
       node.position.set(p.x, y, p.z);
       node.userData = { type: "routeNode", id: route.id, index };
       group.add(node);
-      if (!dim) {
+      if (!dim && numbered) {
         const numLabel = partner
           ? new TextLabel({ width: 160, height: 160, fontSize: 108 })
           : new TextLabel();
@@ -2117,7 +2137,18 @@ export function primaryWorkAreaBounds(project: Project): { minX: number; maxX: n
   };
 }
 
-interface Route2 { id: string; color: string; type?: string; points: { x: number; z: number }[] }
+interface Route2 {
+  id: string;
+  color: string;
+  type?: string;
+  name?: string;
+  visible?: boolean;
+  points: { x: number; z: number }[];
+  thickness?: number;
+  numbered?: boolean;
+  showArrows?: boolean;
+  partnerVisible?: boolean;
+}
 
 function round(n: number): number { return Math.round(n * 1000) / 1000; }
 

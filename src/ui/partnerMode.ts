@@ -195,19 +195,26 @@ export function buildPartnerMode(
     brief.append(el("span", {
       class: "partnerbrief__journey",
       text: role === "all"
-        ? `整體流程：${b.flowSummary ?? "依現場動線前進"}`
+        ? (b.layoutCopy?.[0] ?? "你現在在教室入口")
         : `上一站：${b.peopleComeFrom ?? "入口"} → 你：${b.youAre ?? "目前沒有指定站點"} → 下一站：${b.nextStop ?? "座區結束"}`,
     }));
   }
 
   function renderSteps(): void {
     const b = app.partnerBriefing();
+    const role = b.role;
     sheetTitle.textContent = `${b.icon} ${b.title}：怎麼做`;
     sheetBody.innerHTML = "";
-    if (!b.steps.length) {
+    if (!b.steps.length && !(role === "all" && b.layoutCopy?.length)) {
       sheetBody.append(el("p", { class: "partnerempty", text: b.emptyHint ?? "還沒有安排這個角色。" }));
       return;
     }
+    if (b.layoutCopy?.length) {
+      const copy = el("ul", { class: "partnercopy" });
+      for (const line of b.layoutCopy) copy.append(el("li", { class: "partnercopy__line", text: line }));
+      sheetBody.append(copy);
+    }
+    if (!b.steps.length) return;
     const list = el("ol", { class: "partnersteps" });
     for (const step of b.steps) {
       list.append(el("li", { class: "partnerstep" }, [

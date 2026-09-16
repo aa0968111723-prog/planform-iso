@@ -117,7 +117,7 @@ export function snapToHalfTile(
   };
 }
 
-export type SnapMode = "off" | "intersection" | "edge" | "center" | "half";
+export type SnapMode = "off" | "intersection" | "edge" | "center" | "half" | "wall" | "object" | "entrance" | "centerline";
 
 /** Apply the configured snap mode to a world position (meters). */
 export function applySnap(
@@ -136,6 +136,10 @@ export function applySnap(
     case "half":
       return snapToHalfTile(x, z, tile);
     case "off":
+    case "wall":
+    case "object":
+    case "entrance":
+    case "centerline":
     default:
       return { x, z };
   }

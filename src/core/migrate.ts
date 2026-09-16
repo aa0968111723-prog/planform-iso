@@ -19,6 +19,7 @@ import { templateFromBooth } from "./interactionCompile";
 import { syncPropEntries } from "./propCatalog";
 import { campusRefForVenuePreset } from "./campusNav";
 import type { TkuCampusRef } from "./tkuCampus";
+import { cloneWorkbenchLayers } from "./editorLayers";
 import {
   createDefaultProject,
   DEFAULT_VALIDATION_SETTINGS,
@@ -32,6 +33,9 @@ import {
   type BoothStationType,
   type BoothZoneRole,
   type ChanceBranch,
+  type ClassroomCorridorLink,
+  type CorridorLayout,
+  type CorridorSegment,
   type InteractionAudience,
   type InteractionBranch,
   type InteractionOption,
@@ -150,11 +154,29 @@ export function migrateObject(input: Partial<SceneObject> & { kind: ObjectKind }
     collisionEnabled: input.collisionEnabled !== false,
     snapEnabled: input.snapEnabled !== false,
     allowTabletopOverflow: input.allowTabletopOverflow === true,
+    allowOverflow: input.allowOverflow === true,
     customProperties: input.customProperties && typeof input.customProperties === "object"
       ? Object.fromEntries(Object.entries(input.customProperties).filter(([, value]) => typeof value === "string"))
       : {},
     createdAt: Number.isFinite(input.createdAt) ? Number(input.createdAt) : undefined,
     updatedAt: Number.isFinite(input.updatedAt) ? Number(input.updatedAt) : undefined,
+    color: typeof input.color === "string" ? input.color : undefined,
+    icon: typeof input.icon === "string" ? input.icon : undefined,
+    blocksCirculation: input.blocksCirculation === true ? true : input.blocksCirculation === false ? false : undefined,
+    visibleInEdit: input.visibleInEdit !== false,
+    visibleInPartner: input.visibleInPartner !== false,
+    visibleInExport: input.visibleInExport !== false,
+    keepAspect: input.keepAspect === true,
+    editorLayer: input.editorLayer === "fixture" || input.editorLayer === "furniture" || input.editorLayer === "event" || input.editorLayer === "flow"
+      ? input.editorLayer
+      : undefined,
+    originalSize: input.originalSize && Number.isFinite(input.originalSize.width)
+      ? {
+        width: Number(input.originalSize.width),
+        depth: Number(input.originalSize.depth),
+        height: Number(input.originalSize.height),
+      }
+      : { width: input.width ?? dims.width, depth: input.depth ?? dims.depth, height: input.height ?? dims.height },
   };
 
   if (input.kind === "door") {
@@ -190,10 +212,61 @@ function migrateGroup(g: Partial<ArrayGroup>): ArrayGroup | null {
   };
 }
 
+const ZONE_TYPES = new Set([
+  "registration", "payment", "life", "group", "meditation", "shoe", "backpack",
+  "mats", "staff", "wait", "custom",
+]);
+
+function migrateCorridorLayout(raw: CorridorLayout | undefined): CorridorLayout | undefined {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.segments) || !raw.segments.length) return undefined;
+  const kind = raw.kind === "L" || raw.kind === "T" || raw.kind === "multi" ? raw.kind : "straight";
+  const segments: CorridorSegment[] = raw.segments.map((s, i) => ({
+    id: typeof s.id === "string" && s.id ? s.id : `seg_${i}`,
+    name: typeof s.name === "string" && s.name ? s.name : `走廊段 ${i + 1}`,
+    x: Number.isFinite(s.x) ? Number(s.x) : 0,
+    z: Number.isFinite(s.z) ? Number(s.z) : 0,
+    length: Number.isFinite(s.length) ? Math.max(0.4, Number(s.length)) : 4,
+    width: Number.isFinite(s.width) ? Math.max(0.4, Number(s.width)) : 2,
+    rotationDeg: Number.isFinite(s.rotationDeg) ? Number(s.rotationDeg) : 0,
+    kind: s.kind === "entry" || s.kind === "exit" || s.kind === "restricted" ? s.kind : "passage",
+    passable: s.passable !== false && s.kind !== "restricted",
+  }));
+  const links: ClassroomCorridorLink[] = Array.isArray(raw.links)
+    ? raw.links.map((l, i) => ({
+      id: typeof l.id === "string" && l.id ? l.id : `link_${i}`,
+      doorObjectId: typeof l.doorObjectId === "string" ? l.doorObjectId : undefined,
+      segmentId: typeof l.segmentId === "string" ? l.segmentId : "",
+      enterDir: l.enterDir === "into-corridor" ? "into-corridor" : "into-classroom",
+      leaveDir: l.leaveDir === "into-classroom" ? "into-classroom" : "into-corridor",
+      primary: l.primary === true,
+      showLink: l.showLink !== false,
+      locked: l.locked === true,
+    }))
+    : [];
+  return { kind, segments, links };
+}
+
 function migrateZone(z: Zone): Zone {
-  const def = ZONE_DEFAULTS[z.type] ?? ZONE_DEFAULTS.group;
+  const type = (ZONE_TYPES.has(String(z.type)) ? z.type : "custom") as Zone["type"];
+  const def = ZONE_DEFAULTS[type] ?? ZONE_DEFAULTS.custom;
   const boothRole = BOOTH_ZONE_ROLE_SET.has(String(z.boothRole)) ? (z.boothRole as BoothZoneRole) : undefined;
-  return { ...z, icon: z.icon ?? def.icon, capacity: z.capacity ?? null, boothRole };
+  return {
+    ...z,
+    type,
+    icon: z.icon ?? def.icon,
+    capacity: z.capacity ?? null,
+    boothRole,
+    height: Number.isFinite(z.height) ? Number(z.height) : 0.02,
+    rotationDeg: Number.isFinite(z.rotationDeg) ? Number(z.rotationDeg) : 0,
+    partnerVisible: z.partnerVisible !== false,
+    description: typeof z.description === "string" ? z.description : undefined,
+    staffX: Number.isFinite(z.staffX) ? Number(z.staffX) : undefined,
+    staffZ: Number.isFinite(z.staffZ) ? Number(z.staffZ) : undefined,
+    inLabel: typeof z.inLabel === "string" ? z.inLabel : undefined,
+    outLabel: typeof z.outLabel === "string" ? z.outLabel : undefined,
+    objectIds: Array.isArray(z.objectIds) ? z.objectIds.filter((id) => typeof id === "string") : undefined,
+    displayOrder: Number.isFinite(z.displayOrder) ? Number(z.displayOrder) : undefined,
+  };
 }
 
 function migrateRoute(r: Route): Route {
@@ -204,6 +277,11 @@ function migrateRoute(r: Route): Route {
     endZoneId: r.endZoneId,
     waypointZoneIds: Array.isArray(r.waypointZoneIds) ? r.waypointZoneIds : undefined,
     boothRole: r.boothRole === "visitor" || r.boothRole === "staff" ? r.boothRole : undefined,
+    thickness: Number.isFinite(r.thickness) ? Math.max(0.04, Number(r.thickness)) : 0.12,
+    numbered: r.numbered !== false,
+    showArrows: r.showArrows !== false,
+    partnerVisible: r.partnerVisible !== false,
+    stepLabels: Array.isArray(r.stepLabels) ? r.stepLabels.filter((s) => typeof s === "string") : undefined,
   };
 }
 
@@ -995,8 +1073,22 @@ export function migrateProject(input: Partial<Project>): Project {
   // than inherit a shared constant. Guards "" and non-strings from hand-edited
   // or foreign JSON.
   p.id = typeof input.id === "string" && input.id.length > 0 ? input.id : base.id;
-  p.classroom = { ...base.classroom, ...input.classroom };
-  p.corridor = { ...base.corridor, ...input.corridor };
+  p.classroom = {
+    ...base.classroom,
+    ...input.classroom,
+    height: Number.isFinite(input.classroom?.height) ? Number(input.classroom!.height) : (base.classroom.height ?? 3),
+    floorMaterial: input.classroom?.floorMaterial === "wood" || input.classroom?.floorMaterial === "concrete" || input.classroom?.floorMaterial === "carpet"
+      ? input.classroom.floorMaterial
+      : (input.classroom?.floorMaterial === "tile" ? "tile" : (base.classroom.floorMaterial ?? "tile")),
+  };
+  p.corridor = {
+    ...base.corridor,
+    ...input.corridor,
+    height: Number.isFinite(input.corridor?.height) ? Number(input.corridor!.height) : (base.corridor.height ?? 3),
+    floorMaterial: input.corridor?.floorMaterial === "wood" || input.corridor?.floorMaterial === "concrete" || input.corridor?.floorMaterial === "carpet" || input.corridor?.floorMaterial === "tile"
+      ? input.corridor.floorMaterial
+      : (base.corridor.floorMaterial ?? "tile"),
+  };
   p.tile = { ...base.tile, ...input.tile };
   p.calibration = {
     ...base.calibration,
@@ -1004,6 +1096,11 @@ export function migrateProject(input: Partial<Project>): Project {
     confirmed: { ...base.calibration.confirmed, ...(input.calibration?.confirmed ?? {}) },
   };
   p.layers = { ...base.layers, ...input.layers };
+  p.workbenchLayers = cloneWorkbenchLayers(input.workbenchLayers);
+  p.showCoords = input.showCoords !== false;
+  const layout = migrateCorridorLayout(input.corridorLayout);
+  if (layout) p.corridorLayout = layout;
+  else delete p.corridorLayout;
   p.labelDisplayMode = input.labelDisplayMode === "all" || input.labelDisplayMode === "none" || input.labelDisplayMode === "selected"
     ? input.labelDisplayMode
     : "essential";

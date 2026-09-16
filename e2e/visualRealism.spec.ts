@@ -49,7 +49,7 @@ for (const viewport of viewports) {
           await new Promise<void>((resolve) => {
             const tick = () => {
               frames++;
-              if (performance.now() - start >= 500) resolve();
+              if (performance.now() - start >= 800) resolve();
               else requestAnimationFrame(tick);
             };
             requestAnimationFrame(tick);
