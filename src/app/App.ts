@@ -2976,6 +2976,15 @@ export class App {
   }
 
   private onPointerDown(e: PointerEvent): void {
+    // A mouse/pen pointerdown that never received pointerup (overlay click,
+    // Playwright hover, native <select>) would leave a stale id in the map.
+    // The next canvas tap then looks like a two-finger camera gesture and
+    // silently skips placement / route drawing.
+    if (e.pointerType !== "touch") {
+      for (const [id, p] of this.pointers) {
+        if (p.type !== "touch" && id !== e.pointerId) this.pointers.delete(id);
+      }
+    }
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
     // Two or more fingers → this is a camera gesture (pinch/pan). Never drag objects.
     if (this.pointers.size >= 2) { this.abortDrag(); this.scene.setControlsEnabled(true); return; }
@@ -3039,11 +3048,9 @@ export class App {
         return;
       }
       const pt = this.scene.clampClientToVisible(e.clientX, e.clientY);
-      const routeGround = this.scene.groundPoint(pt.x, pt.y) ?? ground;
-      if (routeGround) {
-        const snapped = applySnap(routeGround.x, routeGround.z, this.state.tile, this.session.snap);
-        this.store.mutate((p) => { const r = p.routes.find((x) => x.id === this.session.activeRouteId); if (r) r.points.push(snapped); });
-      }
+      const routeGround = this.scene.groundPoint(pt.x, pt.y) ?? ground ?? this.centerOfClassroom();
+      const snapped = applySnap(routeGround.x, routeGround.z, this.state.tile, this.session.snap);
+      this.store.mutate((p) => { const r = p.routes.find((x) => x.id === this.session.activeRouteId); if (r) r.points.push(snapped); });
       return;
     }
 

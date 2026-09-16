@@ -150,9 +150,12 @@ export async function gotoWorkflow(
 }
 
 /**
- * Click the WebGL canvas at a fraction of the visible plan, even when a parked
- * sheet, placebar, or native picker is painted on top. Overlay `mouse.click`
- * hits chrome; `#scene.click({ force })` delivers pointerdown to App.
+ * Tap the visible plan at a fraction of the focus rect.
+ *
+ * Playwright `mouse.click` and even `locator.click({ force })` can land on a
+ * parked sheet, the placebar, a native &lt;select&gt;, or a stuck hover
+ * pointer. App.bindPointer listens for pointerdown on `#scene`, so dispatch
+ * that event directly.
  */
 export async function clickCanvasClient(
   page: Page,
@@ -171,17 +174,33 @@ export async function clickCanvasClient(
   }
   const state = await probe(page);
   const rect = state.focusRect.width > 0 ? state.focusRect : state.safeRect;
-  const box = await page.locator("#scene").boundingBox();
-  if (!box) throw new Error("#scene has no bounding box");
   const clientX = rect.x + rect.width * nx;
   const clientY = rect.y + rect.height * ny;
-  const position = {
-    x: Math.max(1, Math.round(clientX - box.x)),
-    y: Math.max(1, Math.round(clientY - box.y)),
-  };
-  await page.locator("#scene").hover({ position, force: true });
-  await page.waitForTimeout(80);
-  await page.locator("#scene").click({ position, force: true });
+  const ok = await page.evaluate(({ x, y }) => {
+    const canvas = document.getElementById("scene");
+    if (!(canvas instanceof HTMLCanvasElement)) return false;
+    const fire = (type: "pointerdown" | "pointerup") => {
+      canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        screenX: x,
+        screenY: y,
+        button: 0,
+        buttons: type === "pointerdown" ? 1 : 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      }));
+    };
+    fire("pointerdown");
+    fire("pointerup");
+    return true;
+  }, { x: clientX, y: clientY });
+  if (!ok) throw new Error("#scene is missing");
   return { x: clientX, y: clientY };
 }
 

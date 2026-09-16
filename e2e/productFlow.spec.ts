@@ -241,8 +241,9 @@ for (const vp of VIEWPORTS) {
       // --- 動線: 入場 chip → two taps on the visible canvas → 完成繪製 ------
       const routesBefore = (await snapshot(page)).routePoints;
       await gotoWorkflow(page, "route");
-      await page.locator(".left .chip", { hasText: "入場" }).first().click();
+      await page.locator(".left button.chip", { hasText: "入場" }).first().click();
       await settle(page);
+      await expect(page.locator(".placebar-wrap")).toContainText("點地面");
       await clickSafeCanvas(page);
       await clickCanvasClient(page, 0.6, 0.55);
       await settle(page);
