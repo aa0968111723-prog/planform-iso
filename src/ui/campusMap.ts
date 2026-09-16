@@ -315,6 +315,12 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
     if (building && !hasCoords(building)) {
       sheet.append(el("p", { class: "hint", text: "這棟樓還沒有公開座標，只顯示目錄資料。" }));
     }
+    if (opts.freshman || place) {
+      sheet.append(button("進入室內場佈", () => {
+        if (place && opts.onPickPlace && !opts.freshman) opts.onPickPlace(place);
+        opts.onEnterLayout();
+      }, "btn btn--primary tkumap__enter"));
+    }
     if (place) {
       const photos = photosForPlace(place.id);
       if (photos.length) {
@@ -328,12 +334,6 @@ export function buildCampusMap(opts: CampusMapOptions): CampusMapHandles {
         }
         sheet.append(row);
       }
-    }
-    if (opts.freshman || place) {
-      sheet.append(button("進入室內場佈", () => {
-        if (place && opts.onPickPlace && !opts.freshman) opts.onPickPlace(place);
-        opts.onEnterLayout();
-      }, "btn btn--primary tkumap__enter"));
     }
     const loc = building && hasCoords(building)
       ? { lat: building.lat!, lng: building.lng!, label: building.name }

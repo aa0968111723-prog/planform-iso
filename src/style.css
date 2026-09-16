@@ -755,7 +755,8 @@ html, body {
   background: var(--panel-solid);
   flex: 0 0 auto;
   position: relative;
-  z-index: 4;
+  z-index: 10;
+  overflow: visible;
 }
 .tkumap__search { width: 100%; min-height: 40px; }
 .tkumap__campuses { display: flex; gap: 6px; }
@@ -763,8 +764,8 @@ html, body {
 .tkumap__campus[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); }
 .tkumap__results {
   display: none; flex-direction: column; gap: 4px;
-  position: absolute; left: 12px; right: 12px; top: calc(100% - 4px);
-  z-index: 6;
+  position: absolute; left: 8px; right: 12px; top: calc(100% + 4px);
+  z-index: 20;
   padding: 8px; background: var(--panel-solid); max-height: min(36vh, 240px); overflow: auto;
   border: 1px solid var(--border); border-radius: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, .16);
